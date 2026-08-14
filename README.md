@@ -1,6 +1,6 @@
 # pi-aura
 
-Aura integration for [pi](https://github.com/badlogic/pi-mono) — skills, agents, and workflows for the [Aura](https://aura.dev-anwalt.de) project management platform.
+Aura integration for [pi](https://github.com/badlogic/pi-mono) — skills, agents, and workflows for the Aura project management platform.
 
 ## What's included
 
