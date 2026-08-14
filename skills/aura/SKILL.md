@@ -1,0 +1,94 @@
+---
+name: aura
+description: Work with Aura — the AI-native project management and knowledge platform. Use when the user mentions Aura, tasks, artifacts, wiki, knowledge base, or project planning in the context of the aura-mcp-dev MCP server.
+---
+
+# Aura MCP
+
+Aura is an AI-native project management and knowledge platform. It combines task
+management, documentation (artifacts), a wiki/knowledge base, code search, and
+organizational memory into a single system. The `aura-mcp-dev` MCP server exposes
+~195 tools for interacting with all of these capabilities.
+
+## What Aura can do
+
+- **Task management** — hierarchical tasks (SAGA → EPIC → STORY → SUBTASK) with
+  status workflows, owner/crew assignment, priority ordering, capacity tracking,
+  and relations between tasks (blocks, relates-to, part-of, duplicates)
+- **Artifacts** — versioned Markdown documents (plans, reviews, generic docs)
+  with review workflows, approval gates, and access control
+- **Knowledge base / Wiki** — hierarchical knowledge spaces with folders and
+  documents, supporting full-text + semantic search, versioning, and images
+- **Code search** — semantic and BM25 search across allowlisted Bitbucket
+  repositories, with file reading and related-chunk discovery
+- **Unified search** — cross-entity semantic search across tasks, artifacts,
+  knowledge documents, skills, glossary entries, Jira issues, and more
+- **Memory / Knowledge graph** — entity-relationship graph connecting products,
+  services, people, tasks, and concepts with confidence-scored edges
+- **Signals** — inbound planning signals that can be triaged into tasks
+- **Skills** — reusable skill documents with assets, plugins, and import/export
+- **Glossary** — shared vocabulary with proposal/approval workflow
+- **Notifications** — per-user preference matrix and notification inbox
+- **Capacity** — team capacity tracking and leadership overview
+- **Comments** — threaded comments on tasks and artifacts with mentions
+
+## Common use cases
+
+Detailed instructions for each use case are in the referenced resource files.
+
+| Use case | Resource file |
+|---|---|
+| Search across Aura (unified search) | [resources/usecases/unified-search.md](resources/usecases/unified-search.md) |
+| Manage tasks (create, update, track, organize) | [resources/usecases/task-management.md](resources/usecases/task-management.md) |
+| Manage artifacts (create, update, review) | [resources/usecases/artifact-management.md](resources/usecases/artifact-management.md) |
+| Search and browse the wiki / knowledge base | [resources/usecases/wiki-knowledge.md](resources/usecases/wiki-knowledge.md) |
+| Search and read code in Bitbucket repos | [resources/usecases/code-search.md](resources/usecases/code-search.md) |
+| Upload documents and link them to tasks | [resources/usecases/upload-documents.md](resources/usecases/upload-documents.md) |
+| Check and adjust capacity commitments | [resources/usecases/capacity-planning.md](resources/usecases/capacity-planning.md) |
+| Answer questions directed at you | [resources/usecases/questions-workflow.md](resources/usecases/questions-workflow.md) |
+| Explore the memory / knowledge graph | [resources/usecases/memory-graph.md](resources/usecases/memory-graph.md) |
+| Triage signals into tasks | [resources/usecases/signals.md](resources/usecases/signals.md) |
+| Manage skills in Aura | [resources/usecases/skills-management.md](resources/usecases/skills-management.md) |
+
+## Development process
+
+Aura has a structured workflow (Open → Refinement → Alignment → Development →
+Review → Deployment → Done) with defined roles, capacity rules, and review
+gates. The process resources encode this knowledge for agents:
+
+| Topic | Resource file |
+|---|---|
+| Process overview and key principles | [resources/process/INDEX.md](resources/process/INDEX.md) |
+| Workflow phases in detail | [resources/process/workflow-phases.md](resources/process/workflow-phases.md) |
+| Roles (Owner, Contributor, Stakeholder) | [resources/process/roles.md](resources/process/roles.md) |
+| Capacity tracking | [resources/process/capacity.md](resources/process/capacity.md) |
+| Review modes | [resources/process/review-modes.md](resources/process/review-modes.md) |
+| Escalation paths | [resources/process/escalation.md](resources/process/escalation.md) |
+| Aura/JIRA/Asana integration | [resources/process/integrations.md](resources/process/integrations.md) |
+
+## How to interact with the Aura MCP
+
+All tools are prefixed with `aura_2d_mcp_2d_dev_`. There are two families:
+
+1. **`mcp*` tools** — agent-facing tools designed for MCP clients. These use
+   the caller's PAT for authentication and are the primary interface for
+   agent workflows.
+2. **All other tools** — the full Aura API surface, including admin operations,
+   board views, notifications, capacity, and user management. These are equally
+   available and useful for broader workflows.
+
+### Key patterns
+
+- **Always search first** before creating tasks or artifacts to avoid duplicates.
+  Use `mcpUnifiedSearch` or `unifiedSearch` with relevant source types.
+- **Use human keys** (e.g. `AURA-42`) to reference tasks when possible;
+  `getTaskByHumanKey` resolves them in a single call.
+- **Prefer `mcp*` variants** when both exist (e.g. `mcpGetTask` over `getTask`)
+  as they are optimized for agent consumption.
+- **Section-mode updates** for artifacts: use `mcpUpdateArtifact` with
+  `mode: "section"` and `target_heading` for large documents to avoid
+  output budget issues.
+- **Comments** support `is_ai_generated: true` — always set this flag when
+  posting as an AI agent.
+- **Progress tracking**: use `recordTaskProgress` to log agent activity on
+  tasks for visibility in the Aura Timeline.
