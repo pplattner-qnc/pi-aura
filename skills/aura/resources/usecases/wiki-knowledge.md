@@ -77,6 +77,12 @@ knowledge spaces.
 > first**. Wiki documents are shared, versioned, and often referenced by
 > others — unapproved changes can break links, confuse readers, or
 > overwrite someone else's work.
+>
+> **Local file hygiene:** a local file is a *temporary transport*, not a cache.
+> After every successful upload, delete the local copy. When you need to edit
+> again, re-download a fresh copy — never edit a stale local file, because it
+> can hide changes that were never uploaded. This keeps `/tmp` clean and
+> guarantees you always work from the server's current version.
 
 ### Create a document
 
@@ -97,7 +103,14 @@ mcpx exec aura-mcp-dev saveKnowledgeNodeBody -- \
   --uuid "<node-uuid>" \
   --body "$(cat /tmp/wiki-body.md)" \
   --summary "Initial version"
+
+# Step 3: Delete the local file after a successful upload
+rm /tmp/wiki-body.md
 ```
+
+**Editing again?** Re-download a fresh copy — never edit a stale local file
+left over from a previous session, since it may hide changes that were never
+uploaded. Re-fetch, edit, upload, then delete again.
 
 **Via MCP (only for small bodies):**
 
@@ -148,7 +161,14 @@ mcpx exec aura-mcp-dev saveKnowledgeNodeBody -- \
   --uuid "<node-uuid>" \
   --body "$(cat /tmp/wiki-current.md)" \
   --summary "Description of changes"
+
+# Step 4: Delete the local file after a successful upload
+rm /tmp/wiki-current.md
 ```
+
+**Editing again?** Re-run Step 1 to download a fresh copy — never edit a stale
+local file left over from a previous session, since it may hide changes that
+were never uploaded. Re-fetch, edit, upload, then delete again.
 
 **Via MCP (only for small edits):**
 

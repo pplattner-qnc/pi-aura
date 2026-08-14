@@ -49,6 +49,13 @@ Wait for the workflow to complete.
 Present the digest output from the workflow. Then:
 
 - Mark notifications read via MCP: `aura_2d_mcp_2d_dev_markAllNotificationsRead()`
+- **Delete the temp fetch file** returned as `fetchOutput` from the workflow.
+  It was only a transport for the digest step and is now garbage — removing it
+  keeps `/tmp` clean. Use bash:
+
+  ```bash
+  rm "<fetchOutput path>"
+  ```
 
 **[ASK]** only if there are actionable items:
 

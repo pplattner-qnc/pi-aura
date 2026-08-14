@@ -38,6 +38,12 @@ disk to server without entering the LLM context as a tool argument.
 (~500 characters), use the file-based workflow. Below that threshold, the
 overhead of the file round-trip isn't worth it.
 
+**Local file hygiene:** a local file is a *temporary transport*, not a cache.
+After every successful upload, delete the local copy. When you need to edit
+again, re-download a fresh copy — never edit a stale local file, because it
+can hide changes that were never uploaded. This keeps `/tmp` clean and
+guarantees you always work from the server's current version.
+
 ## Creating artifacts
 
 ### Small content (≤ ~500 chars) — direct MCP call
@@ -83,6 +89,14 @@ mcpx exec aura-mcp-dev mcpUpdateArtifact -- \
   --confirm_full_replace true
 ```
 
+**Step 4:** Delete the local file. Once the upload succeeds the local copy is
+garbage — remove it so it can't accumulate or be mistaken for the source of
+truth.
+
+```bash
+rm /tmp/artifact-body.md
+```
+
 ## Updating artifacts
 
 ### Small edits (≤ ~500 chars changed) — section mode via MCP
@@ -123,6 +137,17 @@ mcpx exec aura-mcp-dev mcpUpdateArtifact -- \
   --summary "Description of changes" \
   --confirm_full_replace true
 ```
+
+**Step 4:** Delete the local file. Once the upload succeeds, remove the local
+copy so no unuploaded changes can linger on disk.
+
+```bash
+rm /tmp/artifact-current.md
+```
+
+**Editing again?** Re-run Step 1 to download a fresh copy — never edit a stale
+local file left over from a previous session, since it may hide changes that
+were never uploaded. Re-fetch, edit, upload, then delete again.
 
 ## Direct MCP tools (compact reference)
 
