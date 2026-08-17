@@ -4,7 +4,10 @@
   "description": "Aura integration for pi — skills, agents, and workflows for the Aura project management platform",
   "keywords": ["pi-package"],
   "pi": {
-    "extensions": ["./extensions/aura-health.ts"],
+    "extensions": [
+      "./extensions/aura-health.ts",
+      "./extensions/aura-skill-instruction.ts"
+    ],
     "skills": ["./skills"],
     "subagents": {
       "agents": ["./agents"]

@@ -57,6 +57,23 @@ Present the digest output from the workflow. Then:
   rm "<fetchOutput path>"
   ```
 
+---
+
+## Scope and handoff
+
+**This skill covers only the morning fetch + digest + notification cleanup.**
+The moment you move on to any further Aura work — looking up tasks, posting or
+editing comments, reading or editing artifacts, capacity changes, wiki work,
+code search, signals, etc. — **load the `aura` skill** and follow its
+conventions for the remainder of the session. Do not call `aura-mcp-dev` tools
+ad-hoc from this skill; route that work through the `aura` skill instead.
+
+Key conventions the `aura` skill enforces (so you don't silently miss them):
+- Set `is_ai_generated: true` on AI-authored comments.
+- Use the file-based `mcpx` workflow for artifact edits > ~500 chars.
+- Prefer `mcp*` tool variants (`mcpGetArtifact`, `mcpUnifiedSearch`, …).
+- Log activity with `recordTaskProgress` when you act on a task.
+
 **[ASK]** only if there are actionable items:
 
 - Anything overdue or waiting on you → "These need your attention. Want to tackle any now?"
