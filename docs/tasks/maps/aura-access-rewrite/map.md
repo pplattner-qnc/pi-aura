@@ -3,7 +3,7 @@ kind: map
 slug: aura-access-rewrite
 title: Rewrite the Aura access layer to drop the MCP wrapper
 status: active
-tasks: "[{slug: aura-access-grilling, blocked_by: [], done: true}]"
+tasks: "[{slug: aura-access-grilling, blocked_by: [], done: true}, {slug: keyring-key-redesign-grilling, blocked_by: [], done: false}]"
 ---
 
 ## Destination
@@ -97,6 +97,13 @@ skill.
   treats it as a swappable constant.
 - `list` subcommand (show stored accounts without values) was considered and
   deferred; `edit` covers the single-account surface for now.
+
+## Task graph
+
+1. `aura-access-grilling` (grilling, **done**) — settled the overall destination (14 decisions across 5 rounds).
+2. `keyring-key-redesign-grilling` (grilling, **ready**) — settles the keyring `(service, account)` surface that Q9 parked as "may rework soon"; every implementation task depends on its outcome.
+
+Implementation tasks (AuraClient + factory, call-site migration + type dedupe, `/aura secrets` extension, `clients.ts` cleanup) are spawned by the next Wayfinder pass *after* the keyring grilling closes — they all depend on its outcome.
 
 ## Out of scope
 
