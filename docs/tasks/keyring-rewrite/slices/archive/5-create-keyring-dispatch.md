@@ -7,8 +7,8 @@ mode: hitl
 status: done
 size: s
 blocked_by:
-  - macos-keyring-impl
-  - secret-service-dbus-impl
+- macos-keyring-impl
+- secret-service-dbus-impl
 ---
 
 ## End-to-end behavior
