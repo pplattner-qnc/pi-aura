@@ -93,3 +93,28 @@ Windows + side-index, `isAvailable()` static not on interface, three
 errors, per-impl OS-string packing + namespace normalization, split by
 impl, `dbus-next` in `dependencies` dynamically imported in the Linux
 branch.
+
+## Implementation notes
+
+### slice(keyring-interface-and-enum): SecretKey enum, Keyring interface, errors, and barrel
+
+- Merged `slice/keyring-interface-and-enum` into `task/keyring-rewrite`.
+- `packages/shared/src/keyring/keyring.ts` exports the closed `SecretKey`
+  discriminated union (`{ service: "aura"; name: "pat" }`), `StoredSecret`,
+  the `Keyring` interface, the three error classes
+  (`KeyringUnavailableError`, `KeyringLockedError`, `KeyringDBusError`), and
+  `createKeyring()` (throws "not implemented").
+- `packages/shared/src/keyring/index.ts` barrels the public surface; the
+  exec helpers (`run`, `resolveBinary`, `isFile`, `ExecError`,
+  `ToolMissingError`) live in `internal.ts` and are **not** re-exported by
+  the barrel (pre-authorized by the architecture spec for slice 3's use).
+- `packages/shared/package.json` adds the `"./keyring"` export and a
+  minimal `"typecheck": "tsc --noEmit"` script.
+- Verification: `npm run typecheck` passed in `packages/shared`; scratch
+  TypeScript and bundled-ESM runtime checks passed (`createKeyring()`
+  throws `Error("not implemented")`). No committed test suite exists per
+  `docs/testing.md`.
+- Deviations (per TDD worker): (1) `internal.ts` created in this slice
+  instead of slice 3 — the architecture spec pre-authorizes it; (2) the
+  `typecheck` npm script was added to satisfy the acceptance criterion; (3)
+  scratch tests used in lieu of a committed suite.
