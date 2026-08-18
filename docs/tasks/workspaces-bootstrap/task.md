@@ -4,7 +4,7 @@ type: feature
 slug: workspaces-bootstrap
 title: Restructure repo into npm workspaces with @pi-aura/shared
 map: aura-access-rewrite
-status: ready
+status: done
 slices:
 - workspaces-skeleton
 - scripts-joins-workspaces
