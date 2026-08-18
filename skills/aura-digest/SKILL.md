@@ -40,17 +40,32 @@ between `fetch` and `render`.
 
 ## Prerequisites
 
-The script source lives in `src/` and is bundled to `dist/` via esbuild. Build
-once (after checkout or after editing `src/`):
+The script source lives in `scripts/src/` (shared with future scripts) and is
+bundled by esbuild into `skills/aura-digest/dist/aura.mjs`. The compiled `.mjs`
+file is committed, so end users of the pi package don't need to build — but in
+development, rebuild after editing `scripts/src/`:
 
 ```bash
-cd <skill-dir>
-npm install
-npm run build        # -> dist/aura.mjs
+make                # from repo root: install build deps, typecheck, build, verify
+# or: make build     # typecheck + bundle (assumes `make install` was run once)
 ```
+
+See the repo-root `Makefile`. Build tooling (esbuild, typescript, the MCP SDK)
+is isolated in `scripts/package.json` with its own `node_modules` (gitignored),
+keeping the published pi package manifest clean.
 
 `aura.mjs fetch` reads `~/.config/mcp/mcp.json` at runtime for the Aura server
 URL + bearer token. The token is never baked into the bundle.
+
+**Runtime dependency (dev-links Teamwork Graph layer):** `@napi-rs/keyring` is
+declared in the root `package.json` `dependencies` so pi's `npm install` (run
+automatically after cloning the package) places the platform-specific native
+binding in the repo-root `node_modules/`, where Node resolves it from
+`dist/aura.mjs` via walk-up. The import is dynamic, so if the binding is ever
+missing or unsupported on a platform, the Teamwork Graph layer silently skips
+(dev-links still returns GitHub + Bitbucket results) rather than crashing.
+Users who never authenticate the `atlassian` MCP server see the same graceful
+skip — no setup skill is required.
 
 ---
 
@@ -220,13 +235,16 @@ The versioned shape passed from fetch → orchestrator → render. See
 
 ## Development
 
-- `npm run typecheck` — TypeScript type-check (no emit)
-- `npm run build` — esbuild bundle to `dist/aura.mjs`
-- `npm run build -- --watch` — rebuild on change
-- Test the renderer with a saved fixture:
-  `node dist/aura.mjs render <dir-with-digest.json>`
+Run from the repo root via `make`:
 
-The script is plain ESM with no runtime npm deps (the MCP SDK is bundled at
-build time). `fetch` uses the `@modelcontextprotocol/sdk`
+- `make typecheck` — TypeScript type-check (no emit)
+- `make build` — esbuild bundle to `skills/aura-digest/dist/aura.mjs`
+- `make watch` — rebuild on change
+- `make clean` — remove `scripts/node_modules` + built `dist/`
+- Test the renderer with a saved fixture:
+  `node skills/aura-digest/dist/aura.mjs render <dir-with-digest.json>`
+
+The script is plain ESM. `fetch` uses the `@modelcontextprotocol/sdk`
 `StreamableHTTPClientTransport` with the bearer token from `mcp.json` passed
-via `requestInit.headers`.
+via `requestInit.headers`; the Atlassian (Jira) client reuses the OAuth token
+pi-mcp-adapter persists in the OS keyring.

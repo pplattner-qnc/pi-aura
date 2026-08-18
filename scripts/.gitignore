@@ -1,0 +1,4 @@
+# Build tooling artifacts — the compiled .mjs files are committed to the
+# skill's dist/ by `make`, so end users don't need to install or build.
+node_modules/
+package-lock.json

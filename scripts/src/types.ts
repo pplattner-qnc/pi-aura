@@ -145,6 +145,37 @@ export interface AuraTaskList {
   total?: number;
 }
 
+/** Detail returned by aura-mcp-dev_getTaskByHumanKey. We only use the fields
+ * the dev-links feature needs: human_key, title, description, jira_issues. */
+export interface AuraTaskDetail {
+  id: string;
+  human_key: string;
+  title: string;
+  description?: string;
+  jira_issues?: { issue_key: string; summary?: string }[];
+  children?: { human_key: string; title?: string }[];
+  [key: string]: unknown;
+}
+
+/** Response from aura-mcp-dev_getArtifactReview (the review overview). Used to
+ * derive the "reviews I owe" list: filter to artifacts where my reviewer status
+ * is ASSIGNED (not yet decided). */
+export interface ArtifactReview {
+  version: number;
+  review_state: string; // IN_REVIEW | APPROVED | NEEDS_REVISION | UNCHECKED
+  initiator?: { user_id: string; user_name: string } | null;
+  review_started_at?: string | null;
+  review_deadline_at?: string | null;
+  is_initiator?: boolean;
+  reviewers: Array<{
+    user_id: string;
+    user_name: string;
+    status: string; // ASSIGNED | APPROVED | REJECTED | NEEDS_REVISION
+    [k: string]: unknown;
+  }>;
+  review_artifacts?: Array<{ title?: string }>;
+  [k: string]: unknown;
+}
 // ---------------------------------------------------------------------------
 // Artifact-review verification (produced by the orchestrator, not fetch.ts).
 // ---------------------------------------------------------------------------
@@ -206,6 +237,9 @@ export interface DigestQueueRow {
   role: string;
   capacity_pct: number | null;
   hours: number | null; // capacity_pct * 8 / 100, or null
+  /** Compact dev-link summary for the Git column, e.g. "1: 🟢, 2: 🌿" —
+   * counts of PRs (by state emoji) and branches. Empty when none. */
+  git_summary?: string;
 }
 
 export interface DigestCapacity {
@@ -225,6 +259,19 @@ export interface DigestReview {
   decisions: ArtifactApprovalDecision[];
   decided_count: number;
   total_required: number;
+}
+
+/** A review I owe (artifact assigned to me as reviewer, not yet decided). */
+export interface DigestReviewOwed {
+  artifact_id: string;
+  title: string;
+  version: number;
+  /** ISO deadline or null when none set. */
+  deadline: string | null;
+  /** Initiator display name. */
+  initiator: string | null;
+  /** Since when the review has been running (ISO). */
+  review_started_at: string | null;
 }
 
 export interface DigestCorrection {
@@ -247,6 +294,8 @@ export interface Digest {
   reviews: DigestReview[];
   suggested_actions: string[]; // seeded rule-based, orchestrator re-ranks
   corrections: DigestCorrection[]; // orchestrator fills after verification
+  dev_links: TaskDevLinks[]; // related PRs/branches per queue task (dev-links feature)
+  reviews_owed: DigestReviewOwed[]; // reviews assigned to me I haven't decided yet
   meta: {
     generated_at: string;
     raw_path: string;
@@ -370,4 +419,44 @@ export interface DigestDiff {
   overdue_cleared: DigestAttentionItem[];
   /** Days between the two digests (0 = same day). */
   days_elapsed: number;
+}
+
+// ---------------------------------------------------------------------------
+// Dev links — related PRs / branches for a task, found via Jira Teamwork
+// Graph (primary) + GitHub `gh search` + Bitbucket per-repo fallbacks.
+// ---------------------------------------------------------------------------
+
+export interface DevLinkPullRequest {
+  /** Provider: "github" | "bitbucket" | "teamwork-graph". */
+  provider: string;
+  /** PR number/id (string for uniformity). */
+  id: string;
+  title: string;
+  state: string; // OPEN | MERGED | CLOSED | DECLINED
+  url: string;
+  source_branch?: string;
+  destination_branch?: string;
+  author?: string;
+  /** How this PR was found: "teamwork-graph" | "github-search" | "bitbucket-search". */
+  found_via: string;
+}
+
+export interface DevLinkBranch {
+  provider: string; // "github" | "bitbucket"
+  repo: string;
+  name: string;
+  last_commit?: string;
+  found_via: string;
+}
+
+export interface TaskDevLinks {
+  /** Aura task human key, e.g. "AURA-742". */
+  task_key: string;
+  /** Jira issue keys linked to this task (from Aura's jira_issues[]). */
+  jira_keys: string[];
+  pull_requests: DevLinkPullRequest[];
+  branches: DevLinkBranch[];
+  /** Errors encountered while fetching (per layer), so the orchestrator can
+   * surface degradation rather than silently dropping links. */
+  errors: string[];
 }

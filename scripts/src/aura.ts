@@ -27,10 +27,14 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node
 import { resolve, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { randomBytes } from "node:crypto";
-import { AuraClient } from "./aura-client.js";
+import { bearerClient } from "./aura-client.js";
+import type { McpClient } from "./mcp-client.js";
+import { buildAtlassianClient, fetchTaskDevLinks } from "./devlinks.js";
+import { loadSettings } from "./settings.js";
 import type {
   ArtifactApprovalDecision,
   ArtifactApprovalState,
+  ArtifactReview,
   ArtifactToVerify,
   ArtifactVerification,
   AuraArtifact,
@@ -44,6 +48,7 @@ import type {
   AuraPriorityQueue,
   AuraPriorityQueueItem,
   AuraReport,
+  AuraTaskDetail,
   AuraTaskList,
   Digest,
   DigestAttention,
@@ -54,6 +59,8 @@ import type {
   DigestReview,
   LastDigestStore,
   RawAuraData,
+  TaskDevLinks,
+  DigestReviewOwed,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -73,17 +80,41 @@ function humanStatus(status: string): string {
 
 function pctToHours(pct: number | null): number | null {
   if (pct === null) return null;
-  // Keep one decimal (20% -> 1.6h, not 2h). Rounded-to-int loses precision.
-  return Math.round((pct * WORKDAY_HOURS) / 100 * 10) / 10;
+  // Exact hours (20% -> 1.6); the quarter-hour rounding + ~H:MM formatting
+  // happens in fmtHours so the raw digest.json keeps a precise value.
+  return (pct * WORKDAY_HOURS) / 100;
+}
+
+/** Format hours as "~H:MM" rounded to the nearest quarter hour.
+ * null -> "—". */
+function fmtHours(hours: number | null): string {
+  if (hours === null) return "—";
+  // Round to nearest 0.25h, then express as H:MM.
+  const rounded = Math.round(hours / 0.25) * 0.25;
+  const h = Math.floor(rounded);
+  const m = Math.round((rounded - h) * 60);
+  return `~${h}:${String(m).padStart(2, "0")}`;
+}
+
+/** Compact Git column summary for a queue row, e.g. "1: 🟢, 2: 🌿"
+ * meaning 1 PR (open) + 2 branches. PRs grouped by state emoji. */
+function gitColumnSummary(link: TaskDevLinks | undefined): string {
+  if (!link) return "";
+  if (link.pull_requests.length === 0 && link.branches.length === 0) return "";
+  const parts: string[] = [];
+  // PRs grouped by state emoji.
+  const prByState = new Map<string, number>();
+  for (const p of link.pull_requests) {
+    const e = stateEmoji(p.state);
+    prByState.set(e, (prByState.get(e) ?? 0) + 1);
+  }
+  for (const [e, n] of prByState) parts.push(`${n}: ${e}`);
+  if (link.branches.length > 0) parts.push(`${link.branches.length}: 🌿`);
+  return parts.join(", ");
 }
 
 function safeString(v: unknown): string {
   return typeof v === "string" ? v : "";
-}
-
-function fmtHours(hours: number | null): string {
-  if (hours === null) return "—";
-  return `${hours.toFixed(1)}h`;
 }
 
 function fmtPct(pct: number | null): string {
@@ -122,6 +153,8 @@ const REQUIRED_TOOLS = [
   "listArtifacts",
   "listTasks",
   "getArtifactApprovals",
+  "getTaskByHumanKey",
+  "getArtifactReview",
 ];
 
 // Statuses that count as "active open" for the queue table.
@@ -147,7 +180,7 @@ async function fetchAction(): Promise<void> {
   const outDir = join(tmpdir(), `aura-morning-${randomBytes(6).toString("hex")}`);
   mkdirSync(outDir, { recursive: true });
 
-  const client = new AuraClient();
+  const client = bearerClient("aura-mcp-dev");
   await client.connect();
   client.assertToolsAvailable(REQUIRED_TOOLS);
 
@@ -346,7 +379,110 @@ async function fetchAction(): Promise<void> {
   // only, corrections=[]); the full findings live in report.json so the
   // orchestrator can reconcile without any extra MCP calls.
   const verifications = await verifyArtifacts(client, artifactsToVerify);
+
+  // --- Dev links: related PRs / branches per queue task --------------------
+  // Fetch each queue task's detail (for jira_issues + description), then fan
+  // out across Teamwork Graph (primary) + GitHub `gh search` + Bitbucket. The
+  // Aura client is still open for getTaskByHumanKey; the Atlassian client is
+  // built separately (OAuth token from the keyring) and degrades to null if
+  // unavailable. Disabled when no auraDigest settings are present.
+  const settings = loadSettings();
+  const devLinks: TaskDevLinks[] = [];
+  if (settings) {
+    const atlassian = await buildAtlassianClient();
+    try {
+      // Fetch each queue task's detail, then also its children's details so we
+      // collect subtask Jira keys too — PRs often live on a subtask's Jira key,
+      // not the parent's (e.g. AURA-742's own Jira has no PRs; its sibling
+      // AURA-932 -> ANW-8184 has the OTEL PR). Merge child jira_issues in.
+      const taskDetails = await Promise.all(
+        queueRows.map((row) =>
+          client.callTool<AuraTaskDetail>("getTaskByHumanKey", { key: row.key })
+            .catch(() => null)
+        )
+      );
+      for (const detail of taskDetails) {
+        if (!detail) continue;
+        // Pull in children's Jira keys (one getTaskByHumanKey per child).
+        const childKeys = (detail.children ?? []).map((c) => c.human_key).filter(Boolean);
+        if (childKeys.length > 0) {
+          const childDetails = await Promise.all(
+            childKeys.map((k) =>
+              client.callTool<AuraTaskDetail>("getTaskByHumanKey", { key: k }).catch(() => null)
+            )
+          );
+          const childJira = childDetails
+            .filter((c): c is AuraTaskDetail => c !== null)
+            .flatMap((c) => c.jira_issues ?? []);
+          if (childJira.length > 0) {
+            detail.jira_issues = [...(detail.jira_issues ?? []), ...childJira];
+          }
+        }
+        devLinks.push(await fetchTaskDevLinks(detail, settings, atlassian));
+      }
+    } finally {
+      if (atlassian) await atlassian.close();
+    }
+  }
+
+  // --- Reviews I owe: artifacts assigned to me as reviewer, not yet decided ---
+  // Candidates come from the `artifact.review_assigned` notifications (they're
+  // addressed to me by definition). For each, call getArtifactReview and keep
+  // only those where my reviewer row is still ASSIGNED. My user_id is derived
+  // from the first review I initiated (is_initiator: true) among the reviews
+  // already in d.reviews; fallback: match reviewer by name "Plattner, Patric".
+  const reviewsOwed: DigestReviewOwed[] = [];
+  const assignedNotif = (notifications.items ?? []).filter(
+    (n) => safeString(n.type) === "artifact.review_assigned"
+  );
+  const candidateIds = new Set<string>();
+  const titleById = new Map<string, string>();
+  for (const n of assignedNotif) {
+    const p = (n.i18n_params as Record<string, unknown> | undefined) ?? {};
+    const id = safeString(p.artifactUuid) || safeString(p.artifact_uuid);
+    if (id) {
+      candidateIds.add(id);
+      const t = safeString(p.artifactTitle) || safeString(p.artifact_title);
+      if (t) titleById.set(id, t);
+    }
+  }
+  if (candidateIds.size > 0) {
+    // Find my user id: from a review I initiated (my own artifact in d.reviews).
+    let myUserId: string | null = null;
+    for (const r of reviews) {
+      try {
+        const ar = await client.callTool<ArtifactReview>("getArtifactReview", { id: r.artifact_id });
+        if (ar.is_initiator && ar.initiator) { myUserId = ar.initiator.user_id; break; }
+      } catch { /* ignore */ }
+    }
+    const myName = "Plattner, Patric";
+    for (const id of candidateIds) {
+      try {
+        const ar = await client.callTool<ArtifactReview>("getArtifactReview", { id });
+        // Find my reviewer row by user_id (preferred) or name fallback.
+        const me = ar.reviewers.find(
+          (rv) => (myUserId && rv.user_id === myUserId) || rv.user_name === myName
+        );
+        if (me && me.status === "ASSIGNED") {
+          reviewsOwed.push({
+            artifact_id: id,
+            title: ar.review_artifacts?.[0]?.title ?? titleById.get(id) ?? "",
+            version: ar.version,
+            deadline: ar.review_deadline_at ?? null,
+            initiator: ar.initiator?.user_name ?? null,
+            review_started_at: ar.review_started_at ?? null,
+          });
+        }
+      } catch { /* ignore unreachable artifacts */ }
+    }
+  }
   await client.close();
+
+  // --- Enrich queue rows with a compact Git column from dev_links ----------
+  const devLinksByTask = new Map(devLinks.map((l) => [l.task_key, l]));
+  for (const row of queueRows) {
+    row.git_summary = gitColumnSummary(devLinksByTask.get(row.key));
+  }
 
   const rawPath = resolve(outDir, "raw.json");
   const digestPath = resolve(outDir, "digest.json");
@@ -361,6 +497,8 @@ async function fetchAction(): Promise<void> {
     reviews,
     suggested_actions: suggestedActions,
     corrections: [],
+    dev_links: devLinks,
+    reviews_owed: reviewsOwed,
     meta: {
       generated_at: fetchedAt,
       raw_path: rawPath,
@@ -391,7 +529,7 @@ async function fetchAction(): Promise<void> {
   console.error(`  raw:     ${rawPath}`);
   console.error(`  digest:  ${digestPath}`);
   console.error(`  report:  ${reportPath}`);
-  console.error(`  queue rows: ${queueRows.length}, artifacts verified: ${verifications.length} (${verifications.filter((v) => v.stale).length} stale)`);
+  console.error(`  queue rows: ${queueRows.length}, artifacts verified: ${verifications.length} (${verifications.filter((v) => v.stale).length} stale), dev links: ${devLinks.length} tasks`);
 }
 
 /**
@@ -404,7 +542,7 @@ async function fetchAction(): Promise<void> {
  * reported state alongside the current findings.
  */
 async function verifyArtifacts(
-  client: AuraClient,
+  client: McpClient,
   candidates: ArtifactToVerify[]
 ): Promise<ArtifactVerification[]> {
   const isActionable = (d: string | null) =>
@@ -609,21 +747,21 @@ function renderQueue(d: Digest): string {
     lines.push("_No tasks in the queue._");
     return lines.join("\n");
   }
-  lines.push("| # | Task [key] | Status | Role | Cap | Hours |");
-  lines.push("|---|-------------|--------|------|-----|-------|");
+  lines.push("| # | Task [key] | Status | Role | Cap | Hours | Git |");
+  lines.push("|---|-------------|--------|------|-----|------|-----|");
   for (const row of d.queue) {
     lines.push(
-      `| ${row.rank} | ${row.title} [${row.key}] | ${row.status} | ${row.role} | ${fmtPct(row.capacity_pct)} | ${fmtHours(row.hours)} |`
+      `| ${row.rank} | ${row.title} [${row.key}] | ${row.status} | ${row.role} | ${fmtPct(row.capacity_pct)} | ${fmtHours(row.hours)} | ${row.git_summary ?? ""} |`
     );
   }
   const committedRows = d.queue.filter((r) => r.capacity_pct !== null && r.capacity_pct > 0);
   const totalPct = committedRows.reduce((s, r) => s + (r.capacity_pct ?? 0), 0);
   const totalHours = committedRows.reduce((s, r) => s + (r.hours ?? 0), 0);
   lines.push(
-    `|   | **Committed** | | | **${totalPct}%** | **${totalHours.toFixed(1)}h** |`
+    `|   | **Committed** | | | **${totalPct}%** | **${fmtHours(totalHours)}** | |`
   );
   lines.push("");
-  lines.push(`_8hr workday → hours = capacity% × ${WORKDAY_HOURS}_`);
+  lines.push(`_8hr workday → hours = capacity% × ${WORKDAY_HOURS}, rounded to ¼h_`);
   return lines.join("\n");
 }
 
@@ -652,18 +790,39 @@ function renderReviews(d: Digest): string {
     lines.push("Nothing pending.");
     return lines.join("\n");
   }
+  // Terse table: one row per artifact, one column per reviewer (emoji only,
+  // all reviewers present). Column headers are first names to keep it narrow.
+  const allReviewerNames: string[] = [];
+  const seen = new Set<string>();
   for (const r of d.reviews) {
-    const decisions =
-      r.decisions.length > 0
-        ? r.decisions
-            .map((dec) => {
-              const emoji = decisionEmoji(dec);
-              const verdict = dec.decision ? ` ${dec.decision}` : "";
-              return `${emoji} ${dec.user_name}${verdict}`;
-            })
-            .join(", ")
-        : `${r.decided_count}/${r.total_required} decided`;
-    lines.push(`- **${r.title}** v${r.version} — ${decisions}`);
+    for (const dec of r.decisions) {
+      const first = dec.user_name.split(",")[0].trim();
+      if (!seen.has(first)) { seen.add(first); allReviewerNames.push(first); }
+    }
+  }
+  const header = ["Artifact", "v", ...allReviewerNames];
+  lines.push(`| ${header.join(" | ")} |`);
+  lines.push(`|${header.map(() => "---").join("|")}|`);
+  for (const r of d.reviews) {
+    const byName = new Map(r.decisions.map((dec) => [dec.user_name.split(",")[0].trim(), decisionEmoji(dec)]));
+    const cells = allReviewerNames.map((n) => byName.get(n) ?? "");
+    lines.push(`| ${r.title} | ${r.version} | ${cells.join(" | ")} |`);
+  }
+  return lines.join("\n");
+}
+
+/** Render the "reviews I owe" list (artifacts assigned to me, not yet decided). */
+function renderReviewsOwed(d: Digest): string {
+  const lines: string[] = ["### Reviews I owe", ""];
+  const owed = d.reviews_owed ?? [];
+  if (owed.length === 0) {
+    lines.push("_None — you're not blocking any reviews._");
+    return lines.join("\n");
+  }
+  for (const r of owed) {
+    const deadline = r.deadline ? ` (due ${r.deadline.slice(0, 10)})` : "";
+    const initiator = r.initiator ? ` — from ${r.initiator}` : "";
+    lines.push(`- **${r.title}** v${r.version}${deadline}${initiator}`);
   }
   return lines.join("\n");
 }
@@ -693,6 +852,50 @@ function renderSuggestedActions(d: Digest): string {
   return lines.join("\n");
 }
 
+function stateEmoji(state: string): string {
+  const s = state.toUpperCase();
+  if (s === "OPEN") return "🟢";
+  if (s === "MERGED") return "✅";
+  if (s === "CLOSED" || s === "DECLINED") return "⚫";
+  return "•";
+}
+
+function renderDevLinks(d: Digest): string {
+  const lines: string[] = ["### Dev links", ""];
+  const links = d.dev_links ?? [];
+  if (links.length === 0) {
+    lines.push("_No dev-links configured (set auraDigest in settings to enable)._");
+    return lines.join("\n");
+  }
+  const withPrs = links.filter((l) => l.pull_requests.length > 0 || l.branches.length > 0);
+  if (withPrs.length === 0) {
+    lines.push("_No related PRs or branches found for queue tasks._");
+    return lines.join("\n");
+  }
+  // Numbered list; task key inlined into each line (no separate header).
+  let n = 0;
+  for (const l of withPrs) {
+    for (const pr of l.pull_requests) {
+      n++;
+      const keyPart = `${l.task_key}: `;
+      lines.push(
+        `${n}. ${keyPart}${stateEmoji(pr.state)} [${pr.provider} #${pr.id}](${pr.url}) — ${pr.title} (${pr.state.toLowerCase()})`
+      );
+    }
+    for (const b of l.branches) {
+      n++;
+      lines.push(`${n}. ${l.task_key}: 🌿 ${b.provider} \`${b.repo}\` **${b.name}**`);
+    }
+  }
+  const errs = links.flatMap((l) => l.errors.map((e) => `${l.task_key}: ${e}`));
+  if (errs.length > 0) {
+    lines.push("");
+    lines.push("_errors:_");
+    for (const e of errs.slice(0, 3)) lines.push(`  - ${e}`);
+  }
+  return lines.join("\n");
+}
+
 function render(d: Digest): string {
   const sections: string[] = [];
   const day = new Date(d.date + "T00:00:00").toLocaleDateString("en-US", {
@@ -708,7 +911,9 @@ function render(d: Digest): string {
   sections.push(renderQueue(d), "");
   sections.push(renderCapacity(d), "");
   sections.push(renderReviews(d), "");
+  sections.push(renderReviewsOwed(d), "");
   sections.push(renderCorrections(d), "");
+  sections.push(renderDevLinks(d), "");
   sections.push(renderSuggestedActions(d), "");
   return sections.join("\n") + "\n";
 }

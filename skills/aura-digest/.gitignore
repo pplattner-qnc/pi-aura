@@ -1,3 +1,0 @@
-# Ignore node_modules + bundled output (rebuilt via `npm run build`).
-node_modules/
-dist/
