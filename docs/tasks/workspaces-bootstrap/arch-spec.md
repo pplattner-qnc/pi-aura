@@ -76,7 +76,7 @@ Turn pi-aura into an npm workspaces monorepo. A new shared package
   this is the empty skeleton. Do not create a build script.
 - **Interface contract (for slice 2):** the package must exist and be
   importable as `@pi-aura/shared` once the root declares it a workspace + a
-  consumer adds `workspace:*`. Slice 2 depends on this package existing.
+  consumer adds a `*` range dep. Slice 2 depends on this package existing.
 
 ### Slice 2 — `scripts-joins-workspaces` (size s, blocked by slice 1)
 
@@ -84,7 +84,13 @@ Turn pi-aura into an npm workspaces monorepo. A new shared package
 + esbuild config).
 
 - `scripts/package.json` changes:
-  - **Add** `"@pi-aura/shared": "workspace:*"` to `dependencies`.
+  - **Add** `"@pi-aura/shared": "*"` to `dependencies`. ⚠️ **npm, not
+    pnpm** — the grilling's Q31 said `workspace:*`, but npm does not support
+    the `workspace:` protocol (it's a pnpm/yarn convention; `npm install`
+    fails with `EUNSUPPORTEDPROTOCOL`). npm workspaces links local packages
+    **by name** using a normal semver range and creates the symlink
+    automatically; `"*"` is the npm-compatible equivalent. (Confirmed during
+    slice 3 acceptance testing; user-approved correction.)
   - **Keep** `@napi-rs/keyring` in `dependencies` (⚠️ the task doc's "drop
     it" is overridden by this slice doc's nuance: `clients.ts` still imports
     it for the Atlassian OAuth path, which is out of scope until
@@ -101,7 +107,8 @@ Turn pi-aura into an npm workspaces monorepo. A new shared package
     step; esbuild compiles `.ts`).
 - After a root `npm install`: `scripts/node_modules/@pi-aura/shared` is a
   symlink → `../../packages/shared`. (Verified post-install; the symlink is
-  created by npm workspaces, not by this slice's code.)
+  created by npm workspaces by name match — the `*` range is ignored for
+  workspace packages — not by this slice's code.)
 - **Existing abstractions to use:** the existing `esbuild.config.mjs`
   `baseConfig` (don't touch it). The existing `scripts/tsconfig.json` (its
   `moduleResolution: "bundler"` already resolves workspace packages by name).
@@ -162,7 +169,7 @@ Turn pi-aura into an npm workspaces monorepo. A new shared package
 
 ```
 slice 1: packages/shared/ exists, importable by name (once wired)
-slice 2: scripts/ depends on @pi-aura/shared (workspace:*); external list untouched
+slice 2: scripts/ depends on @pi-aura/shared ("*" range; npm-compatible, not workspace:*); external list untouched
 slice 3: root is the workspaces root; make install = root npm install
 ```
 
