@@ -1,5 +1,8 @@
 // Public surface of @pi-aura/shared/keyring.
 
+import { FileKeyring } from "./file-keyring.js";
+import { MacosKeyring } from "./macos-keyring.js";
+
 /** Closed enumeration of secrets this keyring can store.
  *  Add a union member to add a capable secret. */
 export type SecretKey = { service: "aura"; name: "pat" };
@@ -49,7 +52,42 @@ export class KeyringDBusError extends Error {
   }
 }
 
-/** Create a keyring auto-selected for the current platform. */
+/** Create a keyring auto-selected for the current platform.
+ *
+ *  Uses an inline `switch (process.platform)` so the Linux D-Bus backend
+ *  (and its `dbus-next` dependency) is only loaded on Linux via dynamic
+ *  `import()`. macOS and file-only paths never evaluate that module graph. */
 export async function createKeyring(): Promise<Keyring> {
-  throw new Error("not implemented");
+  switch (process.platform) {
+    case "darwin": {
+      if (await MacosKeyring.isAvailable()) {
+        return new MacosKeyring();
+      }
+      if (await FileKeyring.isAvailable()) {
+        return new FileKeyring();
+      }
+      throw new KeyringUnavailableError(["MacosKeyring", "FileKeyring"]);
+    }
+    case "linux": {
+      const { SecretServiceKeyring } = await import(
+        "./secret-service-keyring.js"
+      );
+      if (await SecretServiceKeyring.isAvailable()) {
+        return new SecretServiceKeyring();
+      }
+      if (await FileKeyring.isAvailable()) {
+        return new FileKeyring();
+      }
+      throw new KeyringUnavailableError([
+        "SecretServiceKeyring",
+        "FileKeyring",
+      ]);
+    }
+    default: {
+      if (await FileKeyring.isAvailable()) {
+        return new FileKeyring();
+      }
+      throw new KeyringUnavailableError(["FileKeyring"]);
+    }
+  }
 }
