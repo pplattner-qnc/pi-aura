@@ -4,7 +4,7 @@ slug: keyring-interface-and-enum
 title: SecretKey enum, Keyring interface, errors, and barrel
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: s
 blocked_by: []
 ---
