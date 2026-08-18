@@ -120,3 +120,45 @@ no `workspaces` field yet — that wiring arrives in slice 3
 (`root-manifest-and-makefile`). Nothing imports `@pi-aura/shared` yet, so
 typecheck/build are unaffected (confirmed green). This is expected
 sequencing, not a defect; verify the symlink after slice 3's root install.
+
+### root-manifest-and-makefile (landed)
+
+Root `package.json` now declares `"workspaces": ["scripts", "packages/shared"]`,
+drops `@napi-rs/keyring` from `dependencies` (kept as `{}`, matching prior style;
+confirmed no root/`extensions/` import of `@napi-rs/keyring`), and preserves
+`pi.*`, `peerDependencies`, `name`, `version`, `description`, `keywords`.
+`Makefile` `install` now runs `npm install` at the root; `build`/`typecheck`/
+`codegen`/`watch`/`clean` keep `cd scripts` (minimize change). `.gitignore`
+unrooted globs already cover `packages/shared/`.
+
+**Cross-slice fix (user-approved, arch spec amended):** `scripts/package.json`
+`@pi-aura/shared` changed from `workspace:*` → `*`. npm does not support the
+`workspace:` protocol (pnpm/yarn convention; `npm install` fails with
+`EUNSUPPORTEDPROTOCOL`). npm workspaces links local packages **by name** using a
+normal semver range — `"*"` is the npm-compatible equivalent and produces the
+same symlink. The third grilling's Q31 assumed `workspace:*`; corrected in commit
+`58340c6`. Downstream tasks must use `"*"` for `@pi-aura/shared`, not `workspace:*`.
+
+**npm hoisting layout (deviation from slice-doc wording, expected):** npm
+**hoists** `@pi-aura/shared` to the **root** `node_modules/@pi-aura/shared` →
+`../../packages/shared`; there is no per-consumer symlink under
+`scripts/node_modules/@pi-aura/shared`. This is standard npm workspaces hoisting
+— Node's module resolution finds it from the root, so `import ... from
+"@pi-aura/shared"` resolves from `scripts/`. The slice/task docs' per-consumer-
+symlink wording reflects a pnpm-style layout, not npm's.
+
+**Slice-1 residual risk closed:** `packages/shared` devDependencies (`typescript`,
+`@types/node`) deduplicate cleanly with `scripts`' identical devDependencies
+under hoisting — `npm install` emitted no version-conflict warnings.
+
+**Regenerated dist artifacts:** `make build` under the new hoisted layout
+re-pathed esbuild's module-identity strings in the committed
+`skills/*/dist/*.mjs` from `node_modules/...` to `../node_modules/...` (ajv &
+co. now resolve from the hoisted root `node_modules`). The bundled code is
+functionally identical; only source-path comments/wrapper strings changed.
+These regenerated dist files are committed to match the new topology.
+
+Gate (all PASS): `make install` (root `npm install`, 292 packages, no
+`EUNSUPPORTEDPROTOCOL`, no version conflicts), symlink
+`node_modules/@pi-aura/shared` exists, `make build` produces both `.mjs` outputs,
+`cd scripts && npm run typecheck` clean. No UI work.
