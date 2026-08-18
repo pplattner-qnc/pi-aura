@@ -419,7 +419,7 @@ console.log("decideEditAction pure-function tests passed");
 // --- handleEdit UI/keyring logic ---
 
 function makeMockEditUi(options: {
-  editorResult?: string | null;
+  editorResult?: string;
   confirmResult?: boolean;
 } = {}) {
   const notifies: NotifyCall[] = [];
@@ -428,7 +428,7 @@ function makeMockEditUi(options: {
       notify(message: string, level: "info" | "warning" | "error") {
         notifies.push({ message, level });
       },
-      async editor(_title: string, _prefilled: string) {
+      async editor(_title: string, _prefilled: string): Promise<string | undefined> {
         return options.editorResult;
       },
       async confirm(_title: string, _message: string) {
