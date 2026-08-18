@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { mkdir, readFile, writeFile, chmod } from "node:fs/promises";
 import type { Keyring, SecretKey, StoredSecret } from "./keyring.js";
 
@@ -78,12 +78,8 @@ export class FileKeyring implements Keyring {
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return parsed as Record<string, string>;
       }
-    } catch (e) {
-      // Ignore ENOENT and JSON parse errors — behave as if the store is empty.
-      const code = (e as NodeJS.ErrnoException).code;
-      if (code !== "ENOENT") {
-        // Corrupt JSON / unreadable file: swallow and return empty map.
-      }
+    } catch {
+      // Ignore missing, unreadable, or corrupt store — behave as if empty.
     }
     return {};
   }
@@ -91,7 +87,7 @@ export class FileKeyring implements Keyring {
   /** Persist the JSON store, creating the parent directory and tightening
    *  permissions best-effort. */
   private async save(data: Record<string, string>): Promise<void> {
-    await mkdir(join(this.storePath, ".."), { recursive: true });
+    await mkdir(dirname(this.storePath), { recursive: true });
     await writeFile(
       this.storePath,
       JSON.stringify(data, null, 2) + "\n",
