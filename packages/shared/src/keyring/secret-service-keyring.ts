@@ -206,6 +206,26 @@ export class SecretServiceKeyring implements Keyring {
     }
   }
 
+  /** Resolve the default collection path, falling back to the well-known
+   *  login collection if the "default" alias is not set. */
+  private async resolveDefaultCollectionPath(
+    service: dbus.ClientInterface,
+    bus: MessageBus,
+  ): Promise<string> {
+    const alias = (await service.ReadAlias("default")) as string;
+    if (alias && alias !== "/") return alias;
+
+    // If no default alias is configured, the login collection is the
+    // conventional fallback. Verify it exists by introspecting it.
+    const loginPath = "/org/freedesktop/secrets/collection/login";
+    try {
+      await bus.getProxyObject(SECRETS_DESTINATION, loginPath);
+      return loginPath;
+    } catch {
+      throw new KeyringDBusError("No default Secret Service collection");
+    }
+  }
+
   /** Open a temporary encrypted session and run `fn` inside it. */
   private async withSession<T>(fn: (ctx: SessionContext) => Promise<T>): Promise<T> {
     const bus = dbus.sessionBus();
@@ -225,10 +245,7 @@ export class SecretServiceKeyring implements Keyring {
       const shared = dh.computeSecret(serverPublic);
       const aesKey = deriveAesKey(shared);
 
-      const defaultCollectionPath = (await service.ReadAlias("default")) as string;
-      if (!defaultCollectionPath) {
-        throw new KeyringDBusError("No default Secret Service collection");
-      }
+      const defaultCollectionPath = await this.resolveDefaultCollectionPath(service, bus);
 
       return await fn({ bus, sessionPath, aesKey, defaultCollectionPath });
     } catch (e) {
