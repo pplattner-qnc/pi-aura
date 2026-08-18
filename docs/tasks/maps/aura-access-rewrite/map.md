@@ -3,7 +3,7 @@ kind: map
 slug: aura-access-rewrite
 title: Rewrite the Aura access layer to drop the MCP wrapper
 status: active
-tasks: "[{slug: aura-access-grilling, blocked_by: [], done: true}, {slug: keyring-key-redesign-grilling, blocked_by: [], done: true}, {slug: workspaces-bootstrap, blocked_by: [], done: false}, {slug: keyring-rewrite, blocked_by: [workspaces-bootstrap], done: false}, {slug: aura-client, blocked_by: [keyring-rewrite], done: false}, {slug: call-site-migration, blocked_by: [aura-client], done: false}, {slug: aura-secrets-command, blocked_by: [keyring-rewrite], done: false}, {slug: clients-cleanup, blocked_by: [call-site-migration], done: false}]"
+tasks: "[{slug: aura-access-grilling, blocked_by: [], done: true}, {slug: keyring-key-redesign-grilling, blocked_by: [], done: true}, {slug: workspaces-bootstrap, blocked_by: [], done: true}, {slug: keyring-rewrite, blocked_by: [workspaces-bootstrap], done: false}, {slug: aura-client, blocked_by: [keyring-rewrite], done: false}, {slug: call-site-migration, blocked_by: [aura-client], done: false}, {slug: aura-secrets-command, blocked_by: [keyring-rewrite], done: false}, {slug: clients-cleanup, blocked_by: [call-site-migration], done: false}]"
 ---
 
 ## Destination
