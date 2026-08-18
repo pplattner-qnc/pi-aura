@@ -1,2 +1,3 @@
-task: None
+task: aura-secrets-command
+task_status: done
 slice: null

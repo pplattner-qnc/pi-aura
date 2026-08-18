@@ -4,7 +4,7 @@ type: feature
 slug: aura-secrets-command
 title: /aura secrets slash-command (discover + edit) extension
 map: aura-access-rewrite
-status: ready
+status: done
 slices:
 - aura-command-skeleton
 - secrets-discover
@@ -138,3 +138,44 @@ mcp-json helper failure modes, `handleDiscover` no-PAT / confirm-store / decline
 select-store / cancel scenarios, handler dispatch); `npx tsc --noEmit -p
 .work/tsconfig-aura-secrets.json` clean; `scripts` + `packages/shared` typecheck
 clean; `scripts` build (esbuild bundling) clean. Lint gate N/A.
+
+### slice: secrets-edit
+
+Implemented the `/aura secrets edit` branch in `extensions/aura-secrets.ts`
+(replacing the slice-1 stub): reads the current PAT from the keyring via
+`keyring.getSecret({service:"aura", name:"pat"})`, opens
+`ctx.ui.editor("Aura PAT", current ?? "<paste your Aura PAT here>")`, and
+writes back with `keyring.setSecret` unless cancelled/unchanged. Pure
+`decideEditAction(current, edited)` returns cancel / unchanged / save /
+confirm-empty; `handleEdit(ui, keyringFactory, current)` is a thin UI
+wrapper that runs the editor, applies the decision, confirms empty-string
+edits via `ctx.ui.confirm("Save empty PAT?")`, and notifies "no change" /
+"unchanged" / "saved". The handler dynamic-imports `createKeyring` +
+`KeyringLockedError` from `@pi-aura/shared/keyring`, reads the current PAT,
+delegates to `handleEdit`, and catches `KeyringLockedError` →
+`ctx.ui.notify(error.message, "error")`.
+
+Deviations from plan (deliberate, for testability):
+1. Introduced `handleEdit` as a thin UI wrapper mirroring `handleDiscover`,
+   keeping the handler even thinner and unit-testable without a real pi
+   session. The handler still owns `createKeyring`, `getSecret`, and
+   `KeyringLockedError` handling.
+2. Removed the old `secrets edit` stub assertion from the handler-dispatch
+   test suite because the real branch dynamic-imports
+   `@pi-aura/shared/keyring`, which Node's `--experimental-strip-types` loader
+   cannot resolve (same limitation documented for slice 2). Edit behavior is
+   fully covered by `decideEditAction` + `handleEdit` unit tests.
+3. Created `.work/tsconfig-aura-secrets.json` (referenced in the slice plan but
+   absent from the branch) so the typecheck gate could run.
+
+Residual risk: the `secrets-edit` branch was not executed end-to-end against
+a real pi session / real keyring; the dynamic import of `createKeyring` and the
+actual keyring read/write only run in the live pi runtime. `handleEdit` behavior
+is covered by unit tests with a fake `KeyringBackend`. Live-session smoke test
+remains outstanding.
+
+Verification: slice tests pass (`decideEditAction` cancel/unchanged/save/
+confirm-empty/current-null cases; `handleEdit` cancel/unchanged/changed/
+empty-decline/empty-accept; prior-slice suites green); throwaway
+`tsc --noEmit -p .work/tsconfig-aura-secrets.json` clean; `scripts` +
+`packages/shared` typecheck clean; `scripts` build clean. Lint gate N/A.
