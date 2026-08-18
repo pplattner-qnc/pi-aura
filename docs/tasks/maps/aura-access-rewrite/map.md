@@ -83,6 +83,10 @@ agent-driven work via the `aura` skill.
 
 ### Second grilling — `keyring-key-redesign-grilling` (done)
 
+(Sharing-topology decisions below were settled by a follow-up grilling — see
+the "Third grilling" section.)
+
+
 Reworks the `src/keyring.ts` **interface itself** (not just the strings).
 
 - **Q1 What to rework:** drop `service` from `createKeyring`; namespace is an
@@ -130,6 +134,39 @@ Reworks the `src/keyring.ts` **interface itself** (not just the strings).
   `keyring/macos-keyring.ts` + `keyring/secret-service-keyring.ts` +
   `keyring/file-keyring.ts`.
 
+### Third grilling — sharing topology between `scripts/` and the extension (done)
+
+The keyring (and later `AuraClient`, `settings`) is used by **two build
+targets**: the `scripts/` esbuild sub-project (bundles `.mjs` for the skills)
+and the pi **extension** (`/aura` slash-command `.ts`, loaded directly by pi).
+They resolve deps from different `node_modules`.
+
+- **Q26 Shared source home:** an **npm workspace package**.
+- **Q27 Shared runtime deps:** declared **once** in the shared package's own
+  `package.json` (settled by Q26 — no per-target duplication).
+- **Q28 `scripts/` role:** joins the workspaces — root `package.json` declares
+  `"workspaces": ["scripts", "packages/shared"]`.
+- **Q29 Import style:** by name via `package.json` `exports` —
+  `import { createKeyring } from "@pi-aura/shared/keyring"`.
+- **Q30 Pkg home + name:** directory `packages/shared/`, npm name
+  `@pi-aura/shared`.
+- **Q31 Root `package.json`:** add `workspaces` + `@pi-aura/shared` (workspace)
+  + `dbus-next`; **drop `@napi-rs/keyring`** (the rewrite drops it). The shared
+  package's own `package.json` declares `dbus-next` + `@hey-api/client-fetch`
+  (single-source); workspace install propagates them. `scripts/package.json`
+  drops `@napi-rs/keyring`, gains `@pi-aura/shared`.
+- **Q32 Shared build:** the shared package exports **`.ts` sources** (no build
+  step); both consumers compile/bundle it themselves (pi loads `.ts`, esbuild
+  bundles `.ts`). Zero build artifact to commit.
+- **Q33 Makefile install:** changes from `cd scripts && npm install` to a
+  **root `npm install`** (root is the workspaces root); one install populates
+  `scripts/node_modules` + `packages/shared/node_modules` + symlinks
+  `@pi-aura/shared` into both.
+
+**Consequence folded in:** pi's root `npm install` (run on `pi install` of this
+package) populates everything via the workspaces symlink — no separate
+per-target install.
+
 ## Facts established by Wayfinder (not the user)
 
 - pi registers a `/aura` command via `pi.registerCommand("aura", { handler,
@@ -153,11 +190,16 @@ Reworks the `src/keyring.ts` **interface itself** (not just the strings).
    destination (14 decisions across 5 rounds).
 2. `keyring-key-redesign-grilling` (grilling, **done**) — settled the
    `src/keyring.ts` interface redesign (25 decisions across 7 rounds).
+3. Sharing-topology grilling (inline, **done**) — settled how the keyring /
+   `AuraClient` / `settings` source is shared between the `scripts/` esbuild
+   project and the pi extension (8 decisions: npm workspace package
+   `@pi-aura/shared` at `packages/shared/`, both `scripts/` and the extension
+   import it by name via `exports`, root is the workspaces root).
 
-Implementation tasks (from-scratch `keyring.ts` rewrite; `AuraClient` +
-factory; call-site migration + type dedupe; `/aura secrets` extension;
-`clients.ts` cleanup) are spawned by the next Wayfinder pass now that both
-grillings are closed.
+Implementation tasks (from-scratch `keyring.ts` rewrite in `packages/shared/`;
+`AuraClient` + factory; call-site migration + type dedupe; `/aura secrets`
+extension; `clients.ts` cleanup; repo restructure to workspaces) are spawned
+by the next Wayfinder pass now that all three grillings are closed.
 
 ## Fog
 
