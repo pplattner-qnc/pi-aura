@@ -25,7 +25,7 @@ ENTRY_OUTS   := $(DIGEST_DIST)/aura-digest.mjs $(AURA_DIST)/aura.mjs
 all: install build
 
 install:
-	cd $(SCRIPTS_DIR) && npm install
+	npm install
 
 # Regenerate the typed Aura REST client from openapi/openapi.yaml into
 # src/generated/ (gitignored — rebuild after changing the spec).
