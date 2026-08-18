@@ -49,9 +49,31 @@ export function parseAuraArgs(args: string): ParsedAuraArgs {
 
 type AutocompleteItem = { value: string; label: string };
 
-function getArgumentCompletions(prefix: string): AutocompleteItem[] | null {
-  // TODO: implement completions
-  return null;
+export function getArgumentCompletions(prefix: string): AutocompleteItem[] | null {
+  const trimmed = prefix.trim();
+
+  // Complete the first token "secrets" until it has been fully typed.
+  if (!trimmed.includes("secrets")) {
+    if ("secrets".startsWith(trimmed)) {
+      return [{ value: "secrets", label: "secrets" }];
+    }
+    return null;
+  }
+
+  // Once "secrets" is present, offer subcommands.
+  const afterSecrets = trimmed === "secrets" ? "" : trimmed.slice("secrets".length).trimStart();
+
+  if (afterSecrets.length === 0) {
+    return [
+      { value: "discover", label: "discover" },
+      { value: "edit", label: "edit" },
+    ];
+  }
+
+  const subcommands = ["discover", "edit"];
+  const filtered = subcommands.filter((sub) => sub.startsWith(afterSecrets));
+
+  return filtered.length > 0 ? filtered.map((sub) => ({ value: sub, label: sub })) : null;
 }
 
 const USAGE = "Usage: /aura secrets {discover|edit}";

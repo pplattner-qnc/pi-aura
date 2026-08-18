@@ -6,7 +6,7 @@
  */
 
 import assert from "node:assert";
-import { parseAuraArgs } from "./aura-secrets.ts";
+import { getArgumentCompletions, parseAuraArgs } from "./aura-secrets.ts";
 
 // Empty/unknown -> usage
 assert.deepStrictEqual(parseAuraArgs(""), { command: "usage", rest: "" });
@@ -28,3 +28,27 @@ assert.deepStrictEqual(parseAuraArgs("  secrets   edit  "), { command: "secrets-
 assert.deepStrictEqual(parseAuraArgs("secrets foo"), { command: "usage", rest: "secrets foo" });
 
 console.log("parseAuraArgs tests passed");
+
+// --- getArgumentCompletions ---
+
+assert.deepStrictEqual(getArgumentCompletions(""), [{ value: "secrets", label: "secrets" }]);
+assert.deepStrictEqual(getArgumentCompletions("s"), [{ value: "secrets", label: "secrets" }]);
+assert.deepStrictEqual(getArgumentCompletions("se"), [{ value: "secrets", label: "secrets" }]);
+assert.strictEqual(getArgumentCompletions("x"), null);
+
+// After the full "secrets" token, offer subcommands.
+assert.deepStrictEqual(getArgumentCompletions("secrets"), [
+  { value: "discover", label: "discover" },
+  { value: "edit", label: "edit" },
+]);
+assert.deepStrictEqual(getArgumentCompletions("secrets "), [
+  { value: "discover", label: "discover" },
+  { value: "edit", label: "edit" },
+]);
+
+// Filter subcommands by prefix.
+assert.deepStrictEqual(getArgumentCompletions("secrets d"), [{ value: "discover", label: "discover" }]);
+assert.deepStrictEqual(getArgumentCompletions("secrets e"), [{ value: "edit", label: "edit" }]);
+assert.strictEqual(getArgumentCompletions("secrets x"), null);
+
+console.log("getArgumentCompletions tests passed");
