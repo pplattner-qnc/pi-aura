@@ -4,7 +4,7 @@ slug: secret-service-dbus-impl
 title: SecretServiceKeyring — dbus-next Secret Service impl of Keyring (Linux)
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: xl
 blocked_by:
   - file-keyring-impl
