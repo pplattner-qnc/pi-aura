@@ -79,3 +79,25 @@ so the rewrite doesn't duplicate code across two build targets.
 From the third grilling (sharing topology): npm workspace package, both
 targets import by name via `exports`, shared package exports `.ts` (no build
 step), root is the workspaces root, `@napi-rs/keyring` dropped.
+
+## Implementation notes
+
+### workspaces-skeleton (landed)
+
+Created `packages/shared/` skeleton: `package.json` (name `@pi-aura/shared`,
+`private: true`, `version: 0.0.0`, `type: module`, `exports` mapping `.` and
+`./*` to `.ts` sources), placeholder `src/index.ts`, `tsconfig.json` mirroring
+`scripts/tsconfig.json`, and `.gitignore`.
+
+**Deviation (minor, justified):** added `devDependencies`
+(`typescript: ^5.7.0`, `@types/node: ^22.10.0`) to `packages/shared/package.json`.
+Neither the slice doc nor arch spec listed them, but the slice's own test-plan
+gate (`cd packages/shared && npx tsc --noEmit`) fails without a local
+`typescript` dep — npm's `tsc` package shadows the compiler binary otherwise.
+These are build-time deps, so they don't conflict with the grilling's
+single-source-runtime-deps rule (Q27). Under workspaces hoisting (slice 3)
+these should deduplicate with `scripts/package.json`'s identical devDependencies
+— verify no version conflict during slice 3's clean-install test.
+
+Gate: `npx tsc --noEmit` in `packages/shared` passes; `scripts` typecheck and
+build still green (both `.mjs` outputs produced). No UI work.
