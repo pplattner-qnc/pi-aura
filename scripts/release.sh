@@ -1,16 +1,66 @@
 #!/usr/bin/env bash
 # Release helper: version bump -> commit -> tag -> push commit -> push tag.
 #
-# Usage: ./scripts/release.sh
+# Usage:
+#   ./scripts/release.sh                      # interactive: prompt for bump + confirm
+#   ./scripts/release.sh --bump=minor         # non-interactive bump selection
+#   ./scripts/release.sh --bump=minor --yes   # also skip the confirmation prompt
+#   ./scripts/release.sh --bump=patch -y      # short flags
+#
+# Flags:
+#   --bump=major|minor|patch   Choose the bump programmatically (no menu).
+#   --yes, -y                  Skip the "Proceed?" confirmation.
+#   -h, --help                 Show this help and exit.
 #
 # Preconditions:
-#   - No pending or staged changes in the worktree.
+#   - No pending or staged changes in the worktree (release commits must be
+#     clean so only the version bump is included).
 #   - A remote (origin) configured for pushing the commit and tag.
+#   - HEAD is on a branch (not detached); the branch is pushed to origin.
 
 set -euo pipefail
 
 # Always operate from the repository root, regardless of cwd.
 cd "$(git rev-parse --show-toplevel)"
+
+# --------------------------------------------------------------------------
+# 0. Parse flags
+# --------------------------------------------------------------------------
+bump=""
+assume_yes=false
+
+usage() {
+  sed -n '2,16p' "$0"
+  exit "${1:-0}"
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --bump=*)
+      bump="${arg#--bump=}"
+      ;;
+    --yes|-y)
+      assume_yes=true
+      ;;
+    -h|--help)
+      usage 0
+      ;;
+    *)
+      echo "Error: unknown argument: $arg" >&2
+      usage 1
+      ;;
+  esac
+done
+
+if [[ -n "$bump" ]]; then
+  case "$bump" in
+    major|minor|patch) ;;
+    *)
+      echo "Error: invalid --bump value '$bump' (expected major|minor|patch)" >&2
+      exit 1
+      ;;
+  esac
+fi
 
 # --------------------------------------------------------------------------
 # 1. Clean-worktree guard (pending/staged changes)
@@ -40,27 +90,38 @@ echo "Current version: ${current_version}"
 echo
 
 # --------------------------------------------------------------------------
-# 3. Offer major / minor / patch
+# 3. Choose the bump (interactive menu unless --bump was given)
 # --------------------------------------------------------------------------
-PS3="Select version bump: "
-select choice in "major (${major_v})" "minor (${minor_v})" "patch (${patch_v})"; do
-  case "$choice" in
-    major*) new_version="$major_v"; break ;;
-    minor*) new_version="$minor_v"; break ;;
-    patch*) new_version="$patch_v"; break ;;
-    *) echo "Invalid selection. Please choose 1-3." ;;
+if [[ -n "$bump" ]]; then
+  case "$bump" in
+    major)  new_version="$major_v" ;;
+    minor)  new_version="$minor_v" ;;
+    patch)  new_version="$patch_v" ;;
   esac
-done
+  echo "Bump mode: ${bump} -> ${new_version}"
+else
+  PS3="Select version bump: "
+  select choice in "major (${major_v})" "minor (${minor_v})" "patch (${patch_v})"; do
+    case "$choice" in
+      major*) new_version="$major_v"; break ;;
+      minor*) new_version="$minor_v"; break ;;
+      patch*) new_version="$patch_v"; break ;;
+      *) echo "Invalid selection. Please choose 1-3." ;;
+    esac
+  done
+fi
 
 # --------------------------------------------------------------------------
-# 4. Confirm the new version
+# 4. Confirm the new version (unless --yes)
 # --------------------------------------------------------------------------
 echo
 echo "Bumping ${current_version} -> ${new_version}"
-read -r -p "Proceed? (y/N) " confirm
-if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-  echo "Aborted."
-  exit 0
+if [[ "$assume_yes" != "true" ]]; then
+  read -r -p "Proceed? (y/N) " confirm
+  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 0
+  fi
 fi
 
 # --------------------------------------------------------------------------
@@ -82,6 +143,11 @@ echo "Tagged v${new_version}"
 # 7. Push the commit, then the tag
 # --------------------------------------------------------------------------
 branch=$(git rev-parse --abbrev-ref HEAD)
+if [[ -z "$branch" || "$branch" == "HEAD" ]]; then
+  echo "Error: HEAD is detached — cannot determine a branch to push." >&2
+  echo "Check out a branch (e.g. git switch main) before releasing." >&2
+  exit 1
+fi
 git push origin "$branch"
 git push origin "v${new_version}"
 

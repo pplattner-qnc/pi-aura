@@ -9,7 +9,7 @@ Aura integration for [pi](https://github.com/badlogic/pi-mono) — skills, agent
 | Skill | Description |
 |---|---|
 | `aura` | Reference skill for working with Aura — use cases (tasks, artifacts, wiki, code search, capacity, etc.) and process knowledge (workflow phases, roles, escalation, integrations) |
-| `aura-start-day` | Morning routine — fetches your briefing, attention items, priority queue, capacity, and reviews via a subagent pipeline, then presents a concise digest |
+| `aura-digest` | Morning routine — fetches your briefing, attention items, priority queue, capacity, and reviews via a deterministic script pipeline, then presents a concise digest |
 
 ### Agents
 
@@ -64,10 +64,10 @@ pi install git:github.com/pplattner-qnc/pi-aura@v0.1.0
 ### Morning routine
 
 ```
-/skill:aura-start-day
+/skill:aura-digest
 ```
 
-Fetches your briefing, attention items, priority queue, capacity, and pending reviews in parallel, then presents a consolidated digest.
+Fetches your briefing, attention items, priority queue, capacity, and pending reviews via a deterministic Node script, verifies review states, then presents a consolidated digest with a diff against the last run.
 
 ### Working with Aura
 
