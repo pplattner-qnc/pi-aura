@@ -4,7 +4,7 @@ type: feature
 slug: keyring-rewrite
 title: From-scratch keyring.ts in @pi-aura/shared (dbus-next Linux, no KeyringBackend seam)
 map: aura-access-rewrite
-status: ready
+status: done
 slices:
 - keyring-interface-and-enum
 - file-keyring-impl
@@ -227,3 +227,45 @@ branch.
   from libsecret 0.21.7 source because the spec wording was ambiguous on key
   derivation.
   (4) `isAvailable()` includes the timeout guard + error listener noted above.
+
+### slice(create-keyring-dispatch): createKeyring() inline switch + isAvailable probe loop
+
+- Merged `slice/create-keyring-dispatch` into `task/keyring-rewrite`.
+- `createKeyring()` in `packages/shared/src/keyring/keyring.ts` is now an
+  inline `switch (process.platform)` that dispatches to the platform
+  implementation, probing each with `await isAvailable()` and falling back to
+  `FileKeyring`.
+  - `case "darwin"`: tries `MacosKeyring` (static `isAvailable()`), falls
+    through to `FileKeyring`.
+  - `case "linux"`: `const { SecretServiceKeyring } = await
+    import("./secret-service-keyring.js")` — the only static reference to the
+    Linux impl is the dynamic `import()` path string; tries
+    `SecretServiceKeyring.isAvailable()`, falls through to `FileKeyring`.
+  - `default`: `FileKeyring`.
+  - Throws `KeyringUnavailableError` with a `tried` array listing the candidate
+    backends when no backend is available.
+- `await` is applied uniformly to all `isAvailable()` calls — correct because
+  the backends have mixed signatures (`FileKeyring`/`MacosKeyring` return
+  `boolean`, `SecretServiceKeyring` returns `Promise<boolean>`). `await` on a
+  sync boolean is harmless.
+- **Cross-platform import isolation confirmed**: `keyring.ts` has only static
+  imports of `FileKeyring` and `MacosKeyring`. The sole reference to
+  `secret-service-keyring` is the dynamic `import()` path string inside
+  `case "linux"`. macOS/file code paths never evaluate the `dbus-next` module
+  graph at runtime. esbuild `--splitting` bundle analysis confirms the
+  secret-service code (and its `dbus-next` dependency) is isolated in a lazy
+  chunk with 0 dbus references in the main chunk.
+- Verification: `npm run typecheck` passed in `packages/shared` and `scripts`;
+  `scripts` build passed. A bundled esbuild smoke test (CJS format, `--external:x11`)
+  confirmed the normal Linux path returns `SecretServiceKeyring` and CRUD
+  round-trips; the no-D-Bus fallback path (`DBUS_SESSION_BUS_ADDRESS=`) returns
+  `FileKeyring` and still round-trips. No committed test suite exists per
+  `docs/testing.md`.
+- Deviations (per TDD worker): none. The implementation follows the slice doc
+  and architecture spec exactly.
+- Residual risk (per verify worker): esbuild statically resolves dynamic
+  `import()` at bundle time — a naive single-file bundle without `--splitting`
+  pulls `dbus-next` → `x11` into the graph. This is a bundler behavior, not a
+  defect in `keyring.ts`; at runtime the `case "linux"` guard prevents
+  evaluation on other platforms. Worth noting if a future macOS bundle step
+  uses naive esbuild.

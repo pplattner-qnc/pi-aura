@@ -4,7 +4,7 @@ slug: create-keyring-dispatch
 title: createKeyring() inline switch + isAvailable probe loop
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: s
 blocked_by:
   - macos-keyring-impl
