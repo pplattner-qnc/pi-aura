@@ -207,8 +207,14 @@ export class SecretServiceKeyring implements Keyring {
     }
   }
 
-  /** Resolve the default collection path, falling back to the well-known
-   *  login collection if the "default" alias is not set. */
+  /** Resolve the default collection path.
+   *
+   *  1. Use the alias "default" if it is set.
+   *  2. Fall back to the well-known login collection.
+   *  3. If neither exists, create a new collection aliased as "default".
+   *
+   *  Collection creation may return a prompt object path on a locked or
+   *  prompting keyring; in that case we surface a domain error. */
   private async resolveDefaultCollectionPath(
     service: dbus.ClientInterface,
     bus: MessageBus,
@@ -223,8 +229,28 @@ export class SecretServiceKeyring implements Keyring {
       await bus.getProxyObject(SECRETS_DESTINATION, loginPath);
       return loginPath;
     } catch {
-      throw new KeyringDBusError("No default Secret Service collection");
+      // Neither alias nor login collection exists — create one.
     }
+
+    const [collectionPath, promptPath] = (await service.CreateCollection(
+      {
+        "org.freedesktop.Secret.Collection.Label": new Variant("s", "Default"),
+      },
+      "default",
+    )) as [string, string];
+
+    if (promptPath && promptPath !== "/") {
+      throw new KeyringLockedError(
+        "secret-service",
+        "Secret Service requires a prompt to create the default collection",
+      );
+    }
+
+    if (!collectionPath || collectionPath === "/") {
+      throw new KeyringDBusError("Could not create default Secret Service collection");
+    }
+
+    return collectionPath;
   }
 
   /** Open a temporary encrypted session and run `fn` inside it. */
