@@ -6,7 +6,7 @@
  */
 
 import assert from "node:assert";
-import { getArgumentCompletions, parseAuraArgs } from "./aura-secrets.ts";
+import auraSecretsExtension, { getArgumentCompletions, parseAuraArgs } from "./aura-secrets.ts";
 
 // Empty/unknown -> usage
 assert.deepStrictEqual(parseAuraArgs(""), { command: "usage", rest: "" });
@@ -52,3 +52,79 @@ assert.deepStrictEqual(getArgumentCompletions("secrets e"), [{ value: "edit", la
 assert.strictEqual(getArgumentCompletions("secrets x"), null);
 
 console.log("getArgumentCompletions tests passed");
+
+// --- handler dispatch via mock pi / ctx ---
+
+interface NotifyCall {
+  message: string;
+  level: "info" | "warning" | "error";
+}
+
+function makeMockPi() {
+  let registered: { name: string; config: unknown } | undefined;
+  return {
+    registerCommand(name: string, config: unknown) {
+      registered = { name, config };
+    },
+    getRegistered() {
+      return registered;
+    },
+  };
+}
+
+function makeMockCtx() {
+  const notifies: NotifyCall[] = [];
+  return {
+    ui: {
+      notify(message: string, level: "info" | "warning" | "error") {
+        notifies.push({ message, level });
+      },
+    },
+    getNotifies() {
+      return notifies;
+    },
+  };
+}
+
+const mockPi = makeMockPi();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+auraSecretsExtension(mockPi as any);
+const registered = mockPi.getRegistered();
+assert.ok(registered, "command should be registered");
+assert.strictEqual(registered!.name, "aura");
+
+const config = registered!.config as {
+  description: string;
+  handler: (args: string, ctx: ReturnType<typeof makeMockCtx>) => Promise<void>;
+};
+assert.ok(config.description, "description should be present");
+
+async function runHandler(args: string) {
+  const ctx = makeMockCtx();
+  await config.handler(args, ctx as unknown as ReturnType<typeof makeMockCtx>);
+  return ctx.getNotifies();
+}
+
+// Stubs
+assert.deepStrictEqual(await runHandler("secrets discover"), [
+  { message: "not implemented", level: "info" },
+]);
+assert.deepStrictEqual(await runHandler("secrets edit"), [
+  { message: "not implemented", level: "info" },
+]);
+
+// Unknown / empty -> usage warning
+assert.deepStrictEqual(await runHandler(""), [
+  { message: "Usage: /aura secrets {discover|edit}", level: "warning" },
+]);
+assert.deepStrictEqual(await runHandler("foo"), [
+  { message: "Usage: /aura secrets {discover|edit}", level: "warning" },
+]);
+assert.deepStrictEqual(await runHandler("secrets"), [
+  { message: "Usage: /aura secrets {discover|edit}", level: "warning" },
+]);
+assert.deepStrictEqual(await runHandler("secrets foo"), [
+  { message: "Usage: /aura secrets {discover|edit}", level: "warning" },
+]);
+
+console.log("handler dispatch tests passed");
