@@ -9,7 +9,6 @@ size: m
 blocked_by:
   - aura-client-interface
 ---
-
 ## End-to-end behavior
 
 `HeyApiAuraClient` implements `AuraClient` by delegating to the generated
@@ -22,8 +21,10 @@ keyring + constructs `HeyApiAuraClient` with DI.
 - `HeyApiAuraClient({ keyring: Keyring; baseUrl: string }) implements
   AuraClient`.
 - Each of the ~21 methods calls the matching generated SDK function (e.g.
-  `getArtifact` -> generated `getArtifact`), passing a `createClient({
-  baseUrl, auth: bearer })` configured with the keyring PAT.
+  `getArtifact` -> generated `getArtifact` from
+  `packages/shared/src/generated/sdk.gen.js`), passing a `createClient({
+  baseUrl, auth: bearer })` configured with the keyring PAT. (The generated
+  client was moved into `packages/shared/src/generated/` by slice 1.)
 - Domain-type <-> generated-type mapping happens inside `HeyApiAuraClient`
   (the `AuraClient` interface never sees generated types).
 - `createDefaultAuraClient()`:

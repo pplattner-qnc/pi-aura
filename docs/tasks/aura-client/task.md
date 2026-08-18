@@ -6,6 +6,7 @@ title: AuraClient interface + HeyApiAuraClient impl + createDefaultAuraClient() 
 map: aura-access-rewrite
 status: ready
 slices:
+- codegen-move-to-shared
 - aura-client-interface
 - hey-api-impl-and-factory
 ---
@@ -33,11 +34,16 @@ wrapper and without generated types leaking into my code.
 
 - `AuraClient` interface in `packages/shared/src/aura-client.ts` with
   ~21 methods (today's exercised verbs) and expressive domain types.
+- **The generated client moves into `packages/shared/src/generated/`**
+  (Wayfinder decision, resolving the open fog): the codegen setup
+  (`openapi.yaml`, `openapi-ts.config.ts`, `@hey-api/openapi-ts` devDep,
+  the `make codegen` target) moves from `scripts/` into `packages/shared/`.
+  `packages/shared` owns the generated client; scripts + the extension import
+  it via `@pi-aura/shared/aura-client`. The existing
+  `scripts/src/generated/` becomes dead after `call-site-migration` rewires
+  callers and is removed in `clients-cleanup`.
 - `HeyApiAuraClient` in the same package, delegating to
-  `scripts/src/generated/` (or a copy/move of the generated client into the
-  shared package — decide in slicing; the generated client is currently in
-  `scripts/src/generated/`, which is a workspace member, so the shared
-  package can import it via the workspace symlink or the scripts path).
+  `packages/shared/src/generated/` (now in the shared package itself).
 - `createDefaultAuraClient()` reads `settings.json` `aura` block (base URL
   via a new `instance`/`baseUrl` field) + builds the keyring via
   `createKeyring()` + reads the PAT via `getSecret({service:"aura",

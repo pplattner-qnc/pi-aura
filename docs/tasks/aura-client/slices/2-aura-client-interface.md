@@ -6,7 +6,8 @@ task: ../task.md
 mode: hitl
 status: todo
 size: m
-blocked_by: []
+blocked_by:
+  - codegen-move-to-shared
 ---
 
 ## End-to-end behavior
@@ -46,5 +47,10 @@ owns the vocabulary the scripts see; generated types do not appear in it.
 
 ## Constraints / dependencies
 
-- Blocked by `keyring-rewrite` (the factory needs `createKeyring` to exist;
-  the interface itself doesn't, but the package's coherence does).
+- Blocked by `codegen-move-to-shared` (the shared package must own the
+  generated tree + `@hey-api/client-fetch` dep so the interface's package
+  is coherent; the interface itself only declares domain types, but it
+  lives in the same package that now hosts the generated client).
+- The `AuraClient` interface has **no** generated-type imports (Q8) — this
+  slice declares the domain types from scratch, mapping to generated types
+  happens only in slice 3 (`hey-api-impl-and-factory`).
