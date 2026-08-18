@@ -4,7 +4,7 @@ slug: aura-command-skeleton
 title: /aura command skeleton + subcommand dispatch + completions
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: s
 blocked_by: []
 ---

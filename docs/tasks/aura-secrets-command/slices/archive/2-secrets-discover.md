@@ -4,7 +4,7 @@ slug: secrets-discover
 title: /aura secrets discover — extensible discovery sources + import offer
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: m
 blocked_by:
   - aura-command-skeleton

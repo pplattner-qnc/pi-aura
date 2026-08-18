@@ -4,7 +4,7 @@ slug: secrets-edit
 title: /aura secrets edit — interactive prefilled editor, save back
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: s
 blocked_by:
   - aura-command-skeleton

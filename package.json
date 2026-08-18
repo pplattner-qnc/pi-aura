@@ -5,7 +5,8 @@
   "keywords": ["pi-package"],
   "pi": {
     "extensions": [
-      "./extensions/aura-skill-instruction.ts"
+      "./extensions/aura-skill-instruction.ts",
+      "./extensions/aura-secrets.ts"
     ],
     "skills": ["./skills"],
     "subagents": {
