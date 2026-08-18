@@ -296,6 +296,11 @@ export interface Digest {
   corrections: DigestCorrection[]; // orchestrator fills after verification
   dev_links: TaskDevLinks[]; // related PRs/branches per queue task (dev-links feature)
   reviews_owed: DigestReviewOwed[]; // reviews assigned to me I haven't decided yet
+  /** Non-fatal degradation notices — features that were skipped or partially
+   * run because a dependency was unavailable (e.g. keyring read failed so the
+   * Teamwork Graph dev-links layer was skipped). Each entry is a short human-
+   * readable string. Empty when everything ran fully. */
+  warnings: string[];
   meta: {
     generated_at: string;
     raw_path: string;
@@ -339,6 +344,9 @@ export interface ArtifactVerification {
 export interface AuraReport {
   fetched_at: string;
   raw_path: string;
+  /** Non-fatal degradation notices (mirrors Digest.warnings) — features that
+   * were skipped because a dependency was unavailable. */
+  warnings: string[];
   artifacts_to_verify: ArtifactToVerify[];
   /** Full verification findings: original reported state + current state +
    * stale verdict per artifact. Produced by `fetch` so the orchestrator does

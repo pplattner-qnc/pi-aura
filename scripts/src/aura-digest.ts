@@ -388,8 +388,12 @@ async function fetchAction(): Promise<void> {
   // unavailable. Disabled when no auraDigest settings are present.
   const settings = loadSettings();
   const devLinks: TaskDevLinks[] = [];
-  if (settings.digest) {
-    const atlassian = await buildAtlassianClient(settings.mcpServers.atlassian);
+  const warnings: string[] = [];
+  if (!settings.digest) {
+    warnings.push("Dev-links feature disabled: no `aura.digest` block in settings.json (set it to enable Teamwork Graph + GitHub + Bitbucket PR/branch lookup).");
+  } else {
+    const { client: atlassian, warning: atlWarning } = await buildAtlassianClient(settings.mcpServers.atlassian);
+    if (atlWarning) warnings.push(atlWarning);
     try {
       // Fetch each queue task's detail, then also its children's details so we
       // collect subtask Jira keys too — PRs often live on a subtask's Jira key,
@@ -499,6 +503,7 @@ async function fetchAction(): Promise<void> {
     corrections: [],
     dev_links: devLinks,
     reviews_owed: reviewsOwed,
+    warnings,
     meta: {
       generated_at: fetchedAt,
       raw_path: rawPath,
@@ -508,6 +513,7 @@ async function fetchAction(): Promise<void> {
 
   const report: AuraReport = {
     fetched_at: fetchedAt,
+    warnings,
     raw_path: rawPath,
     artifacts_to_verify: artifactsToVerify,
     verifications,
@@ -852,6 +858,17 @@ function renderSuggestedActions(d: Digest): string {
   return lines.join("\n");
 }
 
+/** Render a warnings block at the bottom when any non-fatal degradation happened
+ * (e.g. Teamwork Graph skipped because the keyring read failed). Omitted when
+ * everything ran fully, so a clean digest has no warnings block. */
+function renderWarnings(d: Digest): string {
+  const warnings = d.warnings ?? [];
+  if (warnings.length === 0) return "";
+  const lines: string[] = ["### ⚠️ Warnings", ""];
+  for (const w of warnings) lines.push(`- ${w}`);
+  return lines.join("\n");
+}
+
 function stateEmoji(state: string): string {
   const s = state.toUpperCase();
   if (s === "OPEN") return "🟢";
@@ -915,6 +932,8 @@ function render(d: Digest): string {
   sections.push(renderCorrections(d), "");
   sections.push(renderDevLinks(d), "");
   sections.push(renderSuggestedActions(d), "");
+  const w = renderWarnings(d);
+  if (w) sections.push(w, "");
   return sections.join("\n") + "\n";
 }
 

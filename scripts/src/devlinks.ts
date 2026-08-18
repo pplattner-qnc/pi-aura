@@ -301,14 +301,17 @@ function addBbBranch(b: BbBranch, repo: string, branches: DevLinkBranch[]): void
   });
 }
 
-/** Try to build the Atlassian client; returns null if unavailable so the
- *  dev-links feature degrades (skips Teamwork Graph) instead of failing. */
-export async function buildAtlassianClient(serverName = "atlassian"): Promise<McpClient | null> {
+/** Try to build the Atlassian client. Returns { client, warning } where
+ *  `client` is null when unavailable (so the dev-links feature degrades by
+ *  skipping Teamwork Graph) and `warning` carries the reason — the caller
+ *  records it in digest.warnings so the degradation is visible, not silent. */
+export async function buildAtlassianClient(serverName = "atlassian"): Promise<{ client: McpClient | null; warning: string | null }> {
   try {
     const c = await atlassianClient(serverName);
     await c.connect();
-    return c;
-  } catch {
-    return null;
+    return { client: c, warning: null };
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    return { client: null, warning: `Teamwork Graph dev-links layer skipped: ${reason}` };
   }
 }

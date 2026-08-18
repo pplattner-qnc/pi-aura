@@ -17387,8 +17387,13 @@ async function readOAuthTokenFromKeyring(serverName) {
   }
   const service = "pi-mcp-adapter.oauth";
   const account = `sha256-${createHash("sha256").update(serverName, "utf8").digest("hex")}`;
-  const entry = new keyringEntryCtor(service, account);
-  const pwd = entry.getPassword();
+  let pwd;
+  try {
+    const entry = new keyringEntryCtor(service, account);
+    pwd = entry.getPassword();
+  } catch (e) {
+    throw new Error(`keyring read failed for ${serverName}: ${e instanceof Error ? e.message : String(e)}`);
+  }
   if (!pwd) return null;
   let parsed;
   try {
@@ -17402,7 +17407,12 @@ async function readOAuthTokenFromKeyring(serverName) {
     const parts = [];
     for (let i = 0; i < chunkCount; i++) {
       const chunkAccount = `${account}.chunk.${chunkDigest}.${i}`;
-      const chunk = new keyringEntryCtor(service, chunkAccount).getPassword();
+      let chunk;
+      try {
+        chunk = new keyringEntryCtor(service, chunkAccount).getPassword();
+      } catch {
+        return null;
+      }
       if (!chunk) return null;
       parts.push(chunk);
     }
@@ -17686,9 +17696,10 @@ async function buildAtlassianClient(serverName = "atlassian") {
   try {
     const c = await atlassianClient(serverName);
     await c.connect();
-    return c;
-  } catch {
-    return null;
+    return { client: c, warning: null };
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    return { client: null, warning: `Teamwork Graph dev-links layer skipped: ${reason}` };
   }
 }
 
@@ -17958,8 +17969,12 @@ async function fetchAction() {
   const verifications = await verifyArtifacts(client, artifactsToVerify);
   const settings = loadSettings();
   const devLinks = [];
-  if (settings.digest) {
-    const atlassian = await buildAtlassianClient(settings.mcpServers.atlassian);
+  const warnings = [];
+  if (!settings.digest) {
+    warnings.push("Dev-links feature disabled: no `aura.digest` block in settings.json (set it to enable Teamwork Graph + GitHub + Bitbucket PR/branch lookup).");
+  } else {
+    const { client: atlassian, warning: atlWarning } = await buildAtlassianClient(settings.mcpServers.atlassian);
+    if (atlWarning) warnings.push(atlWarning);
     try {
       const taskDetails = await Promise.all(
         queueRows.map(
@@ -18053,6 +18068,7 @@ async function fetchAction() {
     corrections: [],
     dev_links: devLinks,
     reviews_owed: reviewsOwed,
+    warnings,
     meta: {
       generated_at: fetchedAt,
       raw_path: rawPath,
@@ -18061,6 +18077,7 @@ async function fetchAction() {
   };
   const report = {
     fetched_at: fetchedAt,
+    warnings,
     raw_path: rawPath,
     artifacts_to_verify: artifactsToVerify,
     verifications,
@@ -18347,6 +18364,13 @@ function renderSuggestedActions(d) {
   d.suggested_actions.forEach((a, i) => lines.push(`${i + 1}. ${a}`));
   return lines.join("\n");
 }
+function renderWarnings(d) {
+  const warnings = d.warnings ?? [];
+  if (warnings.length === 0) return "";
+  const lines = ["### \u26A0\uFE0F Warnings", ""];
+  for (const w of warnings) lines.push(`- ${w}`);
+  return lines.join("\n");
+}
 function stateEmoji(state) {
   const s = state.toUpperCase();
   if (s === "OPEN") return "\u{1F7E2}";
@@ -18407,6 +18431,8 @@ function render(d) {
   sections.push(renderCorrections(d), "");
   sections.push(renderDevLinks(d), "");
   sections.push(renderSuggestedActions(d), "");
+  const w = renderWarnings(d);
+  if (w) sections.push(w, "");
   return sections.join("\n") + "\n";
 }
 function renderAction() {

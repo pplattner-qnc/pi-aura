@@ -88,9 +88,20 @@ export async function readOAuthTokenFromKeyring(serverName: string): Promise<str
   }
   const service = "pi-mcp-adapter.oauth";
   const account = `sha256-${createHash("sha256").update(serverName, "utf8").digest("hex")}`;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const entry = new keyringEntryCtor(service, account) as any;
-  const pwd: string | null = entry.getPassword();
+  // getPassword() can throw on a revoked keyring or D-Bus error; wrap so a
+  // runtime keyring failure degrades to null (skipping TWG) rather than
+  // propagating. The caller (buildAtlassianClient) turns null into a silent
+  // skip, so we log the reason to stderr for diagnosability.
+  let pwd: string | null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const entry = new keyringEntryCtor(service, account) as any;
+    pwd = entry.getPassword();
+  } catch (e) {
+    // Re-throw with a clear message; buildAtlassianClient catches and records
+    // it as a digest warning so the caller sees the degradation reason.
+    throw new Error(`keyring read failed for ${serverName}: ${e instanceof Error ? e.message : String(e)}`);
+  }
   if (!pwd) return null;
   let parsed: Record<string, unknown>;
   try {
@@ -105,8 +116,13 @@ export async function readOAuthTokenFromKeyring(serverName: string): Promise<str
     const parts: string[] = [];
     for (let i = 0; i < chunkCount; i++) {
       const chunkAccount = `${account}.chunk.${chunkDigest}.${i}`;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const chunk: string | null = new keyringEntryCtor(service, chunkAccount).getPassword();
+      let chunk: string | null;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        chunk = new keyringEntryCtor(service, chunkAccount).getPassword();
+      } catch {
+        return null;
+      }
       if (!chunk) return null;
       parts.push(chunk);
     }
