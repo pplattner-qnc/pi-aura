@@ -28,7 +28,7 @@ import type {
   DevLinkPullRequest,
   TaskDevLinks,
 } from "./types.js";
-import type { AuraDigestSettings } from "./settings.js";
+import type { AuraDigestSettings, McpServerNames } from "./settings.js";
 
 // --- Atlassian Teamwork Graph shapes (subset) -----------------------------
 
@@ -139,6 +139,7 @@ function taskText(task: AuraTaskDetail, jiraSummaries: string[]): string {
 export async function fetchTaskDevLinks(
   task: AuraTaskDetail,
   settings: AuraDigestSettings,
+  mcpServers: McpServerNames,
   atlassian: McpClient | null,
 ): Promise<TaskDevLinks> {
   const taskKey = task.human_key;
@@ -239,8 +240,8 @@ export async function fetchTaskDevLinks(
   const tryRepo = async (repo: string): Promise<boolean> => {
     try {
       const [repoPrs, repoBranches] = await Promise.all([
-        searchRepoPRs(ws, repo, prQ),
-        searchRepoBranches(ws, repo, brQ),
+        searchRepoPRs(ws, repo, prQ, mcpServers.atlassianBitbucket),
+        searchRepoBranches(ws, repo, brQ, mcpServers.atlassianBitbucket),
       ]);
       for (const p of repoPrs) addBbPr(p, repo, prs, seenPrUrls);
       for (const b of repoBranches) addBbBranch(b, repo, branches);
@@ -259,7 +260,7 @@ export async function fetchTaskDevLinks(
   // 3b. If nothing found, similarity fallback over the whole workspace.
   if (!found) {
     try {
-      const allRepos = await listWorkspaceRepos(ws);
+      const allRepos = await listWorkspaceRepos(ws, mcpServers.atlassianBitbucket);
       const jiraSummaries = (task.jira_issues ?? []).map((j) => j.summary ?? "");
       const candidates = topReposBySimilarity(allRepos, taskText(task, jiraSummaries), 5)
         .filter((r) => !preferred.includes(r));
@@ -302,9 +303,9 @@ function addBbBranch(b: BbBranch, repo: string, branches: DevLinkBranch[]): void
 
 /** Try to build the Atlassian client; returns null if unavailable so the
  *  dev-links feature degrades (skips Teamwork Graph) instead of failing. */
-export async function buildAtlassianClient(): Promise<McpClient | null> {
+export async function buildAtlassianClient(serverName = "atlassian"): Promise<McpClient | null> {
   try {
-    const c = await atlassianClient();
+    const c = await atlassianClient(serverName);
     await c.connect();
     return c;
   } catch {

@@ -14,8 +14,9 @@
 #   make watch      rebuild on source change (assumes deps are installed)
 
 SCRIPTS_DIR := scripts
-SKILL_DIST  := skills/aura-digest/dist
-ENTRY_OUT   := $(SKILL_DIST)/aura.mjs
+DIGEST_DIST := skills/aura-digest/dist
+AURA_DIST    := skills/aura/dist
+ENTRY_OUTS   := $(DIGEST_DIST)/aura-digest.mjs $(AURA_DIST)/aura.mjs
 
 .PHONY: all install typecheck build clean watch
 
@@ -29,13 +30,15 @@ typecheck:
 
 build: typecheck
 	cd $(SCRIPTS_DIR) && npm run build
-	@echo "verifying $(ENTRY_OUT) exists…"
-	@test -f $(ENTRY_OUT) || { echo "ERROR: $(ENTRY_OUT) was not produced"; exit 1; }
-	@echo "built $(ENTRY_OUT)"
+	@for f in $(ENTRY_OUTS); do \
+	  echo "verifying $$f exists…"; \
+	  test -f $$f || { echo "ERROR: $$f was not produced"; exit 1; }; \
+	done
+	@echo "built $(ENTRY_OUTS)"
 
 watch:
 	cd $(SCRIPTS_DIR) && npm run build -- --watch
 
 clean:
 	rm -rf $(SCRIPTS_DIR)/node_modules $(SCRIPTS_DIR)/package-lock.json
-	rm -rf $(SKILL_DIST)
+	rm -rf $(DIGEST_DIST) $(AURA_DIST)

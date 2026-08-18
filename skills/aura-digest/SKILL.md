@@ -41,7 +41,7 @@ between `fetch` and `render`.
 ## Prerequisites
 
 The script source lives in `scripts/src/` (shared with future scripts) and is
-bundled by esbuild into `skills/aura-digest/dist/aura.mjs`. The compiled `.mjs`
+bundled by esbuild into `skills/aura-digest/dist/aura-digest.mjs`. The compiled `.mjs`
 file is committed, so end users of the pi package don't need to build — but in
 development, rebuild after editing `scripts/src/`:
 
@@ -61,7 +61,7 @@ URL + bearer token. The token is never baked into the bundle.
 declared in the root `package.json` `dependencies` so pi's `npm install` (run
 automatically after cloning the package) places the platform-specific native
 binding in the repo-root `node_modules/`, where Node resolves it from
-`dist/aura.mjs` via walk-up. The import is dynamic, so if the binding is ever
+`dist/aura-digest.mjs` via walk-up. The import is dynamic, so if the binding is ever
 missing or unsupported on a platform, the Teamwork Graph layer silently skips
 (dev-links still returns GitHub + Bitbucket results) rather than crashing.
 Users who never authenticate the `atlassian` MCP server see the same graceful
@@ -72,7 +72,7 @@ skip — no setup skill is required.
 ## Step 1: Fetch
 
 ```bash
-OUT="$(node <skill-dir>/dist/aura.mjs fetch 2>/dev/null | sed -n 's/^output directory: //p')"
+OUT="$(node <skill-dir>/dist/aura-digest.mjs fetch 2>/dev/null | sed -n 's/^output directory: //p')"
 ```
 
 `fetch` creates its own random temp directory (`/tmp/aura-morning-<hex>/`),
@@ -128,7 +128,7 @@ Write the corrected `digest.json` back to `$OUT/digest.json` (or a
 ### Diff against last digest (optional, for "what changed")
 
 ```bash
-node <skill-dir>/dist/aura.mjs diff "$OUT"   # JSON to stdout
+node <skill-dir>/dist/aura-digest.mjs diff "$OUT"   # JSON to stdout
 ```
 
 **Run `diff` *after* augmenting**, not before. It compares the current
@@ -148,8 +148,8 @@ use it, refine the `summary` accordingly.
 ## Step 3: Render
 
 ```bash
-node <skill-dir>/dist/aura.mjs render "$OUT"           # markdown to stdout
-node <skill-dir>/dist/aura.mjs render "$OUT" out.md    # markdown to a file
+node <skill-dir>/dist/aura-digest.mjs render "$OUT"           # markdown to stdout
+node <skill-dir>/dist/aura-digest.mjs render "$OUT" out.md    # markdown to a file
 ```
 
 `render` reads `<dir>/digest.json` and renders the final digest markdown. Pass
@@ -163,11 +163,11 @@ Present the rendered digest. Then:
 - **Save the presented digest** as the last-digest store (so the next run can
   diff against it):
   ```bash
-  node <skill-dir>/dist/aura.mjs save "$OUT"
+  node <skill-dir>/dist/aura-digest.mjs save "$OUT"
   ```
 - **Clean up the temp directory** — it was only transport:
   ```bash
-  node <skill-dir>/dist/aura.mjs cleanup "$OUT"
+  node <skill-dir>/dist/aura-digest.mjs cleanup "$OUT"
   ```
 
 `save` writes `~/.pi/aura/last-digest.json` with the digest, `presented_at`
@@ -188,7 +188,7 @@ skill instead.
 
 Key conventions the `aura` skill enforces (so you don't silently miss them):
 - Set `is_ai_generated: true` on AI-authored comments.
-- Use the file-based `mcpx` workflow for artifact edits > ~500 chars.
+- Use the file-based `aura.mjs` workflow for artifact edits > ~500 chars.
 - Prefer `mcp*` tool variants (`mcpGetArtifact`, `mcpUnifiedSearch`, …).
 - Log activity with `recordTaskProgress` when you act on a task.
 
@@ -238,11 +238,11 @@ The versioned shape passed from fetch → orchestrator → render. See
 Run from the repo root via `make`:
 
 - `make typecheck` — TypeScript type-check (no emit)
-- `make build` — esbuild bundle to `skills/aura-digest/dist/aura.mjs`
+- `make build` — esbuild bundle to `skills/aura-digest/dist/aura-digest.mjs`
 - `make watch` — rebuild on change
 - `make clean` — remove `scripts/node_modules` + built `dist/`
 - Test the renderer with a saved fixture:
-  `node skills/aura-digest/dist/aura.mjs render <dir-with-digest.json>`
+  `node skills/aura-digest/dist/aura-digest.mjs render <dir-with-digest.json>`
 
 The script is plain ESM. `fetch` uses the `@modelcontextprotocol/sdk`
 `StreamableHTTPClientTransport` with the bearer token from `mcp.json` passed

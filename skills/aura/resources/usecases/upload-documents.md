@@ -5,30 +5,34 @@ and searched via unified search. Uploaded files are **parsed and indexed** —
 the stored representation is extracted text organized into pages, not the
 original binary.
 
-> **⚠️ Always use the mcpx CLI for uploads and retrievals.** The MCP tools
-> (`mcpCreateUploadDocument`, `mcpGetUploadDocument`) require the full file
-> content as a base64 tool argument or return it as a tool result — both
-> pollute the LLM context window with potentially large binary content.
-> The CLI keeps file content on disk and out of the agent's context.
+> **⚠️ Always use the `aura` skill's `aura.mjs upload` subcommands for uploads
+> and retrievals.** The MCP tools (`mcpCreateUploadDocument`,
+> `mcpGetUploadDocument`) require the full file content as a base64 tool
+> argument or return it as a tool result — both pollute the LLM context window
+> with potentially large binary content. The script keeps file content on disk
+> and out of the agent's context.
 
 ## Uploading a file
 
 ```bash
-mcpx exec aura-mcp-dev mcpCreateUploadDocument -- \
-  --filename "report.txt" \
-  --content_base64 "$(base64 -w0 /path/to/file)" \
-  --mime_type "text/plain"
+node skills/aura/dist/aura.mjs upload create --file /path/to/report.txt --mime text/plain
 ```
 
+The script base64-encodes the file on disk and uploads it; the binary never
+enters the LLM context. Prints the new upload `id`.
+
 - Maximum 10 MB per request
-- Content must be base64-encoded
 - The server extracts text and generates a summary automatically
 - Ingest status transitions to `READY` when processing completes
 
 ## Retrieving an upload
 
 ```bash
-mcpx exec aura-mcp-dev mcpGetUploadDocument -- --id "<upload-uuid>"
+# Small parsed text -> printed to stdout
+node skills/aura/dist/aura.mjs upload get <upload-uuid>
+
+# Large parsed text -> written to a file (or a workdir if --out omitted and large)
+node skills/aura/dist/aura.mjs upload get <upload-uuid> --out /tmp/upload-parsed.md
 ```
 
 Returns the parsed document: filename, mime type, byte size, page count,
@@ -52,7 +56,7 @@ mcpUnifiedSearch({ query: "...", source_types: ["UPLOAD_DOCUMENT"] })
 ## Forbidden MCP tools
 
 The following MCP tools exist but **must not be called directly** — use the
-mcpx CLI equivalents shown above instead:
+`aura.mjs upload` subcommands shown above instead:
 
 | Tool | Why forbidden |
 |---|---|

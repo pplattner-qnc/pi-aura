@@ -31,18 +31,16 @@ tool result — three problems occur:
    The file on disk is the ground truth — the LLM's re-generation of it is
    an approximation.
 
-The file-based workflow via `mcpx` avoids all three: content travels from
-disk to server without entering the LLM context as a tool argument.
+The file-based workflow via the `aura` skill's `aura.mjs` script avoids all
+three: content travels from disk to server without entering the LLM context
+as a tool argument. The script owns a **workdir** per round-trip (a fresh
+`/tmp/aura-artifact-<hex>/` dir pairing the artifact id with its body file), so
+id↔body mismatch is impossible and the dir is removed on upload — no stale
+files to forget, no manual delete step.
 
 **Rule of thumb:** if the body or the edit is more than a short paragraph
 (~500 characters), use the file-based workflow. Below that threshold, the
 overhead of the file round-trip isn't worth it.
-
-**Local file hygiene:** a local file is a *temporary transport*, not a cache.
-After every successful upload, delete the local copy. When you need to edit
-again, re-download a fresh copy — never edit a stale local file, because it
-can hide changes that were never uploaded. This keeps `/tmp` clean and
-guarantees you always work from the server's current version.
 
 ## Creating artifacts
 
@@ -57,7 +55,7 @@ mcpCreateArtifact({
 })
 ```
 
-### Large content (> ~500 chars) — file-based via mcpx
+### Large content (> ~500 chars) — file-based via `aura.mjs`
 
 **Step 1:** Write the content to a local file using the `write` tool.
 
@@ -65,37 +63,18 @@ mcpCreateArtifact({
 write({ path: "/tmp/artifact-body.md", content: "# Full document..." })
 ```
 
-**Step 2:** Create the artifact with a minimal seed body via MCP.
+**Step 2:** Create the artifact, uploading the body from the file. The script
+removes the body file on success.
 
-```
-mcpCreateArtifact({
-  title: "Authentication Redesign Plan",
-  body: "# Authentication Redesign Plan",
-  kind: "PLAN",
-  summary: "Plan for redesigning the auth system"
-})
+```bash
+node skills/aura/dist/aura.mjs artifact create \
+  --title "Authentication Redesign Plan" \
+  --kind PLAN \
+  --body-file /tmp/artifact-body.md \
+  --summary "Initial full version"
 ```
 
 Note the returned artifact `id`.
-
-**Step 3:** Upload the full body via mcpx.
-
-```bash
-mcpx exec aura-mcp-dev mcpUpdateArtifact -- \
-  --id "<artifact-uuid>" \
-  --mode whole \
-  --body "$(cat /tmp/artifact-body.md)" \
-  --summary "Initial full version" \
-  --confirm_full_replace true
-```
-
-**Step 4:** Delete the local file. Once the upload succeeds the local copy is
-garbage — remove it so it can't accumulate or be mistaken for the source of
-truth.
-
-```bash
-rm /tmp/artifact-body.md
-```
 
 ## Updating artifacts
 
@@ -111,43 +90,33 @@ mcpUpdateArtifact({
 })
 ```
 
-### Large edits (> ~500 chars changed) — file-based via mcpx
+### Large edits (> ~500 chars changed) — file-based via `aura.mjs`
 
-**Step 1:** Download the current version.
-
-```bash
-mcpx exec aura-mcp-dev getArtifact -- --id "<artifact-uuid>" \
-  | jq -r '.content[0].text.body' > /tmp/artifact-current.md
-```
-
-**Step 2:** Edit the file locally with `read` and `edit`.
-
-```
-read({ path: "/tmp/artifact-current.md" })
-edit({ path: "/tmp/artifact-current.md", edits: [...] })
-```
-
-**Step 3:** Upload the edited file.
+**Step 1:** Download the current version into a fresh workdir. The script
+prints the workdir path (holding `body.md` + `meta.json` with the id + version).
 
 ```bash
-mcpx exec aura-mcp-dev mcpUpdateArtifact -- \
-  --id "<artifact-uuid>" \
-  --mode whole \
-  --body "$(cat /tmp/artifact-current.md)" \
-  --summary "Description of changes" \
-  --confirm_full_replace true
+WD=$(node skills/aura/dist/aura.mjs artifact get <artifact-uuid> | sed -n 's/^workdir: //p' | sed 's|/$||')
 ```
 
-**Step 4:** Delete the local file. Once the upload succeeds, remove the local
-copy so no unuploaded changes can linger on disk.
+**Step 2:** Edit the body file locally with `read` and `edit` (only diffs
+flow through context).
+
+```
+read({ path: "$WD/body.md" })
+edit({ path: "$WD/body.md", edits: [...] })
+```
+
+**Step 3:** Upload the edited body from the workdir. The script reads the id
+from `meta.json` + the body from `body.md`, uploads, and removes the workdir.
 
 ```bash
-rm /tmp/artifact-current.md
+node skills/aura/dist/aura.mjs artifact update "$WD" --summary "Description of changes"
 ```
 
-**Editing again?** Re-run Step 1 to download a fresh copy — never edit a stale
-local file left over from a previous session, since it may hide changes that
-were never uploaded. Re-fetch, edit, upload, then delete again.
+The workdir is gone after upload — no stale local file can linger. To edit
+again, re-run Step 1 (a fresh fetch guarantees you start from the server's
+current version).
 
 ## Direct MCP tools (compact reference)
 

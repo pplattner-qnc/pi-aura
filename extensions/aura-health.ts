@@ -1,9 +1,11 @@
 /**
  * Aura Health Check Extension
  *
- * Registers /aura-skills-health — a diagnostic command that checks whether
- * the Aura MCP is configured in the pi-mcp-adapter and whether mcpx is
- * installed and configured.
+ * Registers /aura-skills-health — a diagnostic command that checks whether the
+ * Aura MCP is configured in the pi-mcp-adapter and reachable.
+ *
+ * (The mcpx CLI checks were removed when the file-based artifact/wiki workflows
+ * moved to the `aura` skill's own `aura.mjs` script — mcpx is no longer used.)
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -32,15 +34,15 @@ const MCP_CONFIG_PATH = join(homedir(), ".config", "mcp", "mcp.json");
 
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("aura-skills-health", {
-    description: "Check Aura integration health — MCP adapter config, mcpx CLI, and connectivity",
+    description: "Check Aura integration health — MCP adapter config and Aura connectivity",
     handler: async (_args, ctx) => {
       const results: CheckResult[] = [];
 
-      // 1. Pi MCP adapter — aura-mcp-dev in config
+      // 1. Pi MCP adapter — aura server present
       results.push(
         check(
           "Pi MCP adapter configured",
-          `Add aura-mcp-dev to ${MCP_CONFIG_PATH}:\n` +
+          `Add the Aura server to ${MCP_CONFIG_PATH}:\n` +
             `  {\n` +
             `    "mcpServers": {\n` +
             `      "aura-mcp-dev": {\n` +
@@ -76,69 +78,30 @@ export default function (pi: ExtensionAPI) {
         ),
       );
 
-      // 3. mcpx installed
+      // 3. Aura reachable — a direct MCP ping via the pi-mcp-adapter tool
       results.push(
         check(
-          "mcpx installed",
-          "Install mcpx: https://github.com/arcadeai-labs/mcpx",
-          () => {
-            const path = execSync("which mcpx", { encoding: "utf-8" }).trim();
-            const version = execSync("mcpx --version", { encoding: "utf-8" }).trim();
-            return `${version} at ${path}`;
-          },
-        ),
-      );
-
-      // 4. mcpx — aura configured
-      results.push(
-        check(
-          "mcpx configured",
-          'Add the Aura server to mcpx:\n  mcpx add aura-mcp-dev --url "https://aura.dev-anwalt.de/mcp"',
-          () => {
-            const out = execSync("mcpx servers --json 2>/dev/null || mcpx servers 2>&1", {
-              encoding: "utf-8",
-            });
-            const servers = JSON.parse(out);
-            const aura = servers.find(
-              (s: { name?: string }) => s.name === "aura-mcp-dev",
-            );
-            if (!aura) throw new Error("aura-mcp-dev not in mcpx server list");
-            return `url: ${aura.url}`;
-          },
-        ),
-      );
-
-      // 5. mcpx — reachable
-      results.push(
-        check(
-          "mcpx reachable",
+          "Aura reachable via MCP",
           "Check that the Aura server is up and the URL is correct.\n" +
-            "  Verify: mcpx ping aura-mcp-dev\n" +
-            "  If the URL changed, update with: mcpx remove aura-mcp-dev && mcpx add aura-mcp-dev --url <new-url>",
+            "  Verify with: pi aura-skills-health (re-run) or call aura-mcp-dev getBoardSummary.",
           () => {
-            const out = execSync("mcpx ping aura-mcp-dev 2>&1", {
-              encoding: "utf-8",
-              timeout: 15000,
-            });
-            return out.trim();
-          },
-        ),
-      );
-
-      // 6. mcpx — can execute
-      results.push(
-        check(
-          "mcpx can execute",
-          "Check authentication. mcpx may need its own auth token.\n" +
-            "  Run: mcpx auth aura-mcp-dev\n" +
-            "  Or verify the server accepts requests: mcpx exec aura-mcp-dev getBoardSummary",
-          () => {
+            // We can't easily drive the MCP adapter from here without the
+            // extension API exposing it, so we do a lightweight HTTP reachability
+            // check on the configured URL.
+            const raw = JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8"));
+            const server = raw?.mcpServers?.["aura-mcp-dev"];
+            if (!server?.url) throw new Error("No URL to check");
+            // A bare fetch isn't available in all extension runtimes; use curl.
             const out = execSync(
-              'mcpx exec aura-mcp-dev getBoardSummary 2>&1 | head -1',
-              { encoding: "utf-8", timeout: 15000 },
+              `curl -s -o /dev/null -w "%{http_code}" --max-time 10 -X POST "${server.url}" ` +
+              `-H "Authorization: Bearer ${server.bearerToken}" ` +
+              `-H "Content-Type: application/json" ` +
+              `-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"health","version":"1"}}}'`,
+              { encoding: "utf-8" },
             );
-            if (!out.includes("{")) throw new Error("Unexpected response");
-            return "getBoardSummary returned data";
+            const code = out.trim();
+            if (code === "200" || code === "202") return `MCP initialize returned HTTP ${code}`;
+            throw new Error(`MCP initialize returned HTTP ${code}`);
           },
         ),
       );

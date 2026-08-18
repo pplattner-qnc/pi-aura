@@ -26,19 +26,25 @@ const baseConfig = {
   },
 };
 
+// One entry per skill — each bundle only imports what that skill needs, so a
+// skill can't accidentally reach another skill's subcommands.
 const entries = [
   {
+    entryPoints: ["src/aura-digest.ts"],
+    // The `aura-digest` skill's morning-routine script.
+    outfile: "../skills/aura-digest/dist/aura-digest.mjs",
+  },
+  {
     entryPoints: ["src/aura.ts"],
-    // Output to the skill's dist/ so the SKILL.md commands resolve. The
-    // Makefile copies these committed .mjs files; end users don't build.
-    outfile: "../skills/aura-digest/dist/aura.mjs",
+    // The `aura` skill's artifact + wiki file-based-workflow script.
+    outfile: "../skills/aura/dist/aura.mjs",
   },
 ];
 
 if (watch) {
-  await context({ ...baseConfig, ...entries[0] }).then((ctx) => ctx.watch());
+  await Promise.all(entries.map((e) => context({ ...baseConfig, ...e }).then((ctx) => ctx.watch())));
   console.log("watching…");
 } else {
-  await build({ ...baseConfig, ...entries[0] });
-  console.log(`built ${entries[0].outfile}`);
+  await Promise.all(entries.map((e) => build({ ...baseConfig, ...e })));
+  for (const e of entries) console.log(`built ${e.outfile}`);
 }

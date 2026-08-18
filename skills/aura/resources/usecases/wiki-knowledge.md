@@ -15,11 +15,11 @@ mcpWikiSearch({ query: "deployment pipeline", limit: 10 })
 mcpWikiSearch({ query: "deployment pipeline", space_slug: "engineering", limit: 5 })
 ```
 
-Via mcpx CLI:
+Via `aura.mjs` (inline results — search returns small summaries, safe on stdout):
 
 ```bash
-mcpx exec aura-mcp-dev mcpWikiSearch -- \
-  --query "capacity management" --limit 5
+node skills/aura/dist/aura.mjs wiki search "capacity management" --limit 5
+node skills/aura/dist/aura.mjs wiki search "deployment pipeline" --space engineering --limit 5
 ```
 
 Hybrid search combining literal (German full-text + trigram fallback) and
@@ -28,13 +28,11 @@ readable spaces.
 
 ### Fetch a document by path
 
-Via mcpx CLI (preferred — keeps the body out of LLM context):
+Via `aura.mjs` (workdir model — keeps the body out of LLM context):
 
 ```bash
-mcpx exec aura-mcp-dev getKnowledgeNodeByPath -- \
-  --slug "knowledge-hub" \
-  --path "prozesse/how-we-work-in-aura-a-practical-guide" \
-  | jq -r '.content[0].text.body' > /tmp/wiki-doc.md
+WD=$(node skills/aura/dist/aura.mjs wiki get --slug "knowledge-hub/prozesse/how-we-work-in-aura-a-practical-guide" | sed -n 's/^workdir: //p' | sed 's|/$||')
+# body is at $WD/body.md; id/version at $WD/meta.json
 ```
 
 Via MCP (only for short documents where context cost is negligible):
@@ -55,10 +53,10 @@ getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "prozesse/how-we-work-in-a
 | Get specific version | `getKnowledgeNodeVersion` | Historical version |
 | List versions | `listKnowledgeNodeVersions` | Version history |
 
-Via mcpx CLI:
+Via `aura.mjs`:
 
 ```bash
-mcpx exec aura-mcp-dev getKnowledgeTree -- --slug "knowledge-hub"
+node skills/aura/dist/aura.mjs wiki tree --slug "knowledge-hub"
 ```
 
 ### Cross-entity search
@@ -78,39 +76,27 @@ knowledge spaces.
 > others — unapproved changes can break links, confuse readers, or
 > overwrite someone else's work.
 >
-> **Local file hygiene:** a local file is a *temporary transport*, not a cache.
-> After every successful upload, delete the local copy. When you need to edit
-> again, re-download a fresh copy — never edit a stale local file, because it
-> can hide changes that were never uploaded. This keeps `/tmp` clean and
-> guarantees you always work from the server's current version.
+> **Local file hygiene:** the `aura.mjs` workdir model enforces this for you —
+> each `wiki get` creates a fresh `/tmp/aura-wiki-<hex>/` dir pairing the node
+> id with the body file, and `wiki save` removes it on upload. No stale files
+> can linger; to edit again, re-fetch (a fresh workdir guarantees you start
+> from the server's current version).
 
 ### Create a document
 
-**Via mcpx CLI (preferred for large bodies):**
+**Via `aura.mjs` (workdir model for large bodies):**
 
 ```bash
-# Step 1: Create the node
-mcpx exec aura-mcp-dev createKnowledgeNode -- \
-  --space_slug "engineering" \
-  --kind "DOCUMENT" \
-  --title "Authentication Overview" \
-  --slug "auth-overview"
+# Step 1: Create the node (prints the new node uuid)
+node skills/aura/dist/aura.mjs wiki create \
+  --space engineering --title "Authentication Overview" --slug auth-overview
 
-# Step 2: Write the body to a local file, then upload
-write({ path: "/tmp/wiki-body.md", content: "# Authentication Overview\n\n..." })
-
-mcpx exec aura-mcp-dev saveKnowledgeNodeBody -- \
-  --uuid "<node-uuid>" \
-  --body "$(cat /tmp/wiki-body.md)" \
-  --summary "Initial version"
-
-# Step 3: Delete the local file after a successful upload
-rm /tmp/wiki-body.md
+# Step 2: Write the body to a local file, then fetch-into-workdir + edit + save
+# (use the returned uuid to fetch a workdir, write body.md, then save)
+WD=$(node skills/aura/dist/aura.mjs wiki get --uuid "<node-uuid>" | sed -n 's/^workdir: //p' | sed 's|/$||')
+write({ path: "$WD/body.md", content: "# Authentication Overview\n\n..." })
+node skills/aura/dist/aura.mjs wiki save "$WD" --summary "Initial version"
 ```
-
-**Editing again?** Re-download a fresh copy — never edit a stale local file
-left over from a previous session, since it may hide changes that were never
-uploaded. Re-fetch, edit, upload, then delete again.
 
 **Via MCP (only for small bodies):**
 
@@ -144,31 +130,22 @@ createKnowledgeNode({
 
 ### Update a document body
 
-**Via mcpx CLI (preferred for large bodies):**
+**Via `aura.mjs` (workdir model for large bodies):**
 
 ```bash
-# Step 1: Download current version to a local file
-mcpx exec aura-mcp-dev getKnowledgeNode -- \
-  --uuid "<node-uuid>" \
-  | jq -r '.content[0].text.body' > /tmp/wiki-current.md
+# Step 1: Download current version into a fresh workdir
+WD=$(node skills/aura/dist/aura.mjs wiki get --uuid "<node-uuid>" | sed -n 's/^workdir: //p' | sed 's|/$||')
 
-# Step 2: Edit locally
-read({ path: "/tmp/wiki-current.md" })
-edit({ path: "/tmp/wiki-current.md", edits: [...] })
+# Step 2: Edit the body locally (only diffs flow through context)
+read({ path: "$WD/body.md" })
+edit({ path: "$WD/body.md", edits: [...] })
 
-# Step 3: Upload edited file
-mcpx exec aura-mcp-dev saveKnowledgeNodeBody -- \
-  --uuid "<node-uuid>" \
-  --body "$(cat /tmp/wiki-current.md)" \
-  --summary "Description of changes"
-
-# Step 4: Delete the local file after a successful upload
-rm /tmp/wiki-current.md
+# Step 3: Upload; the script reads id+body from the workdir and removes it
+node skills/aura/dist/aura.mjs wiki save "$WD" --summary "Description of changes"
 ```
 
-**Editing again?** Re-run Step 1 to download a fresh copy — never edit a stale
-local file left over from a previous session, since it may hide changes that
-were never uploaded. Re-fetch, edit, upload, then delete again.
+The workdir is gone after upload — no stale local file can linger. To edit
+again, re-fetch (Step 1) for a fresh copy.
 
 **Via MCP (only for small edits):**
 

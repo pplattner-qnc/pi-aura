@@ -122,25 +122,27 @@ export async function readOAuthTokenFromKeyring(serverName: string): Promise<str
 }
 
 /** Build an McpClient for the Atlassian MCP server, authenticating with the
- * OAuth access token pi-mcp-adapter stored in the keyring. Throws if the user
- * hasn't authenticated the `atlassian` server via pi yet, or if the keyring
- * native binding is unavailable on this platform. */
-export async function atlassianClient(): Promise<McpClient> {
+ * OAuth access token pi-mcp-adapter stored in the keyring. `serverName` is
+ * the Atlassian server name in mcp.json (default "atlassian", configurable
+ * via settings.aura.mcpServers.atlassian). Throws if the user hasn't
+ * authenticated that server via pi yet, or if the keyring native binding is
+ * unavailable on this platform. */
+export async function atlassianClient(serverName = "atlassian"): Promise<McpClient> {
   const config = loadMcpConfig();
-  const server = config.mcpServers["atlassian"];
+  const server = config.mcpServers[serverName];
   if (!server || server.type !== "http" || !server.url) {
     throw new Error(
-      'Atlassian MCP server not found or not http in mcp.json. Add "atlassian" with type=http to use dev-links.'
+      `Atlassian MCP server "${serverName}" not found or not http in mcp.json. Add it with type=http to use dev-links.`
     );
   }
-  const token = await readOAuthTokenFromKeyring("atlassian");
+  const token = await readOAuthTokenFromKeyring(serverName);
   if (!token) {
     throw new Error(
-      "No Atlassian OAuth token found in the OS keyring. Run `/mcp reconnect atlassian` in pi to authenticate, then retry."
+      `No Atlassian OAuth token found in the OS keyring for "${serverName}". Run \`/mcp reconnect ${serverName}\` in pi to authenticate, then retry.`
     );
   }
   return new McpClient({
-    serverName: "atlassian",
+    serverName,
     url: server.url,
     authHeader: `Bearer ${token}`,
     clientName: "aura-digest-script",

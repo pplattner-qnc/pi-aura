@@ -1,1110 +1,461 @@
-// aura.ts — Aura digest script (fetch / render / cleanup / save / diff / last).
+// aura.ts — the `aura` skill's CLI for artifact + wiki file-based workflows.
+//
+// Replaces the old `mcpx exec` shell-outs with a script that owns the lifecycle
+// of the local temp files (the "workdir" model): a fresh dir per round-trip
+// pairs the entity id with its body file, so id↔body mismatch is impossible and
+// the dir is removed on upload — no stale files to forget.
 //
 // Usage:
-//   node dist/aura.mjs fetch                 Create a random /tmp/aura-morning-<hex>/
-//                                            dir, fetch all Aura data (+ verify review
-//                                            states), write raw.json + digest.json +
-//                                            report.json, print "output directory:
-//                                            <path>/" to stdout.
-//   node dist/aura.mjs render <dir>          Read <dir>/digest.json and write the
-//                                            rendered markdown to stdout.
-//   node dist/aura.mjs render <dir> <out>     Write the rendered markdown to <out>
-//                                            instead of stdout.
-//   node dist/aura.mjs cleanup <dir>         Delete <dir> and its contents.
-//   node dist/aura.mjs save <dir>            Save <dir>/digest.json as the last
-//                                            presented digest (~/.pi/aura/last-digest.json).
-//   node dist/aura.mjs diff <dir>            Print (JSON) what changed since the last
-//                                            saved digest.
-//   node dist/aura.mjs last                  Print the last saved digest (JSON).
+//   node aura.mjs artifact get <artifact-uuid>            -> workdir with body.md + meta.json
+//   node aura.mjs artifact update <workdir> [--summary S]  -> uploads, removes workdir
+//   node aura.mjs artifact create --title T --kind K [--body-file F] [--summary S]
+//   node aura.mjs artifact section <id> --heading H --body B --summary S  (small section edit)
+//   node aura.mjs artifact cleanup <workdir> | --stale
+//   node aura.mjs wiki get --slug "eng/auth" | --uuid <node-uuid>     -> workdir
+//   node aura.mjs wiki save <workdir> [--summary S]                   -> uploads, removes workdir
+//   node aura.mjs wiki search "<query>" [--space <slug>] [--limit N]  -> inline results
+//   node aura.mjs wiki tree --slug "<space>"                          -> inline tree
+//   node aura.mjs wiki create --space <slug> --title T --slug S        -> prints new node uuid
+//   node aura.mjs upload create --file <path> [--mime <type>] [--filename <name>]  -> prints upload uuid
+//   node aura.mjs upload get <upload-uuid> [--out <path>]            -> parsed text to file (or stdout if small)
 //
-// fetch is deterministic (same API state -> same files) and does tool discovery
-// first (assertToolsAvailable) so a missing tool fails fast with a clear error.
-// render renders whatever sections are present in digest.json, skipping nulls.
-// cleanup removes the temp directory created by fetch. save/diff/last manage
-// the persistent last-digest store at ~/.pi/aura/last-digest.json.
+// Auth: reuses bearerClient("aura-mcp-dev") (HTTP + bearer from mcp.json),
+// configurable via settings.aura.mcpServers.aura. The MCP SDK is bundled at
+// build time; only @napi-rs/keyring is external (and this script doesn't use it).
 
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { resolve, join } from "node:path";
-import { tmpdir, homedir } from "node:os";
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
-import { bearerClient } from "./aura-client.js";
-import type { McpClient } from "./mcp-client.js";
-import { buildAtlassianClient, fetchTaskDevLinks } from "./devlinks.js";
+import { bearerClient } from "./clients.js";
 import { loadSettings } from "./settings.js";
-import type {
-  ArtifactApprovalDecision,
-  ArtifactApprovalState,
-  ArtifactReview,
-  ArtifactToVerify,
-  ArtifactVerification,
-  AuraArtifact,
-  AuraArtifactList,
-  AuraBoardBriefing,
-  AuraBoardSummary,
-  AuraBoardSummaryItem,
-  AuraCapacity,
-  AuraNotification,
-  AuraNotificationList,
-  AuraPriorityQueue,
-  AuraPriorityQueueItem,
-  AuraReport,
-  AuraTaskDetail,
-  AuraTaskList,
-  Digest,
-  DigestAttention,
-  DigestAttentionItem,
-  DigestCapacity,
-  DigestDiff,
-  DigestQueueRow,
-  DigestReview,
-  LastDigestStore,
-  RawAuraData,
-  TaskDevLinks,
-  DigestReviewOwed,
-} from "./types.js";
+import type { McpClient } from "./mcp-client.js";
 
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
+const USAGE = `Usage:
+  node aura.mjs artifact get <artifact-uuid>              fetch body+meta into a workdir
+  node aura.mjs artifact update <workdir> [--summary S]   upload from workdir, then remove it
+  node aura.mjs artifact create --title T --kind K [--body-file F] [--summary S]
+  node aura.mjs artifact section <id> --heading H --body B --summary S
+  node aura.mjs artifact cleanup <workdir> | --stale
+  node aura.mjs wiki get --slug "eng/auth" | --uuid <node-uuid>   fetch body+meta into a workdir
+  node aura.mjs wiki save <workdir> [--summary S]                upload, then remove workdir
+  node aura.mjs wiki search "<query>" [--space <slug>] [--limit N]
+  node aura.mjs wiki tree --slug "<space>"
+  node aura.mjs wiki create --space <slug> --title T --slug S    prints new node uuid
+  node aura.mjs upload create --file <path> [--mime <type>] [--filename <name>]
+  node aura.mjs upload get <upload-uuid> [--out <path>]          parsed text to file (or stdout if small)`;
 
-const WORKDAY_HOURS = 8;
-
-function humanStatus(status: string): string {
-  // "IN_REVIEW" -> "In Review", "READY_FOR_DEPLOYMENT" -> "Ready For Deployment"
-  return status
-    .toLowerCase()
-    .split("_")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
-}
-
-function pctToHours(pct: number | null): number | null {
-  if (pct === null) return null;
-  // Exact hours (20% -> 1.6); the quarter-hour rounding + ~H:MM formatting
-  // happens in fmtHours so the raw digest.json keeps a precise value.
-  return (pct * WORKDAY_HOURS) / 100;
-}
-
-/** Format hours as "~H:MM" rounded to the nearest quarter hour.
- * null -> "—". */
-function fmtHours(hours: number | null): string {
-  if (hours === null) return "—";
-  // Round to nearest 0.25h, then express as H:MM.
-  const rounded = Math.round(hours / 0.25) * 0.25;
-  const h = Math.floor(rounded);
-  const m = Math.round((rounded - h) * 60);
-  return `~${h}:${String(m).padStart(2, "0")}`;
-}
-
-/** Compact Git column summary for a queue row, e.g. "1: 🟢, 2: 🌿"
- * meaning 1 PR (open) + 2 branches. PRs grouped by state emoji. */
-function gitColumnSummary(link: TaskDevLinks | undefined): string {
-  if (!link) return "";
-  if (link.pull_requests.length === 0 && link.branches.length === 0) return "";
-  const parts: string[] = [];
-  // PRs grouped by state emoji.
-  const prByState = new Map<string, number>();
-  for (const p of link.pull_requests) {
-    const e = stateEmoji(p.state);
-    prByState.set(e, (prByState.get(e) ?? 0) + 1);
-  }
-  for (const [e, n] of prByState) parts.push(`${n}: ${e}`);
-  if (link.branches.length > 0) parts.push(`${link.branches.length}: 🌿`);
-  return parts.join(", ");
-}
-
-function safeString(v: unknown): string {
-  return typeof v === "string" ? v : "";
-}
-
-function fmtPct(pct: number | null): string {
-  if (pct === null) return "—";
-  return `${pct}%`;
-}
-
-function fail(msg: string, usage?: string, code = 2): never {
+function fail(msg: string, usage = false, code = 2): never {
   console.error(msg);
-  if (usage) console.error(usage);
+  if (usage) console.error(USAGE);
   process.exit(code);
 }
 
-const USAGE = `Usage:
-  node aura.mjs fetch                 create temp dir, fetch Aura data (+ verification), print path
-  node aura.mjs render <dir> [out]    render <dir>/digest.json to markdown (stdout or <out>)
-  node aura.mjs cleanup <dir>         delete <dir>
-  node aura.mjs save <dir>            save <dir>/digest.json as the last presented digest
-  node aura.mjs diff <dir>            print what changed since the last saved digest (JSON)
-  node aura.mjs last                  print the last saved digest (JSON)`;
+// ---------------------------------------------------------------------------
+// Workdir model
+// ---------------------------------------------------------------------------
 
-/** Path to the persistent last-digest store. */
-const LAST_DIGEST_PATH = join(homedir(), ".pi", "aura", "last-digest.json");
-const LAST_DIGEST_SCHEMA_VERSION = 1;
+const LARGE_BODY_THRESHOLD = 500; // chars; below this, the resource rule says use direct calls.
 
-// ===========================================================================
-// fetch
-// ===========================================================================
+interface ArtifactMeta {
+  kind: "artifact";
+  artifact_id: string;
+  version: number;
+  title: string;
+  artifact_kind: string; // GENERIC | PLAN | REVIEW
+}
+interface WikiMeta {
+  kind: "wiki";
+  node_uuid: string;
+  slug: string;
+  title: string;
+  version: number;
+}
+type Meta = ArtifactMeta | WikiMeta;
 
-const REQUIRED_TOOLS = [
-  "getBoardBriefing",
-  "getBoardSummary",
-  "listNotifications",
-  "getMyPriorityQueue",
-  "getMyCapacity",
-  "listArtifacts",
-  "listTasks",
-  "getArtifactApprovals",
-  "getTaskByHumanKey",
-  "getArtifactReview",
-];
-
-// Statuses that count as "active open" for the queue table.
-const ACTIVE_STATUS_TYPES = new Set([
-  "ACTIVE", // IN_DEVELOPMENT / IN_REFINEMENT / IN_REVIEW / IN_ALIGNMENT
-]);
-
-function toAttentionItem(item: AuraBoardSummaryItem): DigestAttentionItem {
-  // item.title often already includes the human key prefix (e.g.
-  // "AURA-1061 — Combined plan…"); use the bare task title to avoid
-  // "AURA-1061 — AURA-1061 — …" duplication.
-  const key = item.task?.human_key ?? "";
-  const title = item.task?.title ?? item.title ?? "";
-  return {
-    key,
-    title,
-    days: item.waiting_days ?? undefined,
-    since: item.since ?? undefined,
-  };
+function freshWorkdir(prefix: "aura-artifact" | "aura-wiki" | "aura-upload"): string {
+  const dir = join(tmpdir(), `${prefix}-${randomBytes(6).toString("hex")}`);
+  mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
-async function fetchAction(): Promise<void> {
-  const outDir = join(tmpdir(), `aura-morning-${randomBytes(6).toString("hex")}`);
-  mkdirSync(outDir, { recursive: true });
+function writeWorkdir(dir: string, meta: Meta, body: string): void {
+  writeFileSync(join(dir, "meta.json"), JSON.stringify(meta, null, 2) + "\n", "utf8");
+  writeFileSync(join(dir, "body.md"), body, "utf8");
+}
 
-  const client = bearerClient("aura-mcp-dev");
-  await client.connect();
-  client.assertToolsAvailable(REQUIRED_TOOLS);
+function readWorkdirMeta(dir: string): Meta {
+  const p = join(dir, "meta.json");
+  if (!existsSync(p)) fail(`workdir ${dir} has no meta.json`);
+  return JSON.parse(readFileSync(p, "utf8")) as Meta;
+}
 
-  // Parallel fetch of all base data.
-  const [
-    briefing,
-    summary,
-    notifications,
-    priorityQueue,
-    capacity,
-    pendingReviews,
-    alignmentTasks,
-    reviewTasks,
-  ] = (await Promise.all([
-    client.callTool<AuraBoardBriefing>("getBoardBriefing", { locale: "en" }),
-    client.callTool<AuraBoardSummary>("getBoardSummary"),
-    client.callTool<AuraNotificationList>("listNotifications", {
-      limit: 20,
-      sort_by: "created_at",
-      sort_dir: "desc",
-    }),
-    client.callTool<AuraPriorityQueue>("getMyPriorityQueue"),
-    client.callTool<AuraCapacity>("getMyCapacity"),
-    client.callTool<AuraArtifactList>("listArtifacts", {
-      pending_review: true,
-      limit: 10,
-    }),
-    client.callTool<AuraTaskList>("listTasks", {
-      role: "STAKEHOLDER",
-      view: "mine",
-      status_slug: "IN_ALIGNMENT",
-      limit: 5,
-    }),
-    client.callTool<AuraTaskList>("listTasks", {
-      role: "STAKEHOLDER",
-      view: "mine",
-      status_slug: "IN_REVIEW",
-      limit: 5,
-    }),
-  ])) as [
-    AuraBoardBriefing,
-    AuraBoardSummary,
-    AuraNotificationList,
-    AuraPriorityQueue,
-    AuraCapacity,
-    AuraArtifactList,
-    AuraTaskList,
-    AuraTaskList,
-  ];
+function removeWorkdir(dir: string): void {
+  rmSync(dir, { recursive: true, force: true });
+}
 
-  // NOTE: client kept open — verification (below) reuses it for
-  // getArtifactApprovals calls.
-
-  const fetchedAt = new Date().toISOString();
-  const date = fetchedAt.slice(0, 10);
-
-  const raw: RawAuraData = {
-    fetched_at: fetchedAt,
-    briefing,
-    summary,
-    notifications,
-    priority_queue: priorityQueue,
-    capacity,
-    pending_review_artifacts: pendingReviews,
-    stakeholder_alignment_tasks: alignmentTasks,
-    stakeholder_review_tasks: reviewTasks,
-  };
-
-  // --- Build the queue table: committed tasks + active open tasks ---------
-  const capTaskById = new Map<string, { pct: number | null; role: string }>();
-  for (const t of capacity.tasks) {
-    capTaskById.set(t.task_id, { pct: t.capacity_percent, role: t.roles[0] ?? "OWNER" });
-  }
-
-  const seenIds = new Set<string>();
-  const queueRows: DigestQueueRow[] = [];
-  let rank = 0;
-  const addItem = (item: AuraPriorityQueueItem): void => {
-    if (seenIds.has(item.id)) return;
-    const cap = capTaskById.get(item.id);
-    const capacityPct = cap?.pct ?? item.capacity_percent ?? null;
-    const role = cap?.role ?? "OWNER";
-    queueRows.push({
-      rank: ++rank,
-      key: item.human_key,
-      title: item.title,
-      status: humanStatus(item.status),
-      role,
-      capacity_pct: capacityPct,
-      hours: pctToHours(capacityPct),
-    });
-    seenIds.add(item.id);
-  };
-
-  // Committed tasks first (non-null capacity), in priority-queue order.
-  for (const item of priorityQueue.items) {
-    const cap = capTaskById.get(item.id)?.pct ?? item.capacity_percent;
-    if (cap !== null && cap > 0) addItem(item);
-  }
-  // Then active open tasks (status_type ACTIVE) with null capacity.
-  for (const item of priorityQueue.items) {
-    const cap = capTaskById.get(item.id)?.pct ?? item.capacity_percent;
-    if ((cap === null || cap === 0) && ACTIVE_STATUS_TYPES.has(item.status_type)) {
-      addItem(item);
-    }
-  }
-  // Finally, any capacity-bearing task from getMyCapacity missing from the
-  // priority queue entirely (e.g. AURA-1061 IN_ALIGNMENT). These must be
-  // added so the committed total in the table matches getMyCapacity.
-  for (const t of capacity.tasks) {
-    if (seenIds.has(t.task_id)) continue;
-    const pct = t.capacity_percent;
-    if (pct === null || pct === 0) continue;
-    queueRows.push({
-      rank: ++rank,
-      key: t.human_key,
-      title: t.task_title,
-      status: humanStatus(t.task_status),
-      role: t.roles[0] ?? "OWNER",
-      capacity_pct: pct,
-      hours: pctToHours(pct),
-    });
-    seenIds.add(t.task_id);
-  }
-
-  // --- Capacity summary ---------------------------------------------------
-  const digestCapacity: DigestCapacity = {
-    base_pct: capacity.base_percent,
-    committed_pct: capacity.committed_percent,
-    free_pct: capacity.free_percent,
-    utilization_pct: capacity.utilization_percent,
-    over: capacity.over,
-    total_hours: pctToHours(capacity.committed_percent) ?? 0,
-  };
-
-  // --- Attention ----------------------------------------------------------
-  const overdue = (summary.overdue?.items ?? []).map(toAttentionItem);
-  const waitingOnYou = (summary.waiting_on_me?.items ?? []).map(toAttentionItem);
-  const waitingOnOthers = (summary.waiting_on_others?.items ?? []).map(toAttentionItem);
-  const notifSummaries = summarizeNotifications(notifications.items ?? []);
-  const attention: DigestAttention = {
-    overdue,
-    waiting_on_you: waitingOnYou,
-    waiting_on_others: waitingOnOthers,
-    notifications: notifSummaries,
-  };
-
-  // --- Reviews (from pending_review_artifacts + waiting_on_others) -----
-  const reviews: DigestReview[] = [];
-  const reviewById = new Map<string, DigestReview>();
-  for (const a of pendingReviews.items ?? []) {
-    const r: DigestReview = {
-      artifact_id: a.id,
-      title: a.title,
-      version: a.current_version ?? 0,
-      decisions: [],
-      decided_count: 0,
-      total_required: 0,
-    };
-    reviews.push(r);
-    reviewById.set(a.id, r);
-  }
-  for (const item of summary.waiting_on_others?.items ?? []) {
-    const m = safeString(item.link).match(/artifact=([0-9a-f-]+)/i);
-    if (m && !reviewById.has(m[1])) {
-      const r: DigestReview = {
-        artifact_id: m[1],
-        title: item.title ?? "",
-        version: 0, // filled by the orchestrator from getArtifactApprovals
-        decisions: [],
-        decided_count: 0,
-        total_required: item.approvals_pending ?? 0,
-      };
-      reviews.push(r);
-      reviewById.set(m[1], r);
-    }
-  }
-
-  // --- Suggested actions (rule-based seed; orchestrator re-ranks) ---------
-  const suggestedActions = seedSuggestedActions(overdue, waitingOnYou, reviews, queueRows);
-
-  // --- Report: artifacts to verify ----------------------------------------
-  const waitingOnOthersLinks = (summary.waiting_on_others?.items ?? []).map(
-    (i) => safeString(i.link)
-  );
-  const { artifactsToVerify, notificationReviewEvents } = extractVerifyTargets(
-    notifications.items ?? [],
-    pendingReviews.items ?? [],
-    waitingOnOthersLinks
-  );
-
-  // --- Verify review states against current API ---------------------------
-  // Call getArtifactApprovals for each candidate and decide whether the
-  // reported decision is stale (a rejection on an older version that has
-  // since been advanced). The digest stays conservative (reported state
-  // only, corrections=[]); the full findings live in report.json so the
-  // orchestrator can reconcile without any extra MCP calls.
-  const verifications = await verifyArtifacts(client, artifactsToVerify);
-
-  // --- Dev links: related PRs / branches per queue task --------------------
-  // Fetch each queue task's detail (for jira_issues + description), then fan
-  // out across Teamwork Graph (primary) + GitHub `gh search` + Bitbucket. The
-  // Aura client is still open for getTaskByHumanKey; the Atlassian client is
-  // built separately (OAuth token from the keyring) and degrades to null if
-  // unavailable. Disabled when no auraDigest settings are present.
-  const settings = loadSettings();
-  const devLinks: TaskDevLinks[] = [];
-  if (settings) {
-    const atlassian = await buildAtlassianClient();
+/** Remove all aura-artifact-* / aura-wiki-* dirs older than 1h. */
+function cleanupStale(): void {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  const tmp = tmpdir();
+  let count = 0;
+  for (const name of readdirSync(tmp)) {
+    if (!/^aura-(artifact|wiki|upload)-[0-9a-f]+$/.test(name)) continue;
+    const p = join(tmp, name);
     try {
-      // Fetch each queue task's detail, then also its children's details so we
-      // collect subtask Jira keys too — PRs often live on a subtask's Jira key,
-      // not the parent's (e.g. AURA-742's own Jira has no PRs; its sibling
-      // AURA-932 -> ANW-8184 has the OTEL PR). Merge child jira_issues in.
-      const taskDetails = await Promise.all(
-        queueRows.map((row) =>
-          client.callTool<AuraTaskDetail>("getTaskByHumanKey", { key: row.key })
-            .catch(() => null)
-        )
-      );
-      for (const detail of taskDetails) {
-        if (!detail) continue;
-        // Pull in children's Jira keys (one getTaskByHumanKey per child).
-        const childKeys = (detail.children ?? []).map((c) => c.human_key).filter(Boolean);
-        if (childKeys.length > 0) {
-          const childDetails = await Promise.all(
-            childKeys.map((k) =>
-              client.callTool<AuraTaskDetail>("getTaskByHumanKey", { key: k }).catch(() => null)
-            )
-          );
-          const childJira = childDetails
-            .filter((c): c is AuraTaskDetail => c !== null)
-            .flatMap((c) => c.jira_issues ?? []);
-          if (childJira.length > 0) {
-            detail.jira_issues = [...(detail.jira_issues ?? []), ...childJira];
-          }
-        }
-        devLinks.push(await fetchTaskDevLinks(detail, settings, atlassian));
+      if (statSync(p).mtimeMs < cutoff) {
+        rmSync(p, { recursive: true, force: true });
+        count++;
       }
-    } finally {
-      if (atlassian) await atlassian.close();
-    }
+    } catch { /* ignore */ }
   }
+  console.error(`removed ${count} stale workdir(s)`);
+}
 
-  // --- Reviews I owe: artifacts assigned to me as reviewer, not yet decided ---
-  // Candidates come from the `artifact.review_assigned` notifications (they're
-  // addressed to me by definition). For each, call getArtifactReview and keep
-  // only those where my reviewer row is still ASSIGNED. My user_id is derived
-  // from the first review I initiated (is_initiator: true) among the reviews
-  // already in d.reviews; fallback: match reviewer by name "Plattner, Patric".
-  const reviewsOwed: DigestReviewOwed[] = [];
-  const assignedNotif = (notifications.items ?? []).filter(
-    (n) => safeString(n.type) === "artifact.review_assigned"
-  );
-  const candidateIds = new Set<string>();
-  const titleById = new Map<string, string>();
-  for (const n of assignedNotif) {
-    const p = (n.i18n_params as Record<string, unknown> | undefined) ?? {};
-    const id = safeString(p.artifactUuid) || safeString(p.artifact_uuid);
-    if (id) {
-      candidateIds.add(id);
-      const t = safeString(p.artifactTitle) || safeString(p.artifact_title);
-      if (t) titleById.set(id, t);
-    }
+// ---------------------------------------------------------------------------
+// Aura API response shapes (subset)
+// ---------------------------------------------------------------------------
+
+interface ArtifactDetail {
+  id: string;
+  title: string;
+  current_version: number;
+  kind: string;
+  [k: string]: unknown;
+}
+interface WikiNodeDetail {
+  uuid?: string;
+  slug?: string;
+  title?: string;
+  version?: number;
+  body?: string;
+  [k: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// artifact subcommands
+// ---------------------------------------------------------------------------
+
+async function artifactGet(client: McpClient, id: string): Promise<void> {
+  // getArtifact returns { id, title, latest_version, body, kind, ... } directly
+  // (the McpClient already unwraps the MCP content block + parses the JSON).
+  const detail = await client.callTool<ArtifactDetail & { body?: string; latest_version?: number }>("getArtifact", { id });
+  const body = detail.body ?? "";
+  const dir = freshWorkdir("aura-artifact");
+  writeWorkdir(dir, {
+    kind: "artifact",
+    artifact_id: id,
+    version: detail.current_version ?? detail.latest_version ?? 0,
+    title: detail.title ?? "",
+    artifact_kind: detail.kind ?? "GENERIC",
+  }, body);
+  // stdout: the workdir path + a one-line summary. Body never on stdout.
+  console.log(`workdir: ${dir}/`);
+  console.error(`  ${detail.title ?? "(untitled)"}  v${detail.current_version ?? 0}  (${body.length} bytes)`);
+  await client.close();
+}
+
+async function artifactUpdate(client: McpClient, dir: string, summary?: string): Promise<void> {
+  const meta = readWorkdirMeta(dir);
+  if (meta.kind !== "artifact") fail(`workdir ${dir} is not an artifact workdir`);
+  const bodyPath = join(dir, "body.md");
+  if (!existsSync(bodyPath)) fail(`workdir ${dir} has no body.md`);
+  const body = readFileSync(bodyPath, "utf8");
+  await client.callTool("mcpUpdateArtifact", {
+    id: meta.artifact_id,
+    mode: "whole",
+    body,
+    summary: summary ?? `Updated via aura.mjs (v${meta.version} → next)`,
+    confirm_full_replace: true,
+  });
+  removeWorkdir(dir);
+  console.error(`updated ${meta.artifact_id}; cleaned up ${dir}/`);
+  await client.close();
+}
+
+async function artifactCreate(client: McpClient, opts: { title: string; kind: string; bodyFile?: string; summary?: string }): Promise<void> {
+  let body = "";
+  if (opts.bodyFile) {
+    body = readFileSync(opts.bodyFile, "utf8");
+    if (body.length < LARGE_BODY_THRESHOLD) console.error(`note: body is ${body.length} bytes (≤ ${LARGE_BODY_THRESHOLD}); a direct mcpCreateArtifact call would also be fine.`);
   }
-  if (candidateIds.size > 0) {
-    // Find my user id: from a review I initiated (my own artifact in d.reviews).
-    let myUserId: string | null = null;
-    for (const r of reviews) {
-      try {
-        const ar = await client.callTool<ArtifactReview>("getArtifactReview", { id: r.artifact_id });
-        if (ar.is_initiator && ar.initiator) { myUserId = ar.initiator.user_id; break; }
-      } catch { /* ignore */ }
-    }
-    const myName = "Plattner, Patric";
-    for (const id of candidateIds) {
-      try {
-        const ar = await client.callTool<ArtifactReview>("getArtifactReview", { id });
-        // Find my reviewer row by user_id (preferred) or name fallback.
-        const me = ar.reviewers.find(
-          (rv) => (myUserId && rv.user_id === myUserId) || rv.user_name === myName
-        );
-        if (me && me.status === "ASSIGNED") {
-          reviewsOwed.push({
-            artifact_id: id,
-            title: ar.review_artifacts?.[0]?.title ?? titleById.get(id) ?? "",
-            version: ar.version,
-            deadline: ar.review_deadline_at ?? null,
-            initiator: ar.initiator?.user_name ?? null,
-            review_started_at: ar.review_started_at ?? null,
-          });
-        }
-      } catch { /* ignore unreachable artifacts */ }
-    }
+  const created = await client.callTool<{ id?: string; current_version?: number }>("mcpCreateArtifact", {
+    title: opts.title,
+    kind: opts.kind,
+    body,
+    summary: opts.summary ?? "Initial version",
+  });
+  if (opts.bodyFile) rmSync(opts.bodyFile, { force: true });
+  console.log(`created ${created.id ?? "?"} (v${created.current_version ?? 1})`);
+  await client.close();
+}
+
+async function artifactSection(client: McpClient, id: string, heading: string, body: string, summary: string): Promise<void> {
+  await client.callTool("mcpUpdateArtifact", {
+    id,
+    mode: "section",
+    target_heading: heading,
+    body,
+    summary,
+  });
+  console.error(`updated section ${heading} of ${id}`);
+  await client.close();
+}
+
+// ---------------------------------------------------------------------------
+// wiki subcommands
+// ---------------------------------------------------------------------------
+
+async function wikiGet(client: McpClient, opts: { slug?: string; uuid?: string }): Promise<void> {
+  let node: WikiNodeDetail;
+  if (opts.uuid) {
+    node = await client.callTool<WikiNodeDetail>("getKnowledgeNode", { uuid: opts.uuid, include_body: true });
+  } else if (opts.slug) {
+    node = await client.callTool<WikiNodeDetail>("getKnowledgeNodeByPath", { slug: opts.slug, include_body: true });
+  } else {
+    fail("wiki get requires --slug or --uuid", true);
+  }
+  const body = node.body ?? "";
+  const dir = freshWorkdir("aura-wiki");
+  writeWorkdir(dir, {
+    kind: "wiki",
+    node_uuid: node.uuid ?? "",
+    slug: node.slug ?? opts.slug ?? "",
+    title: node.title ?? "",
+    version: node.version ?? 0,
+  }, body);
+  console.log(`workdir: ${dir}/`);
+  console.error(`  ${node.title ?? "(untitled)"}  ${node.slug ?? ""}  (v${node.version ?? 0}, ${body.length} bytes)`);
+  await client.close();
+}
+
+async function wikiSave(client: McpClient, dir: string, summary?: string): Promise<void> {
+  const meta = readWorkdirMeta(dir);
+  if (meta.kind !== "wiki") fail(`workdir ${dir} is not a wiki workdir`);
+  const bodyPath = join(dir, "body.md");
+  if (!existsSync(bodyPath)) fail(`workdir ${dir} has no body.md`);
+  const body = readFileSync(bodyPath, "utf8");
+  await client.callTool("saveKnowledgeNodeBody", {
+    uuid: meta.node_uuid,
+    body,
+    summary: summary ?? `Updated via aura.mjs`,
+  });
+  removeWorkdir(dir);
+  console.error(`saved ${meta.slug}; cleaned up ${dir}/`);
+  await client.close();
+}
+
+async function wikiSearch(client: McpClient, query: string, spaceSlug?: string, limit?: number): Promise<void> {
+  const res = await client.callTool<{ items?: Array<{ slug?: string; title?: string; score?: number }> }>("mcpWikiSearch", {
+    query,
+    space_slug: spaceSlug,
+    limit: limit ?? 10,
+  });
+  for (const it of res.items ?? []) {
+    console.log(`- ${it.title ?? "(untitled)"}  [${it.slug ?? ""}]${it.score !== undefined ? ` (${it.score.toFixed(3)})` : ""}`);
   }
   await client.close();
-
-  // --- Enrich queue rows with a compact Git column from dev_links ----------
-  const devLinksByTask = new Map(devLinks.map((l) => [l.task_key, l]));
-  for (const row of queueRows) {
-    row.git_summary = gitColumnSummary(devLinksByTask.get(row.key));
-  }
-
-  const rawPath = resolve(outDir, "raw.json");
-  const digestPath = resolve(outDir, "digest.json");
-  const reportPath = resolve(outDir, "report.json");
-
-  const digest: Digest = {
-    date,
-    summary: null,
-    attention,
-    queue: queueRows,
-    capacity: digestCapacity,
-    reviews,
-    suggested_actions: suggestedActions,
-    corrections: [],
-    dev_links: devLinks,
-    reviews_owed: reviewsOwed,
-    meta: {
-      generated_at: fetchedAt,
-      raw_path: rawPath,
-      report_path: reportPath,
-    },
-  };
-
-  const report: AuraReport = {
-    fetched_at: fetchedAt,
-    raw_path: rawPath,
-    artifacts_to_verify: artifactsToVerify,
-    verifications,
-    pending_review_summary: (pendingReviews.items ?? []).map((a) => ({
-      artifact_id: a.id,
-      title: a.title,
-      current_version: a.current_version,
-    })),
-    notification_review_events: notificationReviewEvents,
-  };
-
-  writeFileSync(rawPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
-  writeFileSync(digestPath, JSON.stringify(digest, null, 2) + "\n", "utf8");
-  writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
-
-  // stdout: a single machine-parseable line. stderr: human progress.
-  console.log(`output directory: ${outDir}/`);
-  console.error(`fetched ${fetchedAt}`);
-  console.error(`  raw:     ${rawPath}`);
-  console.error(`  digest:  ${digestPath}`);
-  console.error(`  report:  ${reportPath}`);
-  console.error(`  queue rows: ${queueRows.length}, artifacts verified: ${verifications.length} (${verifications.filter((v) => v.stale).length} stale), dev links: ${devLinks.length} tasks`);
 }
 
-/**
- * Verify each candidate artifact's reported review state against the current
- * API state. A reported rejection/revision is "stale" when the artifact has
- * since been advanced to a newer version (current_version > reported_version):
- * the reported decision no longer applies to the current review run.
- *
- * Returns one ArtifactVerification per candidate, preserving the original
- * reported state alongside the current findings.
- */
-async function verifyArtifacts(
-  client: McpClient,
-  candidates: ArtifactToVerify[]
-): Promise<ArtifactVerification[]> {
-  const isActionable = (d: string | null) =>
-    d === "REJECTED" || d === "NEEDS_REVISION";
-  const results = await Promise.all(
-    candidates.map(async (c): Promise<ArtifactVerification> => {
-      try {
-        const current = await client.callTool<ArtifactApprovalState>(
-          "getArtifactApprovals",
-          { id: c.artifact_id }
-        );
-        const reportedVersion = c.reported_version;
-        const currentVersion = current.version;
-        const stale =
-          isActionable(c.reported_decision) &&
-          reportedVersion !== null &&
-          currentVersion > reportedVersion;
-        const note = stale
-          ? `reported ${c.reported_decision} on v${reportedVersion}, but current is v${currentVersion} (${current.decided_count}/${current.total_required} decided) — already addressed`
-          : "";
-        return {
-          artifact_id: c.artifact_id,
-          title: c.title,
-          reported: {
-            version: reportedVersion,
-            decision: c.reported_decision,
-            source: c.source,
-          },
-          current,
-          stale,
-          note,
-        };
-      } catch (e) {
-        return {
-          artifact_id: c.artifact_id,
-          title: c.title,
-          reported: {
-            version: c.reported_version,
-            decision: c.reported_decision,
-            source: c.source,
-          },
-          current: null,
-          error: e instanceof Error ? e.message : String(e),
-          stale: false,
-          note: "",
-        };
-      }
-    })
-  );
-  return results;
+async function wikiTree(client: McpClient, slug: string): Promise<void> {
+  const res = await client.callTool<unknown>("getKnowledgeTree", { slug });
+  console.log(JSON.stringify(res, null, 2));
+  await client.close();
 }
 
-function summarizeNotifications(items: AuraNotification[]): string[] {
-  const unread = items.filter((n) => !n.read);
-  if (unread.length === 0) return ["No unread notifications."];
-  const lines: string[] = [];
-  for (const n of unread) {
-    const date = safeString(n.created_at).slice(0, 10);
-    const type = safeString(n.type) || "notification";
-    const p = (n.i18n_params as Record<string, unknown> | undefined) ?? {};
-    const actor = safeString(p.actorName) || safeString(p.actor_name);
-    const artifactTitle = safeString(p.artifactTitle) || safeString(p.artifact_title);
-    const taskTitle = safeString(p.taskTitle) || safeString(p.task_title);
-    const version = p.version as number | undefined;
-    const decision = safeString(p.decision);
-    const target = artifactTitle || taskTitle;
-    let line = `${date} — ${type}`;
-    if (actor) line += ` by ${actor}`;
-    if (target) line += `: ${target}`;
-    if (version) line += ` v${version}`;
-    if (decision) line += ` (${decision})`;
-    lines.push(line);
-  }
-  return lines;
-}
-
-function seedSuggestedActions(
-  overdue: DigestAttentionItem[],
-  waitingOnYou: DigestAttentionItem[],
-  reviews: DigestReview[],
-  queue: DigestQueueRow[]
-): string[] {
-  const actions: string[] = [];
-  for (const o of overdue.slice(0, 3)) {
-    actions.push(`Move overdue ${o.key} — ${o.title}${o.days ? ` (${o.days}d)` : ""}`);
-  }
-  for (const w of waitingOnYou.slice(0, 3)) {
-    actions.push(`Unblock ${w.key} — ${w.title}`);
-  }
-  for (const r of reviews.slice(0, 3)) {
-    actions.push(`Review ${r.title} (v${r.version})`);
-  }
-  for (const q of queue.filter((row) => row.capacity_pct && row.capacity_pct > 0).slice(0, 3)) {
-    actions.push(`Advance ${q.key} — ${q.title} (${q.status})`);
-  }
-  return actions.slice(0, 6);
-}
-
-function extractVerifyTargets(
-  notifications: AuraNotification[],
-  pendingArtifacts: AuraArtifact[],
-  waitingOnOthersLinks: string[]
-): {
-  artifactsToVerify: ArtifactToVerify[];
-  notificationReviewEvents: AuraReport["notification_review_events"];
-} {
-  // Aura notification types use dotted names (artifact.review_decided, …).
-  const isReviewEvent = (type: string) => type.includes("artifact") && type.includes("review");
-  const byId = new Map<string, ArtifactToVerify>();
-  const events: AuraReport["notification_review_events"] = [];
-  for (const n of notifications) {
-    const type = safeString(n.type);
-    const p = (n.i18n_params as Record<string, unknown> | undefined) ?? {};
-    const artifactId = safeString(p.artifactUuid) || safeString(p.artifact_uuid);
-    const artifactTitle = safeString(p.artifactTitle) || safeString(p.artifact_title);
-    const version = (p.version as number | null) ?? null;
-    const decision = safeString(p.decision) || null;
-    if (isReviewEvent(type)) {
-      events.push({
-        type,
-        artifact_id: artifactId || null,
-        title: artifactTitle || null,
-        version: version ?? null,
-        decision,
-        created_at: safeString(n.created_at),
-      });
-      if (artifactId) {
-        const existing = byId.get(artifactId);
-        // Keep the most "actionable" reported decision (rejection beats approval).
-        const decisionRank = (d: string | null) =>
-          d === "REJECTED" || d === "NEEDS_REVISION" ? 2 : d === "APPROVED" ? 1 : 0;
-        if (!existing || decisionRank(decision) > decisionRank(existing.reported_decision)) {
-          byId.set(artifactId, {
-            artifact_id: artifactId,
-            title: artifactTitle,
-            reported_version: version,
-            reported_decision: decision,
-            source: "notification",
-          });
-        }
-      }
-    }
-  }
-  for (const a of pendingArtifacts) {
-    if (!byId.has(a.id)) {
-      byId.set(a.id, {
-        artifact_id: a.id,
-        title: a.title,
-        reported_version: a.current_version ?? null,
-        reported_decision: null,
-        source: "pending_review",
-      });
-    }
-  }
-  for (const link of waitingOnOthersLinks) {
-    const m = link.match(/artifact=([0-9a-f-]+)/i);
-    if (m && !byId.has(m[1])) {
-      byId.set(m[1], {
-        artifact_id: m[1],
-        title: "",
-        reported_version: null,
-        reported_decision: null,
-        source: "waiting_on_others",
-      });
-    }
-  }
-  return {
-    artifactsToVerify: [...byId.values()],
-    notificationReviewEvents: events,
-  };
-}
-
-// ===========================================================================
-// render
-// ===========================================================================
-
-function attentionLine(emoji: string, label: string, items: DigestAttentionItem[]): string {
-  if (items.length === 0) return `- ${emoji} **${label}:** None`;
-  const parts = items.map((i) => {
-    let s = `${i.key} — ${i.title}`;
-    if (i.days) s += ` (${i.days}d)`;
-    return s;
+async function wikiCreate(client: McpClient, opts: { space: string; title: string; slug: string }): Promise<void> {
+  const res = await client.callTool<{ uuid?: string }>("createKnowledgeNode", {
+    space_slug: opts.space,
+    kind: "DOCUMENT",
+    title: opts.title,
+    slug: opts.slug,
   });
-  return `- ${emoji} **${label}:** ${parts.join("; ")}`;
+  console.log(res.uuid ?? "(created, no uuid returned)");
+  await client.close();
 }
 
-function renderAttention(d: Digest): string {
-  const lines: string[] = ["### Needs your attention"];
-  lines.push(attentionLine("🔴", "Overdue", d.attention.overdue));
-  lines.push(attentionLine("🟡", "Waiting on you", d.attention.waiting_on_you));
-  lines.push(attentionLine("🔵", "Waiting on others", d.attention.waiting_on_others ?? []));
-  const notif = d.attention.notifications.length > 0
-    ? d.attention.notifications.join("\n  - ")
-    : "No unread notifications.";
-  lines.push(`- 📬 ${notif}`);
-  return lines.join("\n");
-}
+// ---------------------------------------------------------------------------
+// upload subcommands (file-based: base64 stays on disk, out of LLM context)
+// ---------------------------------------------------------------------------
 
-function renderQueue(d: Digest): string {
-  const lines: string[] = ["### Today's queue", ""];
-  if (d.queue.length === 0) {
-    lines.push("_No tasks in the queue._");
-    return lines.join("\n");
-  }
-  lines.push("| # | Task [key] | Status | Role | Cap | Hours | Git |");
-  lines.push("|---|-------------|--------|------|-----|------|-----|");
-  for (const row of d.queue) {
-    lines.push(
-      `| ${row.rank} | ${row.title} [${row.key}] | ${row.status} | ${row.role} | ${fmtPct(row.capacity_pct)} | ${fmtHours(row.hours)} | ${row.git_summary ?? ""} |`
-    );
-  }
-  const committedRows = d.queue.filter((r) => r.capacity_pct !== null && r.capacity_pct > 0);
-  const totalPct = committedRows.reduce((s, r) => s + (r.capacity_pct ?? 0), 0);
-  const totalHours = committedRows.reduce((s, r) => s + (r.hours ?? 0), 0);
-  lines.push(
-    `|   | **Committed** | | | **${totalPct}%** | **${fmtHours(totalHours)}** | |`
-  );
-  lines.push("");
-  lines.push(`_8hr workday → hours = capacity% × ${WORKDAY_HOURS}, rounded to ¼h_`);
-  return lines.join("\n");
-}
-
-function renderCapacity(d: Digest): string {
-  const c = d.capacity;
-  const warn = c.over ? " ⚠️ over-committed" : "";
-  return [
-    "### Capacity",
-    "",
-    `- Base: ${c.base_pct}% | Committed: ${c.committed_pct}% | Free: ${c.free_pct}% | Utilization: ${c.utilization_pct}%${warn}`,
-    `- Committed hours: **${c.total_hours.toFixed(1)}h** / ${WORKDAY_HOURS}h workday`,
-  ].join("\n");
-}
-
-function decisionEmoji(d: ArtifactApprovalDecision): string {
-  if (!d.decided) return "⏳";
-  const dec = d.decision.toUpperCase();
-  if (dec === "APPROVED") return "✅";
-  if (dec === "REJECTED" || dec === "NEEDS_REVISION") return "❌";
-  return "•";
-}
-
-function renderReviews(d: Digest): string {
-  const lines: string[] = ["### Reviews due", ""];
-  if (d.reviews.length === 0) {
-    lines.push("Nothing pending.");
-    return lines.join("\n");
-  }
-  // Terse table: one row per artifact, one column per reviewer (emoji only,
-  // all reviewers present). Column headers are first names to keep it narrow.
-  const allReviewerNames: string[] = [];
-  const seen = new Set<string>();
-  for (const r of d.reviews) {
-    for (const dec of r.decisions) {
-      const first = dec.user_name.split(",")[0].trim();
-      if (!seen.has(first)) { seen.add(first); allReviewerNames.push(first); }
-    }
-  }
-  const header = ["Artifact", "v", ...allReviewerNames];
-  lines.push(`| ${header.join(" | ")} |`);
-  lines.push(`|${header.map(() => "---").join("|")}|`);
-  for (const r of d.reviews) {
-    const byName = new Map(r.decisions.map((dec) => [dec.user_name.split(",")[0].trim(), decisionEmoji(dec)]));
-    const cells = allReviewerNames.map((n) => byName.get(n) ?? "");
-    lines.push(`| ${r.title} | ${r.version} | ${cells.join(" | ")} |`);
-  }
-  return lines.join("\n");
-}
-
-/** Render the "reviews I owe" list (artifacts assigned to me, not yet decided). */
-function renderReviewsOwed(d: Digest): string {
-  const lines: string[] = ["### Reviews I owe", ""];
-  const owed = d.reviews_owed ?? [];
-  if (owed.length === 0) {
-    lines.push("_None — you're not blocking any reviews._");
-    return lines.join("\n");
-  }
-  for (const r of owed) {
-    const deadline = r.deadline ? ` (due ${r.deadline.slice(0, 10)})` : "";
-    const initiator = r.initiator ? ` — from ${r.initiator}` : "";
-    lines.push(`- **${r.title}** v${r.version}${deadline}${initiator}`);
-  }
-  return lines.join("\n");
-}
-
-function renderCorrections(d: Digest): string {
-  const lines: string[] = ["### Corrections", ""];
-  const stale = d.corrections.filter((c) => c.stale);
-  if (stale.length === 0) {
-    lines.push("_All reported review states match current versions._");
-    return lines.join("\n");
-  }
-  for (const c of stale) {
-    // The correction note is self-describing (it includes the reported state,
-    // current version, and verdict), so we just prefix the title.
-    lines.push(`- **${c.title}** — ${c.note}`);
-  }
-  return lines.join("\n");
-}
-
-function renderSuggestedActions(d: Digest): string {
-  const lines: string[] = ["### Suggested actions", ""];
-  if (d.suggested_actions.length === 0) {
-    lines.push("_No suggestions._");
-    return lines.join("\n");
-  }
-  d.suggested_actions.forEach((a, i) => lines.push(`${i + 1}. ${a}`));
-  return lines.join("\n");
-}
-
-function stateEmoji(state: string): string {
-  const s = state.toUpperCase();
-  if (s === "OPEN") return "🟢";
-  if (s === "MERGED") return "✅";
-  if (s === "CLOSED" || s === "DECLINED") return "⚫";
-  return "•";
-}
-
-function renderDevLinks(d: Digest): string {
-  const lines: string[] = ["### Dev links", ""];
-  const links = d.dev_links ?? [];
-  if (links.length === 0) {
-    lines.push("_No dev-links configured (set auraDigest in settings to enable)._");
-    return lines.join("\n");
-  }
-  const withPrs = links.filter((l) => l.pull_requests.length > 0 || l.branches.length > 0);
-  if (withPrs.length === 0) {
-    lines.push("_No related PRs or branches found for queue tasks._");
-    return lines.join("\n");
-  }
-  // Numbered list; task key inlined into each line (no separate header).
-  let n = 0;
-  for (const l of withPrs) {
-    for (const pr of l.pull_requests) {
-      n++;
-      const keyPart = `${l.task_key}: `;
-      lines.push(
-        `${n}. ${keyPart}${stateEmoji(pr.state)} [${pr.provider} #${pr.id}](${pr.url}) — ${pr.title} (${pr.state.toLowerCase()})`
-      );
-    }
-    for (const b of l.branches) {
-      n++;
-      lines.push(`${n}. ${l.task_key}: 🌿 ${b.provider} \`${b.repo}\` **${b.name}**`);
-    }
-  }
-  const errs = links.flatMap((l) => l.errors.map((e) => `${l.task_key}: ${e}`));
-  if (errs.length > 0) {
-    lines.push("");
-    lines.push("_errors:_");
-    for (const e of errs.slice(0, 3)) lines.push(`  - ${e}`);
-  }
-  return lines.join("\n");
-}
-
-function render(d: Digest): string {
-  const sections: string[] = [];
-  const day = new Date(d.date + "T00:00:00").toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
+async function uploadCreate(client: McpClient, opts: { file: string; mime?: string; filename?: string }): Promise<void> {
+  const buf = readFileSync(opts.file);
+  const contentBase64 = buf.toString("base64");
+  const filename = opts.filename ?? opts.file.split("/").pop() ?? "upload";
+  const res = await client.callTool<{ id?: string }>("mcpCreateUploadDocument", {
+    filename,
+    content_base64: contentBase64,
+    mime_type: opts.mime ?? "application/octet-stream",
   });
-  sections.push(`## Morning briefing — ${day}`, "");
-  if (d.summary) {
-    sections.push(`> ${d.summary.replace(/\n/g, "\n> ")}`, "");
-  }
-  sections.push(renderAttention(d), "");
-  sections.push(renderQueue(d), "");
-  sections.push(renderCapacity(d), "");
-  sections.push(renderReviews(d), "");
-  sections.push(renderReviewsOwed(d), "");
-  sections.push(renderCorrections(d), "");
-  sections.push(renderDevLinks(d), "");
-  sections.push(renderSuggestedActions(d), "");
-  return sections.join("\n") + "\n";
+  console.log(res.id ?? "(created, no id returned)");
+  await client.close();
 }
 
-function renderAction(): void {
-  const dir = process.argv[3];
-  const outPath = process.argv[4];
-  if (!dir) fail("render: missing <dir> argument", USAGE);
-  const digestPath = join(dir, "digest.json");
-  if (!existsSync(digestPath)) fail(`render: ${digestPath} not found`);
-  let d: Digest;
-  try {
-    d = JSON.parse(readFileSync(digestPath, "utf8")) as Digest;
-  } catch (e) {
-    fail(`render: failed to parse ${digestPath}: ${e instanceof Error ? e.message : String(e)}`, undefined, 1);
-  }
-  const md = render(d);
+interface UploadDocumentDetail {
+  id?: string;
+  filename?: string;
+  mime_type?: string;
+  byte_size?: number;
+  page_count?: number;
+  ingest_status?: string;
+  summary?: string;
+  pages?: Array<{ text?: string }>;
+  [k: string]: unknown;
+}
+
+async function uploadGet(client: McpClient, id: string, outPath?: string): Promise<void> {
+  const doc = await client.callTool<UploadDocumentDetail>("mcpGetUploadDocument", { id });
+  const text = (doc.pages ?? []).map((p) => p.text ?? "").join("\n\n---\n\n");
+  const summary = `# ${doc.filename ?? id}\n\n- mime: ${doc.mime_type ?? "?"}\n- size: ${doc.byte_size ?? "?"} bytes\n- pages: ${doc.page_count ?? "?"}\n- ingest: ${doc.ingest_status ?? "?"}\n- summary: ${doc.summary ?? ""}\n\n## Extracted text\n\n${text}\n`;
   if (outPath) {
-    writeFileSync(outPath, md, "utf8");
-    console.error(`rendered ${outPath}`);
+    writeFileSync(outPath, summary, "utf8");
+    console.log(`wrote ${outPath} (${summary.length} bytes)`);
+  } else if (summary.length <= LARGE_BODY_THRESHOLD * 4) {
+    process.stdout.write(summary);
   } else {
-    process.stdout.write(md);
+    const dir = freshWorkdir("aura-upload");
+    writeFileSync(join(dir, "parsed.md"), summary, "utf8");
+    console.log(`workdir: ${dir}/`);
+    console.error(`  ${doc.filename ?? id}  (${summary.length} bytes) — parsed text in parsed.md`);
   }
+  await client.close();
 }
 
-// ===========================================================================
-// cleanup
-// ===========================================================================
+// ---------------------------------------------------------------------------
+// arg parsing + dispatch
+// ---------------------------------------------------------------------------
 
-function cleanupAction(): void {
-  const dir = process.argv[3];
-  if (!dir) fail("cleanup: missing <dir> argument", USAGE);
-  if (!existsSync(dir)) fail(`cleanup: ${dir} not found`);
-  rmSync(dir, { recursive: true, force: true });
-  console.error(`cleaned up ${dir}`);
-}
-
-// ===========================================================================
-// last-digest store: save / diff / last
-// ===========================================================================
-
-function loadLastDigest(): LastDigestStore | null {
-  if (!existsSync(LAST_DIGEST_PATH)) return null;
-  try {
-    return JSON.parse(readFileSync(LAST_DIGEST_PATH, "utf8")) as LastDigestStore;
-  } catch (e) {
-    console.error(`warning: could not parse ${LAST_DIGEST_PATH}: ${e instanceof Error ? e.message : String(e)}`);
-    return null;
+function parseFlags(args: string[]): Record<string, string> {
+  const flags: Record<string, string> = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.startsWith("--")) {
+      const key = a.slice(2);
+      const next = args[i + 1];
+      if (next !== undefined && !next.startsWith("--")) {
+        flags[key] = next;
+        i++;
+      } else {
+        flags[key] = "true";
+      }
+    }
   }
+  return flags;
 }
-
-function saveAction(): void {
-  const dir = process.argv[3];
-  if (!dir) fail("save: missing <dir> argument", USAGE);
-  const digestPath = join(dir, "digest.json");
-  if (!existsSync(digestPath)) fail(`save: ${digestPath} not found`);
-  const digest = JSON.parse(readFileSync(digestPath, "utf8")) as Digest;
-  const presentedAt = new Date().toISOString();
-  const store: LastDigestStore = {
-    schema_version: LAST_DIGEST_SCHEMA_VERSION,
-    presented_at: presentedAt,
-    fetched_at: digest.meta?.generated_at ?? presentedAt,
-    digest,
-  };
-  mkdirSync(join(homedir(), ".pi", "aura"), { recursive: true });
-  writeFileSync(LAST_DIGEST_PATH, JSON.stringify(store, null, 2) + "\n", "utf8");
-  console.error(`saved last digest to ${LAST_DIGEST_PATH} (presented ${presentedAt})`);
-}
-
-function daysBetween(aIso: string, bIso: string): number {
-  const a = new Date(aIso.slice(0, 10) + "T00:00:00").getTime();
-  const b = new Date(bIso.slice(0, 10) + "T00:00:00").getTime();
-  return Math.round((b - a) / 86_400_000);
-}
-
-/** Compute a structured delta between a previous digest and the current one. */
-function computeDiff(prev: Digest, cur: Digest): DigestDiff {
-  const prevQueue = new Map(prev.queue.map((r) => [r.key, r]));
-  const curQueue = new Map(cur.queue.map((r) => [r.key, r]));
-  const queue_added = cur.queue.filter((r) => !prevQueue.has(r.key));
-  const queue_removed = prev.queue.filter((r) => !curQueue.has(r.key));
-  const queue_status_changed = cur.queue
-    .filter((r) => prevQueue.has(r.key) && prevQueue.get(r.key)!.status !== r.status)
-    .map((r) => ({ key: r.key, title: r.title, from: prevQueue.get(r.key)!.status, to: r.status }));
-
-  const capacity_delta_pct = cur.capacity.committed_pct - prev.capacity.committed_pct;
-  const capacity_delta_hours = cur.capacity.total_hours - prev.capacity.total_hours;
-
-  const prevReviews = new Map(prev.reviews.map((r) => [r.artifact_id, r]));
-  const reviews_added = cur.reviews.filter((r) => !prevReviews.has(r.artifact_id));
-  const reviews_progressed = cur.reviews
-    .filter((r) => prevReviews.has(r.artifact_id))
-    .map((r) => {
-      const p = prevReviews.get(r.artifact_id)!;
-      return {
-        artifact_id: r.artifact_id,
-        title: r.title,
-        from_decided: p.decided_count,
-        to_decided: r.decided_count,
-        from_version: p.version,
-        to_version: r.version,
-      };
-    })
-    .filter((d) => d.to_decided > d.from_decided || d.to_version > d.from_version);
-
-  const prevCorr = new Map(prev.corrections.map((c) => [c.artifact_id, c]));
-  const curCorr = new Map(cur.corrections.map((c) => [c.artifact_id, c]));
-  // Resolved: was stale last time, not stale (or absent) now.
-  const corrections_resolved = prev.corrections.filter(
-    (c) => c.stale && (!curCorr.has(c.artifact_id) || !curCorr.get(c.artifact_id)!.stale)
-  );
-  const corrections_new = cur.corrections.filter(
-    (c) => c.stale && !prevCorr.has(c.artifact_id)
-  );
-
-  const prevOverdue = new Map(prev.attention.overdue.map((i) => [i.key, i]));
-  const curOverdue = new Map(cur.attention.overdue.map((i) => [i.key, i]));
-  const overdue_added = cur.attention.overdue.filter((i) => !prevOverdue.has(i.key));
-  const overdue_cleared = prev.attention.overdue.filter((i) => !curOverdue.has(i.key));
-
-  return {
-    queue_added,
-    queue_removed,
-    queue_status_changed,
-    capacity_delta_pct,
-    capacity_delta_hours,
-    reviews_added,
-    reviews_progressed,
-    corrections_resolved,
-    corrections_new,
-    overdue_added,
-    overdue_cleared,
-    days_elapsed: daysBetween(prev.date, cur.date),
-  };
-}
-
-function diffAction(): void {
-  const dir = process.argv[3];
-  if (!dir) fail("diff: missing <dir> argument", USAGE);
-  const curPath = join(dir, "digest.json");
-  if (!existsSync(curPath)) fail(`diff: ${curPath} not found`);
-  const last = loadLastDigest();
-  if (!last) {
-    console.error(`no previous digest found at ${LAST_DIGEST_PATH}`);
-    process.stdout.write(JSON.stringify({ first_run: true }, null, 2) + "\n");
-    return;
-  }
-  const cur = JSON.parse(readFileSync(curPath, "utf8")) as Digest;
-  const diff = computeDiff(last.digest, cur);
-  process.stdout.write(JSON.stringify(diff, null, 2) + "\n");
-}
-
-function lastAction(): void {
-  const last = loadLastDigest();
-  if (!last) {
-    console.error(`no last digest found at ${LAST_DIGEST_PATH}`);
-    process.exit(1);
-  }
-  process.stdout.write(JSON.stringify(last, null, 2) + "\n");
-}
-
-// ===========================================================================
-// dispatch
-// ===========================================================================
 
 async function main(): Promise<void> {
-  const action = process.argv[2];
-  switch (action) {
-    case "fetch":
-      await fetchAction();
-      return;
-    case "render":
-      renderAction();
-      return;
-    case "cleanup":
-      cleanupAction();
-      return;
-    case "save":
-      saveAction();
-      return;
-    case "diff":
-      diffAction();
-      return;
-    case "last":
-      lastAction();
-      return;
-    default:
-      fail(
-        action ? `unknown action: ${action}` : "missing action",
-        USAGE
-      );
+  const group = process.argv[2];
+  const sub = process.argv[3];
+  const rest = process.argv.slice(4);
+  const settings = loadSettings();
+  const client = bearerClient(settings.mcpServers.aura);
+  await client.connect();
+
+  try {
+    if (group === "artifact") {
+      switch (sub) {
+        case "get": {
+          const id = rest[0];
+          if (!id) fail("artifact get: missing <artifact-uuid>", true);
+          await artifactGet(client, id);
+          return;
+        }
+        case "update": {
+          const dir = rest[0];
+          if (!dir) fail("artifact update: missing <workdir>", true);
+          const flags = parseFlags(rest.slice(1));
+          await artifactUpdate(client, resolve(dir), flags.summary);
+          return;
+        }
+        case "create": {
+          const flags = parseFlags(rest);
+          if (!flags.title || !flags.kind) fail("artifact create: --title and --kind required", true);
+          await artifactCreate(client, {
+            title: flags.title,
+            kind: flags.kind,
+            bodyFile: flags["body-file"],
+            summary: flags.summary,
+          });
+          return;
+        }
+        case "section": {
+          const id = rest[0];
+          const flags = parseFlags(rest.slice(1));
+          if (!id || !flags.heading || !flags.body || !flags.summary) {
+            fail("artifact section: <id> --heading H --body B --summary S required", true);
+          }
+          await artifactSection(client, id, flags.heading, flags.body, flags.summary);
+          return;
+        }
+        case "cleanup": {
+          if (rest[0] === "--stale") { cleanupStale(); return; }
+          const dir = rest[0];
+          if (!dir) fail("artifact cleanup: <workdir> or --stale required", true);
+          removeWorkdir(resolve(dir));
+          console.error(`cleaned up ${dir}`);
+          return;
+        }
+        default: fail(`artifact: unknown subcommand "${sub}"`, true);
+      }
+    } else if (group === "wiki") {
+      switch (sub) {
+        case "get": {
+          const flags = parseFlags(rest);
+          if (!flags.slug && !flags.uuid) fail("wiki get: --slug or --uuid required", true);
+          await wikiGet(client, { slug: flags.slug, uuid: flags.uuid });
+          return;
+        }
+        case "save": {
+          const dir = rest[0];
+          if (!dir) fail("wiki save: missing <workdir>", true);
+          const flags = parseFlags(rest.slice(1));
+          await wikiSave(client, resolve(dir), flags.summary);
+          return;
+        }
+        case "search": {
+          const query = rest[0];
+          if (!query) fail("wiki search: missing <query>", true);
+          const flags = parseFlags(rest.slice(1));
+          await wikiSearch(client, query, flags.space, flags.limit ? Number(flags.limit) : undefined);
+          return;
+        }
+        case "tree": {
+          const flags = parseFlags(rest);
+          if (!flags.slug) fail("wiki tree: --slug required", true);
+          await wikiTree(client, flags.slug);
+          return;
+        }
+        case "create": {
+          const flags = parseFlags(rest);
+          if (!flags.space || !flags.title || !flags.slug) fail("wiki create: --space --title --slug required", true);
+          await wikiCreate(client, { space: flags.space, title: flags.title, slug: flags.slug });
+          return;
+        }
+        default: fail(`wiki: unknown subcommand "${sub}"`, true);
+      }
+    } else if (group === "upload") {
+      switch (sub) {
+        case "create": {
+          const flags = parseFlags(rest);
+          if (!flags.file) fail("upload create: --file required", true);
+          await uploadCreate(client, { file: flags.file, mime: flags.mime, filename: flags.filename });
+          return;
+        }
+        case "get": {
+          const id = rest[0];
+          if (!id) fail("upload get: missing <upload-uuid>", true);
+          const flags = parseFlags(rest.slice(1));
+          await uploadGet(client, id, flags.out);
+          return;
+        }
+        default: fail(`upload: unknown subcommand "${sub}"`, true);
+      }
+    } else {
+      fail(group ? `unknown group "${group}"` : "missing group", true);
+    }
+  } catch (e) {
+    console.error("aura failed:", e instanceof Error ? e.message : String(e));
+    process.exit(1);
   }
 }
 

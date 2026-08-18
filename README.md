@@ -22,13 +22,12 @@ Aura integration for [pi](https://github.com/badlogic/pi-mono) — skills, agent
 
 | Command | Description |
 |---|---|
-| `/aura-skills-health` | Health check — verifies MCP adapter config, mcpx CLI installation, and Aura connectivity |
+| `/aura-skills-health` | Health check — verifies MCP adapter config and Aura connectivity |
 
 ## Prerequisites
 
 - [pi](https://github.com/badlogic/pi-mono) with [pi-subagents](https://www.npmjs.com/package/pi-subagents) and [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter)
 - An Aura instance with a Personal Access Token (PAT)
-- [mcpx](https://github.com/arcadeai-labs/mcpx) CLI (for file-based artifact/wiki workflows)
 
 ### MCP configuration
 
@@ -45,12 +44,6 @@ Add to `~/.config/mcp/mcp.json`:
     }
   }
 }
-```
-
-### mcpx configuration
-
-```bash
-mcpx add aura-mcp-dev --url "https://<your-aura-instance>/mcp"
 ```
 
 ## Install
@@ -79,11 +72,11 @@ The `aura` skill is discoverable by the agent whenever you mention Aura, tasks, 
 /aura-skills-health
 ```
 
-Runs 6 diagnostic checks and reports what's working and what's not, with fix instructions for any failures.
+Runs diagnostic checks and reports what's working and what's not, with fix instructions for any failures.
 
 ## Design principles
 
-- **CLI-first for large content.** Artifact bodies, wiki documents, and file uploads travel via `mcpx` and local files — never through the LLM context as tool arguments. This avoids re-generation waste, context pollution, and hallucination risk.
+- **File-based for large content.** Artifact bodies and wiki documents travel via the `aura` skill's `aura.mjs` script and local files — never through the LLM context as tool arguments. The script owns a workdir per round-trip (pairs the entity id with the body file, auto-cleans on upload), so id↔body mismatch and stale files are impossible. This avoids re-generation waste, context pollution, and hallucination risk.
 - **Process-aware.** The skill encodes the Aura development process (workflow phases, roles, capacity rules, escalation paths) so agents follow it correctly.
 - **Consent-first for sensitive operations.** Escalations, capacity changes for others, and wiki modifications all require explicit user approval.
 - **Cheap models for routine work.** The morning pipeline runs on `deepseek-v4-flash` — fast and inexpensive for data fetching and summarization.
