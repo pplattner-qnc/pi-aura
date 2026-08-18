@@ -194,12 +194,19 @@ export class SecretServiceKeyring implements Keyring {
     let bus: MessageBus | undefined;
     try {
       bus = dbus.sessionBus();
-      const obj = await bus.getProxyObject(SECRETS_DESTINATION, SECRETS_PATH);
-      const service = obj.getInterface(SERVICE_INTERFACE);
-      // A lightweight probe: ReadAlias never prompts and fails fast if the
-      // service is not present or the bus is unreachable.
-      await service.ReadAlias("default");
-      return true;
+      // Swallow connection errors emitted as events so they don't crash the
+      // process before the promise rejection is handled. Also guard against
+      // dbus-next leaving the probe promise pending when the socket fails.
+      bus.on("error", () => {});
+      const available = await Promise.race([
+        bus
+          .getProxyObject(SECRETS_DESTINATION, SECRETS_PATH)
+          .then((obj) => obj.getInterface(SERVICE_INTERFACE))
+          .then((service) => service.ReadAlias("default"))
+          .then(() => true),
+        new Promise<false>((resolve) => setTimeout(() => resolve(false), 3000)),
+      ]);
+      return available;
     } catch {
       return false;
     } finally {
@@ -258,6 +265,9 @@ export class SecretServiceKeyring implements Keyring {
     let bus: MessageBus | undefined;
     try {
       bus = dbus.sessionBus();
+      // Swallow connection errors emitted as events so they don't crash the
+      // process before the promise rejection is handled.
+      bus.on("error", () => {});
       const serviceObj = await bus.getProxyObject(SECRETS_DESTINATION, SECRETS_PATH);
       const service = serviceObj.getInterface(SERVICE_INTERFACE);
 
