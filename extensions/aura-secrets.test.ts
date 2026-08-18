@@ -10,13 +10,16 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import auraSecretsExtension, {
+  decideEditAction,
   discoverPat,
   DISCOVERY_SOURCES,
   getArgumentCompletions,
   handleDiscover,
+  handleEdit,
   parseAuraArgs,
   readMcpBearerToken,
   type DiscoverySource,
+  type EditDecision,
 } from "./aura-secrets.ts";
 
 // Empty/unknown -> usage
@@ -371,11 +374,6 @@ async function runHandler(args: string) {
   return ctx.getNotifies();
 }
 
-// edit stub still in place for slice 3
-assert.deepStrictEqual(await runHandler("secrets edit"), [
-  { message: "not implemented", level: "info" },
-]);
-
 // Unknown / empty -> usage warning
 assert.deepStrictEqual(await runHandler(""), [
   { message: "Usage: /aura secrets {discover|edit}", level: "warning" },
@@ -389,6 +387,146 @@ assert.deepStrictEqual(await runHandler("secrets"), [
 assert.deepStrictEqual(await runHandler("secrets foo"), [
   { message: "Usage: /aura secrets {discover|edit}", level: "warning" },
 ]);
+
+// --- decideEditAction pure function ---
+
+function assertDecision(actual: EditDecision, expected: EditDecision, message: string) {
+  assert.deepStrictEqual(actual, expected, message);
+}
+
+assertDecision(decideEditAction("abc", undefined), { action: "cancel" }, "undefined edited -> cancel");
+assertDecision(decideEditAction("abc", null), { action: "cancel" }, "null edited -> cancel");
+assertDecision(decideEditAction("abc", "abc"), { action: "unchanged" }, "same as current -> unchanged");
+assertDecision(decideEditAction("abc", "xyz"), { action: "save", value: "xyz" }, "different non-empty -> save");
+assertDecision(
+  decideEditAction(null, ""),
+  { action: "confirm-empty" },
+  "empty when no prior value -> confirm-empty"
+);
+assertDecision(
+  decideEditAction("abc", ""),
+  { action: "confirm-empty" },
+  "empty when a prior value exists -> confirm-empty"
+);
+assertDecision(
+  decideEditAction(null, "new-pat"),
+  { action: "save", value: "new-pat" },
+  "new non-empty PAT when none stored -> save"
+);
+
+console.log("decideEditAction pure-function tests passed");
+
+// --- handleEdit UI/keyring logic ---
+
+function makeMockEditUi(options: {
+  editorResult?: string;
+  confirmResult?: boolean;
+} = {}) {
+  const notifies: NotifyCall[] = [];
+  return {
+    ui: {
+      notify(message: string, level: "info" | "warning" | "error") {
+        notifies.push({ message, level });
+      },
+      async editor(_title: string, _prefilled: string): Promise<string | undefined> {
+        return options.editorResult;
+      },
+      async confirm(_title: string, _message: string) {
+        return options.confirmResult ?? false;
+      },
+    },
+    getNotifies() {
+      return notifies;
+    },
+  };
+}
+
+// Cancelled editor -> no write
+{
+  const { ui, getNotifies } = makeMockEditUi({ editorResult: undefined });
+  const { keyring, getStored } = makeMockKeyring();
+  await handleEdit(
+    ui,
+    async () => keyring as unknown as import("@pi-aura/shared/keyring").Keyring,
+    "existing-pat"
+  );
+  assert.strictEqual(getStored().length, 0, "nothing stored on cancel");
+  assert.ok(
+    notifiesSome(getNotifies(), (n) => n.message === "no change" && n.level === "info"),
+    "no-change notification shown on cancel"
+  );
+}
+
+// Unchanged value -> no write
+{
+  const { ui, getNotifies } = makeMockEditUi({ editorResult: "existing-pat" });
+  const { keyring, getStored } = makeMockKeyring();
+  await handleEdit(
+    ui,
+    async () => keyring as unknown as import("@pi-aura/shared/keyring").Keyring,
+    "existing-pat"
+  );
+  assert.strictEqual(getStored().length, 0, "nothing stored when unchanged");
+  assert.ok(
+    notifiesSome(getNotifies(), (n) => n.message === "unchanged" && n.level === "info"),
+    "unchanged notification shown"
+  );
+}
+
+// Changed value -> write
+{
+  const { ui, getNotifies } = makeMockEditUi({ editorResult: "new-pat" });
+  const { keyring, getStored } = makeMockKeyring();
+  await handleEdit(
+    ui,
+    async () => keyring as unknown as import("@pi-aura/shared/keyring").Keyring,
+    "existing-pat"
+  );
+  const stored = getStored();
+  assert.strictEqual(stored.length, 1);
+  assert.deepStrictEqual(stored[0].key, { service: "aura", name: "pat" });
+  assert.strictEqual(stored[0].secret, "new-pat");
+  assert.ok(
+    notifiesSome(getNotifies(), (n) => n.message === "saved" && n.level === "info"),
+    "saved notification shown"
+  );
+}
+
+// Empty value -> confirm -> decline -> no write
+{
+  const { ui, getNotifies } = makeMockEditUi({ editorResult: "", confirmResult: false });
+  const { keyring, getStored } = makeMockKeyring();
+  await handleEdit(
+    ui,
+    async () => keyring as unknown as import("@pi-aura/shared/keyring").Keyring,
+    "existing-pat"
+  );
+  assert.strictEqual(getStored().length, 0, "nothing stored when empty declined");
+  assert.ok(
+    notifiesSome(getNotifies(), (n) => n.message === "no change" && n.level === "info"),
+    "no-change notification shown on empty decline"
+  );
+}
+
+// Empty value -> confirm -> accept -> write empty
+{
+  const { ui, getNotifies } = makeMockEditUi({ editorResult: "", confirmResult: true });
+  const { keyring, getStored } = makeMockKeyring();
+  await handleEdit(
+    ui,
+    async () => keyring as unknown as import("@pi-aura/shared/keyring").Keyring,
+    "existing-pat"
+  );
+  const stored = getStored();
+  assert.strictEqual(stored.length, 1);
+  assert.strictEqual(stored[0].secret, "");
+  assert.ok(
+    notifiesSome(getNotifies(), (n) => n.message === "saved" && n.level === "info"),
+    "saved notification shown for empty accepted"
+  );
+}
+
+console.log("handleEdit tests passed");
 
 console.log("handler dispatch tests passed");
 console.log("All tests passed");

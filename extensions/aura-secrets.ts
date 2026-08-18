@@ -118,6 +118,76 @@ export async function discoverPat(sources: DiscoverySource[]): Promise<Discovere
 
 const AURA_PAT_KEY: SecretKey = { service: "aura", name: "pat" };
 
+/** Decision produced by `decideEditAction` for the edit handler. */
+export type EditDecision =
+  | { action: "cancel" }
+  | { action: "unchanged" }
+  | { action: "save"; value: string }
+  | { action: "confirm-empty" };
+
+/** Pure function deciding what to do after the user edits the PAT.
+ *
+ *  Unit-testable without a pi session or keyring. */
+export function decideEditAction(
+  current: string | null,
+  edited: string | undefined | null
+): EditDecision {
+  if (edited === undefined || edited === null) {
+    return { action: "cancel" };
+  }
+  if (edited === current) {
+    return { action: "unchanged" };
+  }
+  if (edited === "") {
+    return { action: "confirm-empty" };
+  }
+  return { action: "save", value: edited };
+}
+
+/** Thin UI wrapper around `decideEditAction`.
+ *
+ *  Opens the editor prefilled with the current PAT (or a placeholder), asks for
+ *  confirmation when storing an empty PAT, and writes the result back to the
+ *  keyring. Guards for cancel/non-TUI mode. */
+export async function handleEdit(
+  ui: Pick<ExtensionUIContext, "notify" | "editor" | "confirm">,
+  keyringFactory: () => Promise<Keyring>,
+  current: string | null
+): Promise<void> {
+  const placeholder = "<paste your Aura PAT here>";
+  const edited = await ui.editor("Aura PAT", current ?? placeholder);
+
+  const decision = decideEditAction(current, edited);
+
+  switch (decision.action) {
+    case "cancel":
+      ui.notify("no change", "info");
+      return;
+    case "unchanged":
+      ui.notify("unchanged", "info");
+      return;
+    case "confirm-empty": {
+      const confirmed = await ui.confirm(
+        "Save empty PAT?",
+        "An empty PAT won't authenticate. Save anyway?"
+      );
+      if (!confirmed) {
+        ui.notify("no change", "info");
+        return;
+      }
+      // fall through to save the empty string
+      break;
+    }
+    case "save":
+      break;
+  }
+
+  const value = decision.action === "save" ? decision.value : "";
+  const keyring = await keyringFactory();
+  await keyring.setSecret(AURA_PAT_KEY, value);
+  ui.notify("saved", "info");
+}
+
 /** Thin UI wrapper around `discoverPat`.
  *
  *  Notifies the user which sources were checked, offers to import a found PAT
@@ -215,9 +285,21 @@ export default function auraSecretsExtension(pi: ExtensionAPI) {
           await handleDiscover(ctx.ui, createKeyring);
           return;
         }
-        case "secrets-edit":
-          ctx.ui.notify("not implemented", "info");
+        case "secrets-edit": {
+          const { createKeyring, KeyringLockedError } = await import("@pi-aura/shared/keyring");
+          try {
+            const keyring = await createKeyring();
+            const current = await keyring.getSecret(AURA_PAT_KEY);
+            await handleEdit(ctx.ui, () => Promise.resolve(keyring), current);
+          } catch (error) {
+            if (error instanceof KeyringLockedError) {
+              ctx.ui.notify(error.message, "error");
+              return;
+            }
+            throw error;
+          }
           return;
+        }
         default:
           ctx.ui.notify(USAGE, "warning");
           return;
