@@ -20,9 +20,7 @@ Aura integration for [pi](https://github.com/badlogic/pi-mono) — skills, agent
 
 ### Commands
 
-| Command | Description |
-|---|---|
-| `/aura-skills-health` | Health check — verifies MCP adapter config and Aura connectivity |
+_(No user-facing commands are registered by this package.)_
 
 ## Prerequisites
 
@@ -65,14 +63,6 @@ Fetches your briefing, attention items, priority queue, capacity, and pending re
 ### Working with Aura
 
 The `aura` skill is discoverable by the agent whenever you mention Aura, tasks, artifacts, wiki, or project planning. It loads the relevant resource files for the task at hand — no need to invoke it explicitly.
-
-### Health check
-
-```
-/aura-skills-health
-```
-
-Runs diagnostic checks and reports what's working and what's not, with fix instructions for any failures.
 
 ## Design principles
 

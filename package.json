@@ -5,7 +5,6 @@
   "keywords": ["pi-package"],
   "pi": {
     "extensions": [
-      "./extensions/aura-health.ts",
       "./extensions/aura-skill-instruction.ts"
     ],
     "skills": ["./skills"],
