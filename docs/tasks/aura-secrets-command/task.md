@@ -74,3 +74,29 @@ From the first grilling: `/aura secrets discover` + `edit` (Q12/Q14),
 extensible discovery sources (Q6), `ctx.ui.editor` prefilled (Q14),
 secrets-only (Q3). From the third grilling: the extension imports
 `@pi-aura/shared/keyring` by name via the workspace package.
+
+## Implementation notes
+
+### slice: aura-command-skeleton
+
+Implemented the `/aura` slash-command skeleton in `extensions/aura-secrets.ts`:
+registers `/aura` via `pi.registerCommand` with `description`,
+`getArgumentCompletions`, and `handler`. The handler parses `args` with the
+pure function `parseAuraArgs` and dispatches to stub branches for
+`secrets discover` and `secrets edit`, or shows a usage warning for
+unknown/empty input. `getArgumentCompletions` completes `secrets` and then
+`discover`/`edit`. Added `./extensions/aura-secrets.ts` to root `package.json`
+`pi.extensions`.
+
+Additive exports for testability (not in the spec but harmless): `parseAuraArgs`,
+`getArgumentCompletions`, and supporting types `AuraSubcommand`,
+`ParsedAuraArgs`. The default-export extension function matches the spec
+exactly. A smoke test (`extensions/aura-secrets.test.ts`, run via
+`node --experimental-strip-types`) and a throwaway tsconfig
+(`.work/tsconfig-aura-secrets.json`) were committed as verification
+artifacts. `getArgumentCompletions("secrets")` returns the subcommand list
+in addition to `"crets "` prefixes, consistent with the spec examples.
+
+Verification: slice tests pass (parse, completions, handler dispatch);
+`npm run typecheck` and `npm run build` both clean. Lint gate N/A (no
+lint tooling configured in repo).
