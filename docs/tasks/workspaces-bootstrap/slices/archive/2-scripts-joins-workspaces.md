@@ -7,7 +7,7 @@ mode: hitl
 status: done
 size: s
 blocked_by:
-  - workspaces-skeleton
+- workspaces-skeleton
 ---
 
 ## End-to-end behavior
