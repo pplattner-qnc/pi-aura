@@ -176,3 +176,54 @@ branch.
   packing choice (documented in source) over the alternative
   namespace-as-account-prefix option; both were equally valid per the slice
   doc.
+
+### slice(secret-service-dbus-impl): SecretServiceKeyring — dbus-next Secret Service impl of Keyring
+
+- Merged `slice/secret-service-dbus-impl` into `task/keyring-rewrite`.
+- `packages/shared/src/keyring/secret-service-keyring.ts` exports `class
+  SecretServiceKeyring implements Keyring` — a Linux Secret Service D-Bus
+  backend using `dbus-next` with the `DH-ietf1024-sha256-aes128-cbc-pkcs7`
+  handshake and AES-128-CBC + PKCS#7 encryption. Static top-level
+  `import dbus from "dbus-next"` (file is only dynamically loaded on Linux by
+  the upcoming dispatch slice).
+- Added `dbus-next@^0.10.2` to `packages/shared/package.json` `dependencies`
+  (hoisted to root `node_modules`).
+- `static async isAvailable()` probes the session bus + Secret Service with a
+  3-second timeout guard and an `error` event listener (prevents dbus-next from
+  crashing/hanging when the session bus socket is absent).
+- DH handshake uses Node's `getDiffieHellman("modp2")` (IETF MODP 1024-bit /
+  Oakley Group 2). Key derivation matches libsecret: HKDF-SHA256 with
+  salt = 32 zero bytes, info = empty, IKM = DH shared secret padded to
+  128 bytes.
+- CRUD via `org.freedesktop.Secret.Service/Collection/Item`. Default
+  collection resolution: alias `default` →
+  `/org/freedesktop/secrets/collection/login` → `CreateCollection("default")`
+  if absent. Attribute packing:
+  `{ "xdg:schema": "aura-skills", service, name }`.
+- `listSecrets()` probes each known `SecretKey` with `getSecret` (no side-index,
+  per Q10).
+- Locked collection/item errors map to `KeyringLockedError`; other D-Bus
+  errors map to `KeyringDBusError` (`wrapDbusError`/`isLockedDbusError` inspect
+  D-Bus error type/text).
+- `SecretServiceKeyring` is exported only from `secret-service-keyring.ts`
+  (intentionally **not** re-exported from the public barrel), matching the
+  task-level export contract.
+- Verification: `npm run typecheck` passed in `packages/shared` and `scripts`;
+  `scripts` build passed (both aura-digest/aura bundles); a bundled smoke test
+  round-tripped CRUD against the real GNOME Keyring on the dev box (set OK,
+  get matches, list found, delete true, get-after-delete null). Negative
+  probes: `DBUS_SESSION_BUS_ADDRESS=` and a nonexistent socket path both return
+  `isAvailable() === false` without crashing/hanging. No committed test suite
+  exists per `docs/testing.md`.
+- Deviations (per TDD worker, all non-blocking):
+  (1) `isAvailable()` returns `Promise<boolean>` rather than `boolean` —
+  D-Bus reachability can only be verified asynchronously; the pending
+  `create-keyring-dispatch` slice must `await` it.
+  (2) `org.freedesktop.Secret.Item` properties in `CreateItem` must be
+  fully qualified (`"org.freedesktop.Secret.Item.Attributes"` /
+  `"org.freedesktop.Secret.Item.Label"`) — shorter names are rejected by
+  GNOME Keyring (implementation detail surfaced by D-Bus monitoring).
+  (3) The HKDF-SHA256 key derivation (zero salt/info) was reverse-engineered
+  from libsecret 0.21.7 source because the spec wording was ambiguous on key
+  derivation.
+  (4) `isAvailable()` includes the timeout guard + error listener noted above.
