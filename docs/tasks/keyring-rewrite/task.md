@@ -4,7 +4,7 @@ type: feature
 slug: keyring-rewrite
 title: From-scratch keyring.ts in @pi-aura/shared (dbus-next Linux, no KeyringBackend seam)
 map: aura-access-rewrite
-status: ready
+status: done
 slices:
 - keyring-interface-and-enum
 - file-keyring-impl
@@ -93,3 +93,179 @@ Windows + side-index, `isAvailable()` static not on interface, three
 errors, per-impl OS-string packing + namespace normalization, split by
 impl, `dbus-next` in `dependencies` dynamically imported in the Linux
 branch.
+
+## Implementation notes
+
+### slice(keyring-interface-and-enum): SecretKey enum, Keyring interface, errors, and barrel
+
+- Merged `slice/keyring-interface-and-enum` into `task/keyring-rewrite`.
+- `packages/shared/src/keyring/keyring.ts` exports the closed `SecretKey`
+  discriminated union (`{ service: "aura"; name: "pat" }`), `StoredSecret`,
+  the `Keyring` interface, the three error classes
+  (`KeyringUnavailableError`, `KeyringLockedError`, `KeyringDBusError`), and
+  `createKeyring()` (throws "not implemented").
+- `packages/shared/src/keyring/index.ts` barrels the public surface; the
+  exec helpers (`run`, `resolveBinary`, `isFile`, `ExecError`,
+  `ToolMissingError`) live in `internal.ts` and are **not** re-exported by
+  the barrel (pre-authorized by the architecture spec for slice 3's use).
+- `packages/shared/package.json` adds the `"./keyring"` export and a
+  minimal `"typecheck": "tsc --noEmit"` script.
+- Verification: `npm run typecheck` passed in `packages/shared`; scratch
+  TypeScript and bundled-ESM runtime checks passed (`createKeyring()`
+  throws `Error("not implemented")`). No committed test suite exists per
+  `docs/testing.md`.
+- Deviations (per TDD worker): (1) `internal.ts` created in this slice
+  instead of slice 3 — the architecture spec pre-authorizes it; (2) the
+  `typecheck` npm script was added to satisfy the acceptance criterion; (3)
+  scratch tests used in lieu of a committed suite.
+
+### slice(file-keyring-impl): FileKeyring — JSON-on-disk fallback that implements Keyring
+
+- Merged `slice/file-keyring-impl` into `task/keyring-rewrite`.
+- `packages/shared/src/keyring/file-keyring.ts` exports `class FileKeyring
+  implements Keyring`: `isAvailable()` returns `true` (always-available fallback);
+  CRUD round-trips against a JSON store keyed by `${service}/${name}`;
+  `listSecrets()` probes the closed `SecretKey` enumeration and ignores unknown
+  map entries; corrupt JSON is swallowed (treated as empty store); the store
+  directory is `mkdir -p`-ed, the file is written with mode `0o600` (chmod
+  failures ignored).
+- The namespace constant `"aura-skills"` lives in this module and builds the
+  default store path (`~/.cache/aura-skills/store.json`). A constructor arg
+  allows injecting a temp store path for tests (internal seam, not on the
+  `Keyring` interface).
+- `FileKeyring` is exported only from `file-keyring.ts` (intentionally **not**
+  re-exported from the public barrel), matching the task-level export contract.
+- Verification: `npm run typecheck` passed in `packages/shared` and
+  `scripts`; an esbuild-bundled smoke test round-tripped CRUD and confirmed
+  store file mode `600`. No committed test suite exists per `docs/testing.md`.
+- Deviations (per TDD worker): none beyond the slice plan. The first esbuild
+  smoke run served as the RED step; an unused `unpackKey` helper was removed
+  before the first GREEN commit.
+
+### slice(macos-keyring-impl): MacosKeyring — security CLI impl of Keyring
+
+- Merged `slice/macos-keyring-impl` into `task/keyring-rewrite`.
+- `packages/shared/src/keyring/macos-keyring.ts` exports `class MacosKeyring
+  implements Keyring`: `static isAvailable()` returns `true` iff
+  `process.platform === "darwin"` and `/usr/bin/security` exists; CRUD
+  round-trips via `security find-generic-password` / `add-generic-password` /
+  `delete-generic-password` / `dump-keychain`. `setSecret` does
+  delete-then-add (no upsert); `deleteSecret` returns `false` on exit 44
+  (secItemNotFound); `listSecrets` parses `dump-keychain` blocks and re-reads
+  each secret via `getSecret` (never trusts dump text for values).
+- Per-impl packing (Q14): namespace `"aura-skills"` is the `-s` (service)
+  attribute and the account stores `${service}/${name}` (e.g. `"aura/pat"`),
+  making `listSecrets` recovery unambiguous and keeping the namespace scoped
+  under a single macOS service attribute. This is one of the two recommended
+  packing options in the slice doc.
+- Locked-keychain detection is a best-effort string scan of `security` stderr
+  for known macOS messages, mapping to `KeyringLockedError`. Exact error text
+  may vary by OS version.
+- `MacosKeyring` is exported only from `macos-keyring.ts` (intentionally
+  **not** re-exported from the public barrel), matching the task-level export
+  contract.
+- Verification: `npm run typecheck` passed in `packages/shared` and
+  `scripts`; a `tsx` runtime check confirmed
+  `MacosKeyring.isAvailable() === false` on `process.platform === "linux"`
+  (platform guard). Full CRUD round-trip against a real keychain was **not**
+  performed because the dev box is Linux and lacks `/usr/bin/security` — this
+  is the expected residual risk called out in the slice doc and arch spec (a
+  manual macOS-host verification step). No committed test suite exists per
+  `docs/testing.md`.
+- Deviations (per TDD worker): the `-s "aura-skills"` / `-a "<service>/<name>"`
+  packing choice (documented in source) over the alternative
+  namespace-as-account-prefix option; both were equally valid per the slice
+  doc.
+
+### slice(secret-service-dbus-impl): SecretServiceKeyring — dbus-next Secret Service impl of Keyring
+
+- Merged `slice/secret-service-dbus-impl` into `task/keyring-rewrite`.
+- `packages/shared/src/keyring/secret-service-keyring.ts` exports `class
+  SecretServiceKeyring implements Keyring` — a Linux Secret Service D-Bus
+  backend using `dbus-next` with the `DH-ietf1024-sha256-aes128-cbc-pkcs7`
+  handshake and AES-128-CBC + PKCS#7 encryption. Static top-level
+  `import dbus from "dbus-next"` (file is only dynamically loaded on Linux by
+  the upcoming dispatch slice).
+- Added `dbus-next@^0.10.2` to `packages/shared/package.json` `dependencies`
+  (hoisted to root `node_modules`).
+- `static async isAvailable()` probes the session bus + Secret Service with a
+  3-second timeout guard and an `error` event listener (prevents dbus-next from
+  crashing/hanging when the session bus socket is absent).
+- DH handshake uses Node's `getDiffieHellman("modp2")` (IETF MODP 1024-bit /
+  Oakley Group 2). Key derivation matches libsecret: HKDF-SHA256 with
+  salt = 32 zero bytes, info = empty, IKM = DH shared secret padded to
+  128 bytes.
+- CRUD via `org.freedesktop.Secret.Service/Collection/Item`. Default
+  collection resolution: alias `default` →
+  `/org/freedesktop/secrets/collection/login` → `CreateCollection("default")`
+  if absent. Attribute packing:
+  `{ "xdg:schema": "aura-skills", service, name }`.
+- `listSecrets()` probes each known `SecretKey` with `getSecret` (no side-index,
+  per Q10).
+- Locked collection/item errors map to `KeyringLockedError`; other D-Bus
+  errors map to `KeyringDBusError` (`wrapDbusError`/`isLockedDbusError` inspect
+  D-Bus error type/text).
+- `SecretServiceKeyring` is exported only from `secret-service-keyring.ts`
+  (intentionally **not** re-exported from the public barrel), matching the
+  task-level export contract.
+- Verification: `npm run typecheck` passed in `packages/shared` and `scripts`;
+  `scripts` build passed (both aura-digest/aura bundles); a bundled smoke test
+  round-tripped CRUD against the real GNOME Keyring on the dev box (set OK,
+  get matches, list found, delete true, get-after-delete null). Negative
+  probes: `DBUS_SESSION_BUS_ADDRESS=` and a nonexistent socket path both return
+  `isAvailable() === false` without crashing/hanging. No committed test suite
+  exists per `docs/testing.md`.
+- Deviations (per TDD worker, all non-blocking):
+  (1) `isAvailable()` returns `Promise<boolean>` rather than `boolean` —
+  D-Bus reachability can only be verified asynchronously; the pending
+  `create-keyring-dispatch` slice must `await` it.
+  (2) `org.freedesktop.Secret.Item` properties in `CreateItem` must be
+  fully qualified (`"org.freedesktop.Secret.Item.Attributes"` /
+  `"org.freedesktop.Secret.Item.Label"`) — shorter names are rejected by
+  GNOME Keyring (implementation detail surfaced by D-Bus monitoring).
+  (3) The HKDF-SHA256 key derivation (zero salt/info) was reverse-engineered
+  from libsecret 0.21.7 source because the spec wording was ambiguous on key
+  derivation.
+  (4) `isAvailable()` includes the timeout guard + error listener noted above.
+
+### slice(create-keyring-dispatch): createKeyring() inline switch + isAvailable probe loop
+
+- Merged `slice/create-keyring-dispatch` into `task/keyring-rewrite`.
+- `createKeyring()` in `packages/shared/src/keyring/keyring.ts` is now an
+  inline `switch (process.platform)` that dispatches to the platform
+  implementation, probing each with `await isAvailable()` and falling back to
+  `FileKeyring`.
+  - `case "darwin"`: tries `MacosKeyring` (static `isAvailable()`), falls
+    through to `FileKeyring`.
+  - `case "linux"`: `const { SecretServiceKeyring } = await
+    import("./secret-service-keyring.js")` — the only static reference to the
+    Linux impl is the dynamic `import()` path string; tries
+    `SecretServiceKeyring.isAvailable()`, falls through to `FileKeyring`.
+  - `default`: `FileKeyring`.
+  - Throws `KeyringUnavailableError` with a `tried` array listing the candidate
+    backends when no backend is available.
+- `await` is applied uniformly to all `isAvailable()` calls — correct because
+  the backends have mixed signatures (`FileKeyring`/`MacosKeyring` return
+  `boolean`, `SecretServiceKeyring` returns `Promise<boolean>`). `await` on a
+  sync boolean is harmless.
+- **Cross-platform import isolation confirmed**: `keyring.ts` has only static
+  imports of `FileKeyring` and `MacosKeyring`. The sole reference to
+  `secret-service-keyring` is the dynamic `import()` path string inside
+  `case "linux"`. macOS/file code paths never evaluate the `dbus-next` module
+  graph at runtime. esbuild `--splitting` bundle analysis confirms the
+  secret-service code (and its `dbus-next` dependency) is isolated in a lazy
+  chunk with 0 dbus references in the main chunk.
+- Verification: `npm run typecheck` passed in `packages/shared` and `scripts`;
+  `scripts` build passed. A bundled esbuild smoke test (CJS format, `--external:x11`)
+  confirmed the normal Linux path returns `SecretServiceKeyring` and CRUD
+  round-trips; the no-D-Bus fallback path (`DBUS_SESSION_BUS_ADDRESS=`) returns
+  `FileKeyring` and still round-trips. No committed test suite exists per
+  `docs/testing.md`.
+- Deviations (per TDD worker): none. The implementation follows the slice doc
+  and architecture spec exactly.
+- Residual risk (per verify worker): esbuild statically resolves dynamic
+  `import()` at bundle time — a naive single-file bundle without `--splitting`
+  pulls `dbus-next` → `x11` into the graph. This is a bundler behavior, not a
+  defect in `keyring.ts`; at runtime the `case "linux"` guard prevents
+  evaluation on other platforms. Worth noting if a future macOS bundle step
+  uses naive esbuild.

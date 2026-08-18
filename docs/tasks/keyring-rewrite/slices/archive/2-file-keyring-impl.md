@@ -4,7 +4,7 @@ slug: file-keyring-impl
 title: FileKeyring — JSON-on-disk fallback that implements Keyring
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: s
 blocked_by:
   - keyring-interface-and-enum
