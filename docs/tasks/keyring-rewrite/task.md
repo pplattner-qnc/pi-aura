@@ -118,3 +118,26 @@ branch.
   instead of slice 3 — the architecture spec pre-authorizes it; (2) the
   `typecheck` npm script was added to satisfy the acceptance criterion; (3)
   scratch tests used in lieu of a committed suite.
+
+### slice(file-keyring-impl): FileKeyring — JSON-on-disk fallback that implements Keyring
+
+- Merged `slice/file-keyring-impl` into `task/keyring-rewrite`.
+- `packages/shared/src/keyring/file-keyring.ts` exports `class FileKeyring
+  implements Keyring`: `isAvailable()` returns `true` (always-available fallback);
+  CRUD round-trips against a JSON store keyed by `${service}/${name}`;
+  `listSecrets()` probes the closed `SecretKey` enumeration and ignores unknown
+  map entries; corrupt JSON is swallowed (treated as empty store); the store
+  directory is `mkdir -p`-ed, the file is written with mode `0o600` (chmod
+  failures ignored).
+- The namespace constant `"aura-skills"` lives in this module and builds the
+  default store path (`~/.cache/aura-skills/store.json`). A constructor arg
+  allows injecting a temp store path for tests (internal seam, not on the
+  `Keyring` interface).
+- `FileKeyring` is exported only from `file-keyring.ts` (intentionally **not**
+  re-exported from the public barrel), matching the task-level export contract.
+- Verification: `npm run typecheck` passed in `packages/shared` and
+  `scripts`; an esbuild-bundled smoke test round-tripped CRUD and confirmed
+  store file mode `600`. No committed test suite exists per `docs/testing.md`.
+- Deviations (per TDD worker): none beyond the slice plan. The first esbuild
+  smoke run served as the RED step; an unused `unpackKey` helper was removed
+  before the first GREEN commit.
