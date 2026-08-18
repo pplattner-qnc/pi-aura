@@ -100,3 +100,41 @@ in addition to `"crets "` prefixes, consistent with the spec examples.
 Verification: slice tests pass (parse, completions, handler dispatch);
 `npm run typecheck` and `npm run build` both clean. Lint gate N/A (no
 lint tooling configured in repo).
+
+### slice: secrets-discover
+
+Implemented the `/aura secrets discover` branch in `extensions/aura-secrets.ts`:
+`DiscoverySource` interface + extensible `DISCOVERY_SOURCES` array; `mcp-json`
+source reads `~/.config/mcp/mcp.json` `mcpServers["aura-mcp-dev"].bearerToken`
+and returns `null` on missing/unparseable/no entry/no token. Pure `discoverPat(sources)`
+for unit-testability; `handleDiscover(ui, keyringFactory, sources)` thin UI wrapper
+notifies a summary, offers import via `ctx.ui.confirm` (single source) or
+`ctx.ui.select` (multiple sources), and guards cancel/non-TUI mode (`undefined` →
+nothing stored, notify "not stored"). Handler dispatches to `handleDiscover` with
+`createKeyring` from `@pi-aura/shared/keyring`.
+
+Deviations from plan (both deliberate, documented in source via
+`// rule: dynamic-import-createKeyring`):
+1. `createKeyring` is dynamically imported inside the async handler instead of
+   statically, because `@pi-aura/shared/keyring`'s internal `.js` extension
+   specifiers cannot be resolved by Node's `--experimental-strip-types` loader;
+   a static import would break the unit-test entry point
+   (`node --experimental-strip-types extensions/aura-secrets.test.ts`). Runtime
+   equivalent (handler is async); pi's extension runtime resolves the package
+   for static imports, so the dynamic import works there.
+2. `readMcpBearerToken` is exported (minor addition beyond spec) so failure-mode
+   tests can exercise the `mcp-json` parser against temp files rather than the
+   user's real `~/.config/mcp/mcp.json`. Also enabled `allowImportingTsExtensions`
+   and added the test file to `include` in `.work/tsconfig-aura-secrets.json`.
+
+Residual risk (carried in slice doc): the handler's `secrets-discover` branch was
+not executed end-to-end against a real pi session / real keyring; the dynamic
+import of `createKeyring` (and the actual keyring write) only run in the live pi
+runtime. `handleDiscover` behavior is covered by unit tests with a fake
+`KeyringBackend`. Live-session smoke test remains outstanding.
+
+Verification: slice tests pass (`discoverPat`, `DISCOVERY_SOURCES` extension,
+mcp-json helper failure modes, `handleDiscover` no-PAT / confirm-store / decline /
+select-store / cancel scenarios, handler dispatch); `npx tsc --noEmit -p
+.work/tsconfig-aura-secrets.json` clean; `scripts` + `packages/shared` typecheck
+clean; `scripts` build (esbuild bundling) clean. Lint gate N/A.
