@@ -191,8 +191,9 @@ export class SecretServiceKeyring implements Keyring {
 
     // Honor DBUS_SESSION_BUS_ADDRESS if set; otherwise dbus-next falls back
     // to the default session bus socket.
-    const bus = dbus.sessionBus();
+    let bus: MessageBus | undefined;
     try {
+      bus = dbus.sessionBus();
       const obj = await bus.getProxyObject(SECRETS_DESTINATION, SECRETS_PATH);
       const service = obj.getInterface(SERVICE_INTERFACE);
       // A lightweight probe: ReadAlias never prompts and fails fast if the
@@ -202,7 +203,7 @@ export class SecretServiceKeyring implements Keyring {
     } catch {
       return false;
     } finally {
-      bus.disconnect();
+      bus?.disconnect();
     }
   }
 
@@ -228,8 +229,9 @@ export class SecretServiceKeyring implements Keyring {
 
   /** Open a temporary encrypted session and run `fn` inside it. */
   private async withSession<T>(fn: (ctx: SessionContext) => Promise<T>): Promise<T> {
-    const bus = dbus.sessionBus();
+    let bus: MessageBus | undefined;
     try {
+      bus = dbus.sessionBus();
       const serviceObj = await bus.getProxyObject(SECRETS_DESTINATION, SECRETS_PATH);
       const service = serviceObj.getInterface(SERVICE_INTERFACE);
 
@@ -251,7 +253,7 @@ export class SecretServiceKeyring implements Keyring {
     } catch (e) {
       throw wrapDbusError(e);
     } finally {
-      bus.disconnect();
+      bus?.disconnect();
     }
   }
 
