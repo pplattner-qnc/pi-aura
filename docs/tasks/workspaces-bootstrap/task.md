@@ -4,7 +4,7 @@ type: feature
 slug: workspaces-bootstrap
 title: Restructure repo into npm workspaces with @pi-aura/shared
 map: aura-access-rewrite
-status: ready
+status: done
 slices:
 - workspaces-skeleton
 - scripts-joins-workspaces
@@ -79,3 +79,86 @@ so the rewrite doesn't duplicate code across two build targets.
 From the third grilling (sharing topology): npm workspace package, both
 targets import by name via `exports`, shared package exports `.ts` (no build
 step), root is the workspaces root, `@napi-rs/keyring` dropped.
+
+## Implementation notes
+
+### workspaces-skeleton (landed)
+
+Created `packages/shared/` skeleton: `package.json` (name `@pi-aura/shared`,
+`private: true`, `version: 0.0.0`, `type: module`, `exports` mapping `.` and
+`./*` to `.ts` sources), placeholder `src/index.ts`, `tsconfig.json` mirroring
+`scripts/tsconfig.json`, and `.gitignore`.
+
+**Deviation (minor, justified):** added `devDependencies`
+(`typescript: ^5.7.0`, `@types/node: ^22.10.0`) to `packages/shared/package.json`.
+Neither the slice doc nor arch spec listed them, but the slice's own test-plan
+gate (`cd packages/shared && npx tsc --noEmit`) fails without a local
+`typescript` dep — npm's `tsc` package shadows the compiler binary otherwise.
+These are build-time deps, so they don't conflict with the grilling's
+single-source-runtime-deps rule (Q27). Under workspaces hoisting (slice 3)
+these should deduplicate with `scripts/package.json`'s identical devDependencies
+— verify no version conflict during slice 3's clean-install test.
+
+Gate: `npx tsc --noEmit` in `packages/shared` passes; `scripts` typecheck and
+build still green (both `.mjs` outputs produced). No UI work.
+
+### scripts-joins-workspaces (landed)
+
+Added `"@pi-aura/shared": "workspace:*"` to `scripts/package.json`
+`dependencies` (single-line, one-field change). `@napi-rs/keyring` kept in
+both `dependencies` and `esbuild.config.mjs` `external` per the slice's
+edge-case override (the TDD worker's divergence note and the slice doc's
+own Constraints/edge-case block): `scripts/src/clients.ts` still performs a
+runtime `await import("@napi-rs/keyring")` for the Atlassian OAuth path,
+which is out of scope until the `clients-cleanup` task.
+
+Gate: `cd scripts && npm run typecheck` (PASS), `cd scripts && npm run build`
+(PASS, both `.mjs` outputs produced). No automated test suite in this repo;
+lint is N/A (no linter configured). The `workspace:*` symlink is NOT yet
+populated under `scripts/node_modules` because the root `package.json` has
+no `workspaces` field yet — that wiring arrives in slice 3
+(`root-manifest-and-makefile`). Nothing imports `@pi-aura/shared` yet, so
+typecheck/build are unaffected (confirmed green). This is expected
+sequencing, not a defect; verify the symlink after slice 3's root install.
+
+### root-manifest-and-makefile (landed)
+
+Root `package.json` now declares `"workspaces": ["scripts", "packages/shared"]`,
+drops `@napi-rs/keyring` from `dependencies` (kept as `{}`, matching prior style;
+confirmed no root/`extensions/` import of `@napi-rs/keyring`), and preserves
+`pi.*`, `peerDependencies`, `name`, `version`, `description`, `keywords`.
+`Makefile` `install` now runs `npm install` at the root; `build`/`typecheck`/
+`codegen`/`watch`/`clean` keep `cd scripts` (minimize change). `.gitignore`
+unrooted globs already cover `packages/shared/`.
+
+**Cross-slice fix (user-approved, arch spec amended):** `scripts/package.json`
+`@pi-aura/shared` changed from `workspace:*` → `*`. npm does not support the
+`workspace:` protocol (pnpm/yarn convention; `npm install` fails with
+`EUNSUPPORTEDPROTOCOL`). npm workspaces links local packages **by name** using a
+normal semver range — `"*"` is the npm-compatible equivalent and produces the
+same symlink. The third grilling's Q31 assumed `workspace:*`; corrected in commit
+`58340c6`. Downstream tasks must use `"*"` for `@pi-aura/shared`, not `workspace:*`.
+
+**npm hoisting layout (deviation from slice-doc wording, expected):** npm
+**hoists** `@pi-aura/shared` to the **root** `node_modules/@pi-aura/shared` →
+`../../packages/shared`; there is no per-consumer symlink under
+`scripts/node_modules/@pi-aura/shared`. This is standard npm workspaces hoisting
+— Node's module resolution finds it from the root, so `import ... from
+"@pi-aura/shared"` resolves from `scripts/`. The slice/task docs' per-consumer-
+symlink wording reflects a pnpm-style layout, not npm's.
+
+**Slice-1 residual risk closed:** `packages/shared` devDependencies (`typescript`,
+`@types/node`) deduplicate cleanly with `scripts`' identical devDependencies
+under hoisting — `npm install` emitted no version-conflict warnings.
+
+**Regenerated dist artifacts:** `make build` under the new hoisted layout
+re-pathed esbuild's module-identity strings in the committed
+`skills/*/dist/*.mjs` from `node_modules/...` to `../node_modules/...` (ajv &
+co. now resolve from the hoisted root `node_modules`). The bundled code is
+functionally identical; only source-path comments/wrapper strings changed.
+These regenerated dist files are committed to match the new topology.
+
+Gate (all PASS): `make install` (root `npm install`, 292 packages, no
+`EUNSUPPORTEDPROTOCOL`, no version conflicts), symlink
+`node_modules/@pi-aura/shared` exists, `make build` produces both `.mjs` outputs,
+`cd scripts && npm run typecheck` clean. No UI work.

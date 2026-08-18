@@ -4,10 +4,10 @@ slug: root-manifest-and-makefile
 title: Root package.json becomes workspaces root; Makefile install moves to root
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: s
 blocked_by:
-  - scripts-joins-workspaces
+- scripts-joins-workspaces
 ---
 
 ## End-to-end behavior

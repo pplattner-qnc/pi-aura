@@ -4,10 +4,10 @@ slug: scripts-joins-workspaces
 title: scripts/ becomes a workspace member depending on @pi-aura/shared
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: s
 blocked_by:
-  - workspaces-skeleton
+- workspaces-skeleton
 ---
 
 ## End-to-end behavior
