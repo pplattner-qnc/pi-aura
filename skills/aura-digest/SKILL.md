@@ -1,11 +1,11 @@
 ---
 name: aura-digest
-description: Morning routine — fetches your Aura briefing, attention items, priority queue, capacity, and reviews via a deterministic Node script (aura.mjs), verifies review states, then presents a concise digest with a diff against the last run. Use when the user wants to start their day, get an Aura digest, or see what changed since last time.
+description: Morning routine — fetches your Aura briefing, attention items, priority queue, capacity, and reviews via a deterministic Node script (aura-digest.mjs), verifies review states, then presents a concise digest with a diff against the last run. Use when the user wants to start their day, get an Aura digest, or see what changed since last time.
 ---
 
 # Aura — Digest
 
-Inline, script-driven pipeline. One deterministic Node script (`aura.mjs`) with
+Inline, script-driven pipeline. One deterministic Node script (`aura-digest.mjs`) with
 six subcommands — `fetch`, `render`, `cleanup`, `save`, `diff`, `last` —
 handles all data gathering, formatting, temp-file cleanup, and the persistent
 last-digest store. The orchestrator (you) does the judgment work — filling the
@@ -13,27 +13,30 @@ situation summary, surfacing corrections, and ranking suggested actions —
 between `fetch` and `render`.
 
 ```
- ┌──────────────────┐  raw.json    ┌──────────────┐  digest.json   ┌──────────────────┐
- │  aura.mjs fetch  │ ──────────→ │  orchestrator │ ────────────→ │  aura.mjs render │ → markdown
- │  (Aura MCP +     │  digest.json │  fill summary + │              └──────────────────┘
- │   verification)  │  report.json │  corrections +  │
- └──────────────────┘              │  re-rank actions │
-                                   └──────┬───────┘
+ ┌────────────────────┐  raw.json    ┌──────────────┐  digest.json   ┌────────────────────┐
+ │  aura-digest.mjs   │ ──────────→ │  orchestrator │ ────────────→ │  aura-digest.mjs   │ → markdown
+ │  fetch             │  digest.json │  fill summary + │              └────────────────────┘
+ │  (Aura MCP +       │  report.json │  corrections +  │
+ │   verification)    │              │  re-rank actions │
+ └────────────────────┘              └──────┬───────┘
                                           │ (after presenting)
                                           ↓
-                                   ┌──────────────────┐   ~/.pi/aura/
-                                   │  aura.mjs save   │ → last-digest.json
-                                   └──────────────────┘
+                                   ┌────────────────────┐   ~/.pi/aura/
+                                   │  aura-digest.mjs   │ → last-digest.json
+                                   │  save              │
+                                   └────────────────────┘
                                           │ (next run, before presenting)
                                           ↓
-                                   ┌──────────────────┐
-                                   │  aura.mjs diff   │ → what changed
-                                   └──────────────────┘
+                                   ┌────────────────────┐
+                                   │  aura-digest.mjs   │ → what changed
+                                   │  diff              │
+                                   └────────────────────┘
                                           │
                                           ↓
-                                   ┌──────────────────┐
-                                   │  aura.mjs cleanup│
-                                   └──────────────────┘
+                                   ┌────────────────────┐
+                                   │  aura-digest.mjs   │
+                                   │  cleanup           │
+                                   └────────────────────┘
 ```
 
 ---
@@ -54,7 +57,7 @@ See the repo-root `Makefile`. Build tooling (esbuild, typescript, the MCP SDK)
 is isolated in `scripts/package.json` with its own `node_modules` (gitignored),
 keeping the published pi package manifest clean.
 
-`aura.mjs fetch` reads `~/.config/mcp/mcp.json` at runtime for the Aura server
+`aura-digest.mjs fetch` reads `~/.config/mcp/mcp.json` at runtime for the Aura server
 URL + bearer token. The token is never baked into the bundle.
 
 **Runtime dependency (dev-links Teamwork Graph layer):** `@napi-rs/keyring` is

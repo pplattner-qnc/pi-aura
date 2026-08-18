@@ -16,14 +16,24 @@
 SCRIPTS_DIR := scripts
 DIGEST_DIST := skills/aura-digest/dist
 AURA_DIST    := skills/aura/dist
+OPENAPI_DIR  := $(SCRIPTS_DIR)/openapi
+GEN_DIR      := $(SCRIPTS_DIR)/src/generated
 ENTRY_OUTS   := $(DIGEST_DIST)/aura-digest.mjs $(AURA_DIST)/aura.mjs
 
-.PHONY: all install typecheck build clean watch
+.PHONY: all install typecheck build clean watch codegen
 
 all: install build
 
 install:
 	cd $(SCRIPTS_DIR) && npm install
+
+# Regenerate the typed Aura REST client from openapi/openapi.yaml into
+# src/generated/ (gitignored — rebuild after changing the spec).
+codegen:
+	cd $(SCRIPTS_DIR) && npm run codegen
+
+# Regenerate the client, then typecheck + bundle. Use this after touching the spec.
+gen: codegen typecheck build
 
 typecheck:
 	cd $(SCRIPTS_DIR) && npm run typecheck
@@ -41,4 +51,4 @@ watch:
 
 clean:
 	rm -rf $(SCRIPTS_DIR)/node_modules $(SCRIPTS_DIR)/package-lock.json
-	rm -rf $(DIGEST_DIST) $(AURA_DIST)
+	rm -rf $(GEN_DIR) $(DIGEST_DIST) $(AURA_DIST)
