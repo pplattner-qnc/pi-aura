@@ -12,9 +12,11 @@
       "agents": ["./agents"]
     }
   },
-  "dependencies": {
-    "@napi-rs/keyring": "^1.3.0"
-  },
+  "workspaces": [
+    "scripts",
+    "packages/shared"
+  ],
+  "dependencies": {},
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "typebox": "*"
