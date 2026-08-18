@@ -150,11 +150,19 @@ They resolve deps from different `node_modules`.
   `import { createKeyring } from "@pi-aura/shared/keyring"`.
 - **Q30 Pkg home + name:** directory `packages/shared/`, npm name
   `@pi-aura/shared`.
-- **Q31 Root `package.json`:** add `workspaces` + `@pi-aura/shared` (workspace)
-  + `dbus-next`; **drop `@napi-rs/keyring`** (the rewrite drops it). The shared
+- **Q31 Root `package.json`:** add `workspaces` + `@pi-aura/shared` +
+  `dbus-next`; **drop `@napi-rs/keyring`** (the rewrite drops it). The shared
   package's own `package.json` declares `dbus-next` + `@hey-api/client-fetch`
   (single-source); workspace install propagates them. `scripts/package.json`
-  drops `@napi-rs/keyring`, gains `@pi-aura/shared`.
+  keeps `@napi-rs/keyring` (the `clients-cleanup` task removes it with the
+  `clients.ts` import) and gains `@pi-aura/shared`.
+  - **Correction (found during `workspaces-bootstrap`):** npm does **not**
+    support the `workspace:` protocol (a pnpm/yarn convention — `npm install`
+    fails with `EUNSUPPORTEDPROTOCOL`). npm workspaces links local packages
+    **by name** using a normal semver range. So the `@pi-aura/shared` dep in
+    `scripts/package.json` (and anywhere else a consumer needs it) is `"*"`,
+    not `"workspace:*"`. The original grilling wording assumed `workspace:*`;
+    amended after user approval. Downstream tasks must use `"*"`.
 - **Q32 Shared build:** the shared package exports **`.ts` sources** (no build
   step); both consumers compile/bundle it themselves (pi loads `.ts`, esbuild
   bundles `.ts`). Zero build artifact to commit.
@@ -162,6 +170,12 @@ They resolve deps from different `node_modules`.
   **root `npm install`** (root is the workspaces root); one install populates
   `scripts/node_modules` + `packages/shared/node_modules` + symlinks
   `@pi-aura/shared` into both.
+  - **Correction (found during `workspaces-bootstrap`):** npm **hoists** the
+    `@pi-aura/shared` symlink to the **root** `node_modules/@pi-aura/shared`,
+    not per-consumer under each workspace's own `node_modules`. This is
+    standard npm hoisting; Node's module resolution finds it from the root,
+    so `import ... from "@pi-aura/shared"` resolves from any workspace. The
+    per-consumer-symlink wording reflected a pnpm-style layout, not npm's.
 
 **Consequence folded in:** pi's root `npm install` (run on `pi install` of this
 package) populates everything via the workspaces symlink — no separate
@@ -196,10 +210,19 @@ per-target install.
    `@pi-aura/shared` at `packages/shared/`, both `scripts/` and the extension
    import it by name via `exports`, root is the workspaces root).
 
+4. `workspaces-bootstrap` (feature, **done**) — restructured the repo into
+   npm workspaces: `packages/shared/` skeleton (`@pi-aura/shared`, `.ts`
+   `exports`), root `package.json` is the workspaces root (drops root
+   `@napi-rs/keyring`), `Makefile` `install` runs a root `npm install`.
+   `scripts/package.json` gains `@pi-aura/shared` (`"*"`, not `workspace:*` —
+   npm doesn't support the protocol) and keeps `@napi-rs/keyring` until
+   `clients-cleanup`.
+
 Implementation tasks (from-scratch `keyring.ts` rewrite in `packages/shared/`;
 `AuraClient` + factory; call-site migration + type dedupe; `/aura secrets`
-extension; `clients.ts` cleanup; repo restructure to workspaces) are spawned
-by the next Wayfinder pass now that all three grillings are closed.
+extension; `clients.ts` cleanup) are spawned by Wayfinder as their blockers
+close. `keyring-rewrite` is the next ready frontier (its only blocker,
+`workspaces-bootstrap`, is done).
 
 ## Fog
 
