@@ -5,11 +5,15 @@
  * the Aura PAT in the OS keyring.
  *
  * Slice 1 (aura-command-skeleton) implements the command skeleton, subcommand
- * dispatch, and completions. The `secrets discover` and `secrets edit`
- * subcommands are stubs here; slices 2 and 3 will replace them.
+ * dispatch, and completions. Slice 2 (secrets-discover) implements the
+ * extensible discovery-source registry and the import offer flow.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type { SecretKey, Keyring } from "@pi-aura/shared/keyring";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 export type AuraSubcommand = "secrets-discover" | "secrets-edit" | "usage";
 
@@ -45,6 +49,122 @@ export function parseAuraArgs(args: string): ParsedAuraArgs {
   }
 
   return { command: "usage", rest: `${tokens[0]} ${sub}` };
+}
+
+/** A source that can discover an Aura PAT from some external location. */
+export interface DiscoverySource {
+  name: string;
+  find(): Promise<string | null>;
+}
+
+/** One discovered PAT together with the source that produced it. */
+export interface DiscoveredPat {
+  name: string;
+  value: string;
+}
+
+const MCP_CONFIG_PATH = join(homedir(), ".config", "mcp", "mcp.json");
+
+/** Read the aura-mcp-dev bearerToken from an mcp.json file.
+ *
+ *  Returns null if the file is missing, unparseable, or has no entry/token.
+ *  Exported for unit testing so tests can use temporary files. */
+export function readMcpBearerToken(path: string = MCP_CONFIG_PATH): string | null {
+  try {
+    const raw = readFileSync(path, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const servers = (parsed as Record<string, unknown>).mcpServers as
+      | Record<string, { bearerToken?: unknown }>
+      | undefined;
+    if (!servers || typeof servers !== "object") return null;
+
+    const auraServer = servers["aura-mcp-dev"];
+    if (!auraServer || typeof auraServer !== "object") return null;
+
+    const token = auraServer.bearerToken;
+    return typeof token === "string" && token.length > 0 ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Extensible registry of discovery sources.
+ *
+ *  New sources can be added by appending a `DiscoverySource` object. */
+export const DISCOVERY_SOURCES: DiscoverySource[] = [
+  {
+    name: "mcp-json",
+    async find() {
+      return readMcpBearerToken();
+    },
+  },
+];
+
+/** Pure function that runs all sources and returns only the found PATs.
+ *
+ *  Unit-testable without a pi session or keyring. */
+export async function discoverPat(sources: DiscoverySource[]): Promise<DiscoveredPat[]> {
+  const found: DiscoveredPat[] = [];
+  for (const source of sources) {
+    const value = await source.find();
+    if (value !== null && value !== undefined && value !== "") {
+      found.push({ name: source.name, value });
+    }
+  }
+  return found;
+}
+
+const AURA_PAT_KEY: SecretKey = { service: "aura", name: "pat" };
+
+/** Thin UI wrapper around `discoverPat`.
+ *
+ *  Notifies the user which sources were checked, offers to import a found PAT
+ *  into the keyring, and guards for cancel/non-TUI mode. */
+export async function handleDiscover(
+  ui: Pick<ExtensionUIContext, "notify" | "select" | "confirm">,
+  keyringFactory: () => Promise<Keyring>,
+  sources: DiscoverySource[] = DISCOVERY_SOURCES
+): Promise<void> {
+  const found = await discoverPat(sources);
+
+  const checked = sources.map((s) => s.name).join(", ");
+  const foundNames = found.map((f) => f.name).join(", ") || "none";
+  ui.notify(`Discovery sources checked: ${checked}. Found in: ${foundNames}.`, "info");
+
+  if (found.length === 0) {
+    ui.notify("no PAT found in any source", "warning");
+    return;
+  }
+
+  const keyring = await keyringFactory();
+
+  if (found.length === 1) {
+    const confirmed = await ui.confirm("Import Aura PAT", `Import from ${found[0].name}?`);
+    if (!confirmed) {
+      ui.notify("not stored", "info");
+      return;
+    }
+    await keyring.setSecret(AURA_PAT_KEY, found[0].value);
+    ui.notify(`Aura PAT imported from ${found[0].name}`, "info");
+    return;
+  }
+
+  const choice = await ui.select("Import Aura PAT from:", found.map((f) => f.name));
+  if (choice === undefined) {
+    ui.notify("not stored", "info");
+    return;
+  }
+
+  const selected = found.find((f) => f.name === choice);
+  if (!selected) {
+    ui.notify("not stored", "info");
+    return;
+  }
+
+  await keyring.setSecret(AURA_PAT_KEY, selected.value);
+  ui.notify(`Aura PAT imported from ${selected.name}`, "info");
 }
 
 type AutocompleteItem = { value: string; label: string };
@@ -85,9 +205,16 @@ export default function auraSecretsExtension(pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const parsed = parseAuraArgs(args);
       switch (parsed.command) {
-        case "secrets-discover":
-          ctx.ui.notify("not implemented", "info");
+        case "secrets-discover": {
+          // rule: dynamic-import-createKeyring — @pi-aura/shared/keyring uses
+          // .js extension specifiers internally, which Node's experimental
+          // strip-types loader cannot resolve. Pi's extension runtime handles
+          // static imports, so we dynamic-import createKeyring here to keep
+          // the unit-test entry point runnable with `node --experimental-strip-types`.
+          const { createKeyring } = await import("@pi-aura/shared/keyring");
+          await handleDiscover(ctx.ui, createKeyring);
           return;
+        }
         case "secrets-edit":
           ctx.ui.notify("not implemented", "info");
           return;
