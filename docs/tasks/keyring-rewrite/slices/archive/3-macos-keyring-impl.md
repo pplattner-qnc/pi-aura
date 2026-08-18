@@ -4,7 +4,7 @@ slug: macos-keyring-impl
 title: MacosKeyring — security CLI impl of Keyring
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: m
 blocked_by:
   - keyring-interface-and-enum

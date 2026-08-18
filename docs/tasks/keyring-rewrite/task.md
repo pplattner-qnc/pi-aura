@@ -141,3 +141,38 @@ branch.
 - Deviations (per TDD worker): none beyond the slice plan. The first esbuild
   smoke run served as the RED step; an unused `unpackKey` helper was removed
   before the first GREEN commit.
+
+### slice(macos-keyring-impl): MacosKeyring — security CLI impl of Keyring
+
+- Merged `slice/macos-keyring-impl` into `task/keyring-rewrite`.
+- `packages/shared/src/keyring/macos-keyring.ts` exports `class MacosKeyring
+  implements Keyring`: `static isAvailable()` returns `true` iff
+  `process.platform === "darwin"` and `/usr/bin/security` exists; CRUD
+  round-trips via `security find-generic-password` / `add-generic-password` /
+  `delete-generic-password` / `dump-keychain`. `setSecret` does
+  delete-then-add (no upsert); `deleteSecret` returns `false` on exit 44
+  (secItemNotFound); `listSecrets` parses `dump-keychain` blocks and re-reads
+  each secret via `getSecret` (never trusts dump text for values).
+- Per-impl packing (Q14): namespace `"aura-skills"` is the `-s` (service)
+  attribute and the account stores `${service}/${name}` (e.g. `"aura/pat"`),
+  making `listSecrets` recovery unambiguous and keeping the namespace scoped
+  under a single macOS service attribute. This is one of the two recommended
+  packing options in the slice doc.
+- Locked-keychain detection is a best-effort string scan of `security` stderr
+  for known macOS messages, mapping to `KeyringLockedError`. Exact error text
+  may vary by OS version.
+- `MacosKeyring` is exported only from `macos-keyring.ts` (intentionally
+  **not** re-exported from the public barrel), matching the task-level export
+  contract.
+- Verification: `npm run typecheck` passed in `packages/shared` and
+  `scripts`; a `tsx` runtime check confirmed
+  `MacosKeyring.isAvailable() === false` on `process.platform === "linux"`
+  (platform guard). Full CRUD round-trip against a real keychain was **not**
+  performed because the dev box is Linux and lacks `/usr/bin/security` — this
+  is the expected residual risk called out in the slice doc and arch spec (a
+  manual macOS-host verification step). No committed test suite exists per
+  `docs/testing.md`.
+- Deviations (per TDD worker): the `-s "aura-skills"` / `-a "<service>/<name>"`
+  packing choice (documented in source) over the alternative
+  namespace-as-account-prefix option; both were equally valid per the slice
+  doc.
