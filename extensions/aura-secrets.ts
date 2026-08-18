@@ -287,8 +287,8 @@ export default function auraSecretsExtension(pi: ExtensionAPI) {
         }
         case "secrets-edit": {
           const { createKeyring, KeyringLockedError } = await import("@pi-aura/shared/keyring");
-          const keyring = await createKeyring();
           try {
+            const keyring = await createKeyring();
             const current = await keyring.getSecret(AURA_PAT_KEY);
             await handleEdit(ctx.ui, () => Promise.resolve(keyring), current);
           } catch (error) {
