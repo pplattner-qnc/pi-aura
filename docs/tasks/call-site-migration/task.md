@@ -62,3 +62,35 @@ the Aura path and the types are single-source.
 From the first grilling: full access-layer redesign with the interface seam
 (Q2), dedupe overlapping types (Q8), ~21 verbs (Q11), keep the
 digest-specific types.
+
+## Implementation notes
+
+### Slice: migrate-aura-digest (landed)
+
+All ~12 Aura `callTool` calls in `aura-digest.ts` replaced with `AuraClient`
+methods via `createDefaultAuraClient()`. `REQUIRED_TOOLS` /
+`assertToolsAvailable` / `client.connect()` removed. The 8-call parallel
+`Promise.all` block stays parallel against `aura.<method>(...)`.
+`getTaskByHumanKey` (×2), `getArtifactReview` (×2), `getArtifactApprovals`
+(in `verifyArtifacts`) all migrated. `verifyArtifacts` retyped to
+`client: AuraClient`. Both Aura `client.close()` calls dropped (Seam A);
+the Atlassian `McpClient` path (`buildAtlassianClient`,
+`fetchTaskDevLinks`, `atlassian.close()`) untouched (out of scope). Seam C
+(`current_version` → `latest_version`) applied at 3 sites.
+
+**Build-config note:** `dbus-next` added to `scripts/esbuild.config.mjs`
+`external` array (transitively pulled in by `createDefaultAuraClient()` →
+keyring on Linux; its optional `x11` dep can't bundle). Same external-marking
+pattern as the existing `@napi-rs/keyring` entries. `migrate-aura-cli` will
+inherit this fix (shared config).
+
+**Transitional items flagged for `dedupe-types` (Level 2):**
+- `as unknown as RawAuraData` cast — domain types use `undefined` where
+  `RawAuraData` (typed from `types.ts`) uses `null`. Reconcile `RawAuraData`
+  to domain types and remove the cast.
+- `?? null` normalization at 3 capacity-boundary sites — can stay or fold into
+  the `RawAuraData` reconciliation.
+- `fetchTaskDevLinks` signature kept on `AuraTaskDetail` (structurally
+  compatible with domain `Task`); retype to `Task`.
+- Remove now-unused `Aura*` types from `types.ts`.
+- Stale line-21 comment still references `assertToolsAvailable` (cosmetic).
