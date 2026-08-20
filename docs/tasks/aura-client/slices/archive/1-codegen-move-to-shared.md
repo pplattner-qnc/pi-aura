@@ -4,7 +4,7 @@ slug: codegen-move-to-shared
 title: Move the @hey-api codegen setup into packages/shared
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: m
 blocked_by: []
 ---
