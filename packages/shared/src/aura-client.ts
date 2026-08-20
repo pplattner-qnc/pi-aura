@@ -408,3 +408,14 @@ export interface AuraClient {
   getTaskByHumanKey(key: string): Promise<Task>;
   getArtifactReview(id: string): Promise<ArtifactReview>;
 }
+
+// ---------------------------------------------------------------------------
+// Slice 3 re-exports: HeyApiAuraClient + createDefaultAuraClient
+// ---------------------------------------------------------------------------
+// The impl lives in ./hey-api-aura-client.js (sibling file; keeps this
+// interface file clean per arch spec open decision #2). Re-exported here so
+// the single `@pi-aura/shared/aura-client` import path surfaces both the
+// interface/types and the impl/factory.
+
+export { HeyApiAuraClient, createDefaultAuraClient, AuraApiError } from "./hey-api-aura-client.js";
+export type { HeyApiAuraClientOptions } from "./hey-api-aura-client.js";
