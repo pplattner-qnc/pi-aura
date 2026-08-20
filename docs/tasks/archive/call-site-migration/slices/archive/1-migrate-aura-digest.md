@@ -4,7 +4,7 @@ slug: migrate-aura-digest
 title: Migrate aura-digest.ts call sites to AuraClient
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: l
 blocked_by: []
 ---

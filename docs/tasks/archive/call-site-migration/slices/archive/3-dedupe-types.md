@@ -4,7 +4,7 @@ slug: dedupe-types
 title: Remove types.ts Aura shapes duplicated by the domain types
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: m
 blocked_by:
   - migrate-aura-digest

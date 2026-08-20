@@ -17,8 +17,9 @@
 //                                            saved digest.
 //   node dist/aura.mjs last                  Print the last saved digest (JSON).
 //
-// fetch is deterministic (same API state -> same files) and does tool discovery
-// first (assertToolsAvailable) so a missing tool fails fast with a clear error.
+// fetch is deterministic (same API state -> same files). It constructs an
+// AuraClient (via createDefaultAuraClient) and calls the typed methods;
+// a missing PAT/base URL fails fast at construction with a clear error.
 // render renders whatever sections are present in digest.json, skipping nulls.
 // cleanup removes the temp directory created by fetch. save/diff/last manage
 // the persistent last-digest store at ~/.pi/aura/last-digest.json.
@@ -27,29 +28,22 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node
 import { resolve, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { randomBytes } from "node:crypto";
-import { bearerClient } from "./aura-client.js";
-import type { McpClient } from "./mcp-client.js";
+import { createDefaultAuraClient } from "@pi-aura/shared/aura-client";
+import type {
+  ApprovalDecision,
+  AuraClient,
+  BoardItem,
+  Notification,
+  PriorityQueueItem,
+  Task,
+  ArtifactListItem,
+} from "@pi-aura/shared/aura-client";
 import { buildAtlassianClient, fetchTaskDevLinks } from "./devlinks.js";
 import { loadSettings } from "./settings.js";
 import type {
-  ArtifactApprovalDecision,
-  ArtifactApprovalState,
-  ArtifactReview,
   ArtifactToVerify,
   ArtifactVerification,
-  AuraArtifact,
-  AuraArtifactList,
-  AuraBoardBriefing,
-  AuraBoardSummary,
-  AuraBoardSummaryItem,
-  AuraCapacity,
-  AuraNotification,
-  AuraNotificationList,
-  AuraPriorityQueue,
-  AuraPriorityQueueItem,
   AuraReport,
-  AuraTaskDetail,
-  AuraTaskList,
   Digest,
   DigestAttention,
   DigestAttentionItem,
@@ -144,25 +138,12 @@ const LAST_DIGEST_SCHEMA_VERSION = 1;
 // fetch
 // ===========================================================================
 
-const REQUIRED_TOOLS = [
-  "getBoardBriefing",
-  "getBoardSummary",
-  "listNotifications",
-  "getMyPriorityQueue",
-  "getMyCapacity",
-  "listArtifacts",
-  "listTasks",
-  "getArtifactApprovals",
-  "getTaskByHumanKey",
-  "getArtifactReview",
-];
-
 // Statuses that count as "active open" for the queue table.
 const ACTIVE_STATUS_TYPES = new Set([
   "ACTIVE", // IN_DEVELOPMENT / IN_REFINEMENT / IN_REVIEW / IN_ALIGNMENT
 ]);
 
-function toAttentionItem(item: AuraBoardSummaryItem): DigestAttentionItem {
+function toAttentionItem(item: BoardItem): DigestAttentionItem {
   // item.title often already includes the human key prefix (e.g.
   // "AURA-1061 — Combined plan…"); use the bare task title to avoid
   // "AURA-1061 — AURA-1061 — …" duplication.
@@ -180,9 +161,7 @@ async function fetchAction(): Promise<void> {
   const outDir = join(tmpdir(), `aura-morning-${randomBytes(6).toString("hex")}`);
   mkdirSync(outDir, { recursive: true });
 
-  const client = bearerClient(loadSettings().mcpServers.aura);
-  await client.connect();
-  client.assertToolsAvailable(REQUIRED_TOOLS);
+  const aura = await createDefaultAuraClient();
 
   // Parallel fetch of all base data.
   const [
@@ -194,45 +173,33 @@ async function fetchAction(): Promise<void> {
     pendingReviews,
     alignmentTasks,
     reviewTasks,
-  ] = (await Promise.all([
-    client.callTool<AuraBoardBriefing>("getBoardBriefing", { locale: "en" }),
-    client.callTool<AuraBoardSummary>("getBoardSummary"),
-    client.callTool<AuraNotificationList>("listNotifications", {
+  ] = await Promise.all([
+    aura.getBoardBriefing({ locale: "en" }),
+    aura.getBoardSummary(),
+    aura.listNotifications({
       limit: 20,
       sort_by: "created_at",
       sort_dir: "desc",
     }),
-    client.callTool<AuraPriorityQueue>("getMyPriorityQueue"),
-    client.callTool<AuraCapacity>("getMyCapacity"),
-    client.callTool<AuraArtifactList>("listArtifacts", {
+    aura.getMyPriorityQueue(),
+    aura.getMyCapacity(),
+    aura.listArtifacts({
       pending_review: true,
       limit: 10,
     }),
-    client.callTool<AuraTaskList>("listTasks", {
+    aura.listTasks({
       role: "STAKEHOLDER",
       view: "mine",
       status_slug: "IN_ALIGNMENT",
       limit: 5,
     }),
-    client.callTool<AuraTaskList>("listTasks", {
+    aura.listTasks({
       role: "STAKEHOLDER",
       view: "mine",
       status_slug: "IN_REVIEW",
       limit: 5,
     }),
-  ])) as [
-    AuraBoardBriefing,
-    AuraBoardSummary,
-    AuraNotificationList,
-    AuraPriorityQueue,
-    AuraCapacity,
-    AuraArtifactList,
-    AuraTaskList,
-    AuraTaskList,
-  ];
-
-  // NOTE: client kept open — verification (below) reuses it for
-  // getArtifactApprovals calls.
+  ]);
 
   const fetchedAt = new Date().toISOString();
   const date = fetchedAt.slice(0, 10);
@@ -252,13 +219,13 @@ async function fetchAction(): Promise<void> {
   // --- Build the queue table: committed tasks + active open tasks ---------
   const capTaskById = new Map<string, { pct: number | null; role: string }>();
   for (const t of capacity.tasks) {
-    capTaskById.set(t.task_id, { pct: t.capacity_percent, role: t.roles[0] ?? "OWNER" });
+    capTaskById.set(t.task_id, { pct: t.capacity_percent ?? null, role: t.roles[0] ?? "OWNER" });
   }
 
   const seenIds = new Set<string>();
   const queueRows: DigestQueueRow[] = [];
   let rank = 0;
-  const addItem = (item: AuraPriorityQueueItem): void => {
+  const addItem = (item: PriorityQueueItem): void => {
     if (seenIds.has(item.id)) return;
     const cap = capTaskById.get(item.id);
     const capacityPct = cap?.pct ?? item.capacity_percent ?? null;
@@ -277,12 +244,12 @@ async function fetchAction(): Promise<void> {
 
   // Committed tasks first (non-null capacity), in priority-queue order.
   for (const item of priorityQueue.items) {
-    const cap = capTaskById.get(item.id)?.pct ?? item.capacity_percent;
+    const cap = capTaskById.get(item.id)?.pct ?? item.capacity_percent ?? null;
     if (cap !== null && cap > 0) addItem(item);
   }
   // Then active open tasks (status_type ACTIVE) with null capacity.
   for (const item of priorityQueue.items) {
-    const cap = capTaskById.get(item.id)?.pct ?? item.capacity_percent;
+    const cap = capTaskById.get(item.id)?.pct ?? item.capacity_percent ?? null;
     if ((cap === null || cap === 0) && ACTIVE_STATUS_TYPES.has(item.status_type)) {
       addItem(item);
     }
@@ -292,7 +259,7 @@ async function fetchAction(): Promise<void> {
   // added so the committed total in the table matches getMyCapacity.
   for (const t of capacity.tasks) {
     if (seenIds.has(t.task_id)) continue;
-    const pct = t.capacity_percent;
+    const pct = t.capacity_percent ?? null;
     if (pct === null || pct === 0) continue;
     queueRows.push({
       rank: ++rank,
@@ -335,7 +302,7 @@ async function fetchAction(): Promise<void> {
     const r: DigestReview = {
       artifact_id: a.id,
       title: a.title,
-      version: a.current_version ?? 0,
+      version: a.latest_version ?? 0,
       decisions: [],
       decided_count: 0,
       total_required: 0,
@@ -378,7 +345,7 @@ async function fetchAction(): Promise<void> {
   // since been advanced). The digest stays conservative (reported state
   // only, corrections=[]); the full findings live in report.json so the
   // orchestrator can reconcile without any extra MCP calls.
-  const verifications = await verifyArtifacts(client, artifactsToVerify);
+  const verifications = await verifyArtifacts(aura, artifactsToVerify);
 
   // --- Dev links: related PRs / branches per queue task --------------------
   // Fetch each queue task's detail (for jira_issues + description), then fan
@@ -401,7 +368,7 @@ async function fetchAction(): Promise<void> {
       // AURA-932 -> ANW-8184 has the OTEL PR). Merge child jira_issues in.
       const taskDetails = await Promise.all(
         queueRows.map((row) =>
-          client.callTool<AuraTaskDetail>("getTaskByHumanKey", { key: row.key })
+          aura.getTaskByHumanKey(row.key)
             .catch(() => null)
         )
       );
@@ -412,11 +379,11 @@ async function fetchAction(): Promise<void> {
         if (childKeys.length > 0) {
           const childDetails = await Promise.all(
             childKeys.map((k) =>
-              client.callTool<AuraTaskDetail>("getTaskByHumanKey", { key: k }).catch(() => null)
+              aura.getTaskByHumanKey(k).catch(() => null)
             )
           );
           const childJira = childDetails
-            .filter((c): c is AuraTaskDetail => c !== null)
+            .filter((c): c is Task => c !== null)
             .flatMap((c) => c.jira_issues ?? []);
           if (childJira.length > 0) {
             detail.jira_issues = [...(detail.jira_issues ?? []), ...childJira];
@@ -455,14 +422,14 @@ async function fetchAction(): Promise<void> {
     let myUserId: string | null = null;
     for (const r of reviews) {
       try {
-        const ar = await client.callTool<ArtifactReview>("getArtifactReview", { id: r.artifact_id });
+        const ar = await aura.getArtifactReview(r.artifact_id);
         if (ar.is_initiator && ar.initiator) { myUserId = ar.initiator.user_id; break; }
       } catch { /* ignore */ }
     }
     const myName = "Plattner, Patric";
     for (const id of candidateIds) {
       try {
-        const ar = await client.callTool<ArtifactReview>("getArtifactReview", { id });
+        const ar = await aura.getArtifactReview(id);
         // Find my reviewer row by user_id (preferred) or name fallback.
         const me = ar.reviewers.find(
           (rv) => (myUserId && rv.user_id === myUserId) || rv.user_name === myName
@@ -480,8 +447,6 @@ async function fetchAction(): Promise<void> {
       } catch { /* ignore unreachable artifacts */ }
     }
   }
-  await client.close();
-
   // --- Enrich queue rows with a compact Git column from dev_links ----------
   const devLinksByTask = new Map(devLinks.map((l) => [l.task_key, l]));
   for (const row of queueRows) {
@@ -520,7 +485,7 @@ async function fetchAction(): Promise<void> {
     pending_review_summary: (pendingReviews.items ?? []).map((a) => ({
       artifact_id: a.id,
       title: a.title,
-      current_version: a.current_version,
+      current_version: a.latest_version,
     })),
     notification_review_events: notificationReviewEvents,
   };
@@ -548,7 +513,7 @@ async function fetchAction(): Promise<void> {
  * reported state alongside the current findings.
  */
 async function verifyArtifacts(
-  client: McpClient,
+  client: AuraClient,
   candidates: ArtifactToVerify[]
 ): Promise<ArtifactVerification[]> {
   const isActionable = (d: string | null) =>
@@ -556,10 +521,7 @@ async function verifyArtifacts(
   const results = await Promise.all(
     candidates.map(async (c): Promise<ArtifactVerification> => {
       try {
-        const current = await client.callTool<ArtifactApprovalState>(
-          "getArtifactApprovals",
-          { id: c.artifact_id }
-        );
+        const current = await client.getArtifactApprovals(c.artifact_id);
         const reportedVersion = c.reported_version;
         const currentVersion = current.version;
         const stale =
@@ -601,7 +563,7 @@ async function verifyArtifacts(
   return results;
 }
 
-function summarizeNotifications(items: AuraNotification[]): string[] {
+function summarizeNotifications(items: Notification[]): string[] {
   const unread = items.filter((n) => !n.read);
   if (unread.length === 0) return ["No unread notifications."];
   const lines: string[] = [];
@@ -648,8 +610,8 @@ function seedSuggestedActions(
 }
 
 function extractVerifyTargets(
-  notifications: AuraNotification[],
-  pendingArtifacts: AuraArtifact[],
+  notifications: Notification[],
+  pendingArtifacts: ArtifactListItem[],
   waitingOnOthersLinks: string[]
 ): {
   artifactsToVerify: ArtifactToVerify[];
@@ -697,7 +659,7 @@ function extractVerifyTargets(
       byId.set(a.id, {
         artifact_id: a.id,
         title: a.title,
-        reported_version: a.current_version ?? null,
+        reported_version: a.latest_version ?? null,
         reported_decision: null,
         source: "pending_review",
       });
@@ -782,7 +744,7 @@ function renderCapacity(d: Digest): string {
   ].join("\n");
 }
 
-function decisionEmoji(d: ArtifactApprovalDecision): string {
+function decisionEmoji(d: ApprovalDecision): string {
   if (!d.decided) return "⏳";
   const dec = d.decision.toUpperCase();
   if (dec === "APPROVED") return "✅";

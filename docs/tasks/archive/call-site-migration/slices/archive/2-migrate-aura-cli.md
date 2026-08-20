@@ -4,7 +4,7 @@ slug: migrate-aura-cli
 title: Migrate aura.ts (artifact/wiki/upload CLI) call sites to AuraClient
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: m
 blocked_by: []
 ---

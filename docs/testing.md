@@ -42,6 +42,12 @@ make build            # typecheck + bundle
 - Inject a fake generated SDK / `createClient` over hitting real Aura for
   `HeyApiAuraClient` mapping tests; assert the domain<->generated mapping
   without network calls.
-- The `AuraClient` interface is implementation-agnostic; tests of consumers
-  (`aura.ts`, `aura-digest.ts` after `call-site-migration`) should inject a
-  fake `AuraClient` rather than the real `HeyApiAuraClient`.
+- The `AuraClient` interface is implementation-agnostic; `aura.ts` and
+  `aura-digest.ts` now consume `createDefaultAuraClient()` from
+  `@pi-aura/shared/aura-client` and should be unit-tested by injecting a fake
+  `AuraClient` rather than the real `HeyApiAuraClient`.
+- The scripts' esbuild bundle marks `@napi-rs/keyring`,
+  `@napi-rs/keyring-linux-x64-gnu`, and `dbus-next` as `external` (native
+  binding / optional `x11` require that can't bundle). Any new native-ish dep
+  pulled in transitively via `@pi-aura/shared` must be added to
+  `scripts/esbuild.config.mjs`'s `external` array or the bundle breaks.

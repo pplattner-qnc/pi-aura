@@ -19,17 +19,22 @@
 //   node aura.mjs upload create --file <path> [--mime <type>] [--filename <name>]  -> prints upload uuid
 //   node aura.mjs upload get <upload-uuid> [--out <path>]            -> parsed text to file (or stdout if small)
 //
-// Auth: reuses bearerClient("aura-mcp-dev") (HTTP + bearer from mcp.json),
-// configurable via settings.aura.mcpServers.aura. The MCP SDK is bundled at
-// build time; only @napi-rs/keyring is external (and this script doesn't use it).
+// Auth: createDefaultAuraClient() reads aura.baseUrl from
+// ~/.pi/agent/settings.json + a PAT from the OS keyring. No MCP SDK needed.
 
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
-import { bearerClient } from "./clients.js";
-import { loadSettings } from "./settings.js";
-import type { McpClient } from "./mcp-client.js";
+import { createDefaultAuraClient } from "@pi-aura/shared/aura-client";
+import type {
+  AuraClient,
+  ArtifactKind,
+  KnowledgeNode,
+  WikiSearchResult,
+  KnowledgeTree,
+  UploadDocument,
+} from "@pi-aura/shared/aura-client";
 
 const USAGE = `Usage:
   node aura.mjs artifact get <artifact-uuid>              fetch body+meta into a workdir
@@ -113,55 +118,32 @@ function cleanupStale(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Aura API response shapes (subset)
-// ---------------------------------------------------------------------------
-
-interface ArtifactDetail {
-  id: string;
-  title: string;
-  current_version: number;
-  kind: string;
-  [k: string]: unknown;
-}
-interface WikiNodeDetail {
-  uuid?: string;
-  slug?: string;
-  title?: string;
-  version?: number;
-  body?: string;
-  [k: string]: unknown;
-}
-
-// ---------------------------------------------------------------------------
 // artifact subcommands
 // ---------------------------------------------------------------------------
 
-async function artifactGet(client: McpClient, id: string): Promise<void> {
-  // getArtifact returns { id, title, latest_version, body, kind, ... } directly
-  // (the McpClient already unwraps the MCP content block + parses the JSON).
-  const detail = await client.callTool<ArtifactDetail & { body?: string; latest_version?: number }>("getArtifact", { id });
+async function artifactGet(client: AuraClient, id: string): Promise<void> {
+  const detail = await client.getArtifact(id);
   const body = detail.body ?? "";
   const dir = freshWorkdir("aura-artifact");
   writeWorkdir(dir, {
     kind: "artifact",
     artifact_id: id,
-    version: detail.current_version ?? detail.latest_version ?? 0,
+    version: detail.latest_version ?? 0,
     title: detail.title ?? "",
     artifact_kind: detail.kind ?? "GENERIC",
   }, body);
   // stdout: the workdir path + a one-line summary. Body never on stdout.
   console.log(`workdir: ${dir}/`);
-  console.error(`  ${detail.title ?? "(untitled)"}  v${detail.current_version ?? 0}  (${body.length} bytes)`);
-  await client.close();
+  console.error(`  ${detail.title ?? "(untitled)"}  v${detail.latest_version ?? 0}  (${body.length} bytes)`);
 }
 
-async function artifactUpdate(client: McpClient, dir: string, summary?: string): Promise<void> {
+async function artifactUpdate(client: AuraClient, dir: string, summary?: string): Promise<void> {
   const meta = readWorkdirMeta(dir);
   if (meta.kind !== "artifact") fail(`workdir ${dir} is not an artifact workdir`);
   const bodyPath = join(dir, "body.md");
   if (!existsSync(bodyPath)) fail(`workdir ${dir} has no body.md`);
   const body = readFileSync(bodyPath, "utf8");
-  await client.callTool("mcpUpdateArtifact", {
+  await client.mcpUpdateArtifact({
     id: meta.artifact_id,
     mode: "whole",
     body,
@@ -170,28 +152,26 @@ async function artifactUpdate(client: McpClient, dir: string, summary?: string):
   });
   removeWorkdir(dir);
   console.error(`updated ${meta.artifact_id}; cleaned up ${dir}/`);
-  await client.close();
 }
 
-async function artifactCreate(client: McpClient, opts: { title: string; kind: string; bodyFile?: string; summary?: string }): Promise<void> {
+async function artifactCreate(client: AuraClient, opts: { title: string; kind: string; bodyFile?: string; summary?: string }): Promise<void> {
   let body = "";
   if (opts.bodyFile) {
     body = readFileSync(opts.bodyFile, "utf8");
     if (body.length < LARGE_BODY_THRESHOLD) console.error(`note: body is ${body.length} bytes (≤ ${LARGE_BODY_THRESHOLD}); a direct mcpCreateArtifact call would also be fine.`);
   }
-  const created = await client.callTool<{ id?: string; current_version?: number }>("mcpCreateArtifact", {
+  const created = await client.mcpCreateArtifact({
     title: opts.title,
-    kind: opts.kind,
+    kind: opts.kind as ArtifactKind,
     body,
     summary: opts.summary ?? "Initial version",
   });
   if (opts.bodyFile) rmSync(opts.bodyFile, { force: true });
-  console.log(`created ${created.id ?? "?"} (v${created.current_version ?? 1})`);
-  await client.close();
+  console.log(`created ${created.id} (v${created.latest_version ?? 1})`);
 }
 
-async function artifactSection(client: McpClient, id: string, heading: string, body: string, summary: string): Promise<void> {
-  await client.callTool("mcpUpdateArtifact", {
+async function artifactSection(client: AuraClient, id: string, heading: string, body: string, summary: string): Promise<void> {
+  await client.mcpUpdateArtifact({
     id,
     mode: "section",
     target_heading: heading,
@@ -199,19 +179,23 @@ async function artifactSection(client: McpClient, id: string, heading: string, b
     summary,
   });
   console.error(`updated section ${heading} of ${id}`);
-  await client.close();
 }
 
 // ---------------------------------------------------------------------------
 // wiki subcommands
 // ---------------------------------------------------------------------------
 
-async function wikiGet(client: McpClient, opts: { slug?: string; uuid?: string }): Promise<void> {
-  let node: WikiNodeDetail;
+async function wikiGet(client: AuraClient, opts: { slug?: string; uuid?: string }): Promise<void> {
+  let node: KnowledgeNode;
   if (opts.uuid) {
-    node = await client.callTool<WikiNodeDetail>("getKnowledgeNode", { uuid: opts.uuid, include_body: true });
+    node = await client.getKnowledgeNode(opts.uuid, { includeBody: true });
   } else if (opts.slug) {
-    node = await client.callTool<WikiNodeDetail>("getKnowledgeNodeByPath", { slug: opts.slug, include_body: true });
+    // Seam B: the CLI --slug is the full slash-separated path (e.g. "daten/chat").
+    // Split into spaceSlug (first segment) + path (remainder).
+    const slashIdx = opts.slug.indexOf("/");
+    const spaceSlug = slashIdx === -1 ? opts.slug : opts.slug.slice(0, slashIdx);
+    const path = slashIdx === -1 ? "" : opts.slug.slice(slashIdx + 1);
+    node = await client.getKnowledgeNodeByPath(spaceSlug, path, { includeBody: true });
   } else {
     fail("wiki get requires --slug or --uuid", true);
   }
@@ -219,94 +203,77 @@ async function wikiGet(client: McpClient, opts: { slug?: string; uuid?: string }
   const dir = freshWorkdir("aura-wiki");
   writeWorkdir(dir, {
     kind: "wiki",
-    node_uuid: node.uuid ?? "",
+    node_uuid: node.id,
     slug: node.slug ?? opts.slug ?? "",
     title: node.title ?? "",
-    version: node.version ?? 0,
+    version: node.latest_version ?? 0,
   }, body);
   console.log(`workdir: ${dir}/`);
-  console.error(`  ${node.title ?? "(untitled)"}  ${node.slug ?? ""}  (v${node.version ?? 0}, ${body.length} bytes)`);
-  await client.close();
+  console.error(`  ${node.title ?? "(untitled)"}  ${node.slug ?? ""}  (v${node.latest_version ?? 0}, ${body.length} bytes)`);
 }
 
-async function wikiSave(client: McpClient, dir: string, summary?: string): Promise<void> {
+async function wikiSave(client: AuraClient, dir: string, summary?: string): Promise<void> {
   const meta = readWorkdirMeta(dir);
   if (meta.kind !== "wiki") fail(`workdir ${dir} is not a wiki workdir`);
   const bodyPath = join(dir, "body.md");
   if (!existsSync(bodyPath)) fail(`workdir ${dir} has no body.md`);
   const body = readFileSync(bodyPath, "utf8");
-  await client.callTool("saveKnowledgeNodeBody", {
+  await client.saveKnowledgeNodeBody({
     uuid: meta.node_uuid,
     body,
     summary: summary ?? `Updated via aura.mjs`,
   });
   removeWorkdir(dir);
   console.error(`saved ${meta.slug}; cleaned up ${dir}/`);
-  await client.close();
 }
 
-async function wikiSearch(client: McpClient, query: string, spaceSlug?: string, limit?: number): Promise<void> {
-  const res = await client.callTool<{ items?: Array<{ slug?: string; title?: string; score?: number }> }>("mcpWikiSearch", {
+async function wikiSearch(client: AuraClient, query: string, spaceSlug?: string, limit?: number): Promise<void> {
+  const res: WikiSearchResult = await client.mcpWikiSearch({
     query,
     space_slug: spaceSlug,
     limit: limit ?? 10,
   });
-  for (const it of res.items ?? []) {
-    console.log(`- ${it.title ?? "(untitled)"}  [${it.slug ?? ""}]${it.score !== undefined ? ` (${it.score.toFixed(3)})` : ""}`);
+  for (const it of res.items) {
+    console.log(`- ${it.title}  [${it.space_slug}]  (${it.url})`);
   }
-  await client.close();
 }
 
-async function wikiTree(client: McpClient, slug: string): Promise<void> {
-  const res = await client.callTool<unknown>("getKnowledgeTree", { slug });
+async function wikiTree(client: AuraClient, slug: string): Promise<void> {
+  const res: KnowledgeTree = await client.getKnowledgeTree(slug);
   console.log(JSON.stringify(res, null, 2));
-  await client.close();
 }
 
-async function wikiCreate(client: McpClient, opts: { space: string; title: string; slug: string }): Promise<void> {
-  const res = await client.callTool<{ uuid?: string }>("createKnowledgeNode", {
+async function wikiCreate(client: AuraClient, opts: { space: string; title: string; slug: string }): Promise<void> {
+  const res = await client.createKnowledgeNode({
     space_slug: opts.space,
     kind: "DOCUMENT",
     title: opts.title,
     slug: opts.slug,
   });
-  console.log(res.uuid ?? "(created, no uuid returned)");
-  await client.close();
+  console.log(res.id);
 }
 
 // ---------------------------------------------------------------------------
 // upload subcommands (file-based: base64 stays on disk, out of LLM context)
 // ---------------------------------------------------------------------------
 
-async function uploadCreate(client: McpClient, opts: { file: string; mime?: string; filename?: string }): Promise<void> {
+async function uploadCreate(client: AuraClient, opts: { file: string; mime?: string; filename?: string }): Promise<void> {
   const buf = readFileSync(opts.file);
   const contentBase64 = buf.toString("base64");
   const filename = opts.filename ?? opts.file.split("/").pop() ?? "upload";
-  const res = await client.callTool<{ id?: string }>("mcpCreateUploadDocument", {
+  const res = await client.mcpCreateUploadDocument({
     filename,
     content_base64: contentBase64,
     mime_type: opts.mime ?? "application/octet-stream",
   });
-  console.log(res.id ?? "(created, no id returned)");
-  await client.close();
+  console.log(res.id);
 }
 
-interface UploadDocumentDetail {
-  id?: string;
-  filename?: string;
-  mime_type?: string;
-  byte_size?: number;
-  page_count?: number;
-  ingest_status?: string;
-  summary?: string;
-  pages?: Array<{ text?: string }>;
-  [k: string]: unknown;
-}
-
-async function uploadGet(client: McpClient, id: string, outPath?: string): Promise<void> {
-  const doc = await client.callTool<UploadDocumentDetail>("mcpGetUploadDocument", { id });
-  const text = (doc.pages ?? []).map((p) => p.text ?? "").join("\n\n---\n\n");
-  const summary = `# ${doc.filename ?? id}\n\n- mime: ${doc.mime_type ?? "?"}\n- size: ${doc.byte_size ?? "?"} bytes\n- pages: ${doc.page_count ?? "?"}\n- ingest: ${doc.ingest_status ?? "?"}\n- summary: ${doc.summary ?? ""}\n\n## Extracted text\n\n${text}\n`;
+async function uploadGet(client: AuraClient, id: string, outPath?: string): Promise<void> {
+  const doc: UploadDocument = await client.mcpGetUploadDocument(id);
+  // Domain UploadDocument.pages items use `content` (not `text`); map accordingly.
+  const text = doc.pages.map((p) => p.content ?? "").join("\n\n---\n\n");
+  const summary = `# ${doc.filename}\n\n- mime: ${doc.mime_type}\n- size: ${doc.byte_size ?? "?"} bytes\n- pages: ${doc.page_count ?? "?"}\n- ingest: ${doc.ingest_status ?? "?"}\n- summary: ${doc.summary ?? ""}\n\n## Extracted text\n\n${text}\n`;
   if (outPath) {
     writeFileSync(outPath, summary, "utf8");
     console.log(`wrote ${outPath} (${summary.length} bytes)`);
@@ -316,9 +283,8 @@ async function uploadGet(client: McpClient, id: string, outPath?: string): Promi
     const dir = freshWorkdir("aura-upload");
     writeFileSync(join(dir, "parsed.md"), summary, "utf8");
     console.log(`workdir: ${dir}/`);
-    console.error(`  ${doc.filename ?? id}  (${summary.length} bytes) — parsed text in parsed.md`);
+    console.error(`  ${doc.filename}  (${summary.length} bytes) — parsed text in parsed.md`);
   }
-  await client.close();
 }
 
 // ---------------------------------------------------------------------------
@@ -347,9 +313,7 @@ async function main(): Promise<void> {
   const group = process.argv[2];
   const sub = process.argv[3];
   const rest = process.argv.slice(4);
-  const settings = loadSettings();
-  const client = bearerClient(settings.mcpServers.aura);
-  await client.connect();
+  const client = await createDefaultAuraClient();
 
   try {
     if (group === "artifact") {
