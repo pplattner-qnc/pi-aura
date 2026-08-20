@@ -19,6 +19,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./keyring": "./src/keyring/index.ts",
+    "./aura-client": "./src/aura-client.ts",
     "./*": "./src/*.ts"
   }
 }
