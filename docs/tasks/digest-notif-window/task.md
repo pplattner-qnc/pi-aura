@@ -5,6 +5,9 @@ slug: digest-notif-window
 title: "aura-digest: since-last-run + older-unread notifications, drop auto mark-read"
 status: ready
 size: m
+slices:
+- notif-window-fetch
+- skill-drop-markread
 ---
 
 ## User-visible outcome
@@ -318,3 +321,34 @@ have the new shape) and the rendered markdown.
 - [ ] SKILL.md no longer instructs marking notifications read.
 - [ ] `make typecheck` + `make build` pass.
 - [ ] Hard cap (500) is respected; over-cap produces a `warnings[]` entry.
+
+## Implementation notes
+
+### Slice: notif-window-fetch (landed)
+
+- Implemented the since-last-run + older-unread notification window in
+  `scripts/src/types.ts` and `scripts/src/aura-digest.ts`, with the rebuilt
+  bundle in `skills/aura-digest/dist/aura-digest.mjs`.
+- Added exported `DigestNotifications { since_last_run: string[];
+  older_unread: string[] }`; changed `DigestAttention.notifications` to this
+  structured type.
+- Added `fetchNotifications(aura, lastFetchedAt, warnings)` internal helper
+  with boundary logic, pagination, first-run behavior, 500-item hard cap,
+  and defensive NaN `created_at` handling.
+- `fetchAction` reads `loadLastDigest()?.fetched_at`, splits notifications
+  into since/older groups, feeds the combined list into
+  `extractVerifyTargets` and the `review_assigned` filter, and stores the
+  full set in `raw.notifications`.
+- `summarizeNotifications` no longer filters unread or emits a fallback
+  string; `renderAttention` renders two lines with empty-state text.
+- **Minor deviation (spec-endorsed):** the internal `fetchNotifications`
+  helper takes a third `warnings: string[]` param (pushes the over-cap
+  warning directly into the caller's array) — the arch spec explicitly
+  allowed this.
+- Verification: `npm run typecheck` + `npm run build` passed in
+  `scripts/`; `packages/shared` typecheck + tests (4/4) passed.
+- `ui-noter` returned "no_ui_work".
+- `scripts/` has no test runner wired; correctness verified by typecheck +
+  build + manual smoke tests, per the slice doc's test plan.
+- SKILL.md changes are **not** part of this slice — they are the separate
+  `skill-drop-markread` slice (slice 2).
