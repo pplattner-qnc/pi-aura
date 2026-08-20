@@ -1,6 +1,5 @@
 // clients.ts — build McpClient instances for the servers this script uses.
 //
-// - Aura (aura-mcp-dev): HTTP + bearer token from ~/.config/mcp/mcp.json.
 // - Atlassian (Jira/Teamwork Graph): HTTP + OAuth access token read from the
 //   OS keyring, where pi-mcp-adapter persists it (service "pi-mcp-adapter.oauth",
 //   account "sha256-<sha256(serverName)>"). Reusing the adapter's stored token
