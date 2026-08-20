@@ -3,7 +3,7 @@ kind: task
 type: feature
 slug: digest-notif-window
 title: "aura-digest: since-last-run + older-unread notifications, drop auto mark-read"
-status: ready
+status: done
 size: m
 slices:
 - notif-window-fetch
