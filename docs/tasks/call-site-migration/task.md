@@ -4,7 +4,7 @@ type: feature
 slug: call-site-migration
 title: Migrate aura.ts/aura-digest.ts to AuraClient; dedupe types.ts
 map: aura-access-rewrite
-status: ready
+status: done
 slices:
 - migrate-aura-digest
 - migrate-aura-cli
@@ -125,3 +125,46 @@ empty string. `includeBody: true` opt passed to `getKnowledgeNode` and
 - `artifactCreate` kind casting: CLI `--kind` is `string` but
   `CreateArtifactInput.kind` expects `ArtifactKind`; cast with
   `opts.kind as ArtifactKind` (runtime value passed through unchanged).
+
+### Slice: dedupe-types (landed)
+
+20 hand-maintained Aura-API-response shapes removed from
+`scripts/src/types.ts` (`AuraHumanKey`, `AuraCapacityTask`, `AuraCapacity`,
+`AuraPriorityQueueItem`, `AuraPriorityQueue`, `AuraNotification`,
+`AuraNotificationList`, `AuraArtifact`, `AuraArtifactList`,
+`AuraBoardBriefing`, `AuraBoardSummaryItem`, `AuraBoardSummaryBucket`,
+`AuraBoardSummary`, `AuraAttentionItem`, `AuraTask`, `AuraTaskList`,
+`AuraTaskDetail`, `ArtifactReview`, `ArtifactApprovalDecision`,
+`ArtifactApprovalState`). `types.ts` dropped from ~400 to 296 lines and now
+imports 9 domain types (`ApprovalDecision`, `ArtifactApprovals`,
+`ArtifactList`, `BoardBriefing`, `BoardSummary`, `Capacity`,
+`NotificationList`, `PriorityQueue`, `TaskList`) from
+`@pi-aura/shared/aura-client`. The digest/report/diff/dev-link types with no
+spec equivalent (`Digest`, `DigestQueueRow`, `RawAuraData`, `AuraReport`,
+`ArtifactVerification`, `TaskDevLinks`, etc.) stay.
+
+Embedded references retyped to domain equivalents: `DigestReview.decisions`
+and `DigestCorrection.current_decisions` → `ApprovalDecision[]`;
+`ArtifactVerification.current` → `ArtifactApprovals | null`; all 8
+`RawAuraData` fields → domain types (`BoardBriefing`, `BoardSummary`,
+`NotificationList`, `PriorityQueue`, `Capacity`, `ArtifactList`, `TaskList`);
+`devlinks.ts` `fetchTaskDevLinks` + `taskText` params → `Task`.
+
+**Divergence from plan (both minor, consistent with slice intent):**
+- `AuraAttentionItem` removed — not in the arch spec's explicit "Types to
+  remove" list, but a dead Aura-response shape with no domain equivalent and
+  no consumers outside `types.ts` after Slices 1+2. Removed as a dead type.
+- `as unknown as RawAuraData` cast removed in `aura-digest.ts` — the
+  transitional cast from Slice 1 is no longer needed once `RawAuraData`
+  fields were retyped to domain types. The `raw` object is now directly
+  annotated `const raw: RawAuraData = {...}` with no cast.
+
+**Intentional non-changes:** The 3 capacity-boundary `?? null` sites in
+`aura-digest.ts` stay. These map domain types (which use `undefined` for
+optionals like `capacity_percent?: number`) to the digest JSON contract
+(which uses `null` for `capacity_pct: number | null`). This is intentional
+runtime behavior, not a type-source duplication issue.
+
+Typecheck + build passed on first attempt — no removed-type references
+needed fixing, confirming Slices 1+2 had already migrated all call sites to
+domain types.
