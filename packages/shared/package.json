@@ -4,18 +4,24 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "codegen": "openapi-ts -f openapi-ts.config.ts",
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
+    "@hey-api/client-fetch": "^0.13.1",
     "dbus-next": "^0.10.2"
   },
   "devDependencies": {
+    "@hey-api/openapi-ts": "^0.64.2",
     "@types/node": "^22.10.0",
+    "tsx": "^4.23.0",
     "typescript": "^5.7.0"
   },
   "exports": {
     ".": "./src/index.ts",
     "./keyring": "./src/keyring/index.ts",
+    "./aura-client": "./src/aura-client.ts",
     "./*": "./src/*.ts"
   }
 }
