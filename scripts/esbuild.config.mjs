@@ -10,9 +10,17 @@ const baseConfig = {
   target: "node22",
   sourcemap: false,
   legalComments: "none",
-  // @napi-rs/keyring has a native .node binding that cannot be bundled —
-  // mark it external so Node resolves it from node_modules at runtime.
-  external: ["@napi-rs/keyring", "@napi-rs/keyring-linux-x64-gnu"],
+  // Native bindings + optional-dep modules that cannot be bundled —
+  // mark them external so Node resolves them from node_modules at runtime.
+  // @napi-rs/keyring: native .node binding.
+  // dbus-next: pulled in transitively via @pi-aura/shared keyring (used by
+  //   createDefaultAuraClient); its address-x11.js has an optional require("x11")
+  //   that isn't installed and can't be resolved at bundle time.
+  external: [
+    "@napi-rs/keyring",
+    "@napi-rs/keyring-linux-x64-gnu",
+    "dbus-next",
+  ],
   banner: {
     // __dirname/__filename aren't defined in ESM; banner provides them.
     js: [
