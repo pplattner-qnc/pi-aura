@@ -109,3 +109,26 @@ from `settings.json` `aura` block (Q4), PAT from keyring (Q1), ~21 verbs
   workspace rather than `make codegen` / `make gen`. The `Makefile` targets
   are correct but unverified end-to-end here; a machine with `make` (or CI)
   should run `make gen` once to confirm the target wiring.
+
+### slice 2 — aura-client-interface (done)
+
+- `packages/shared/src/aura-client.ts` exports the `AuraClient` interface
+  with exactly 21 methods (4 artifacts + 6 knowledge/wiki + 2 upload +
+  2 boards + 1 notifications + 2 my-board + 1 listTasks + 3 reviews) and all
+  domain types from the arch spec's "Domain type catalogue" (verified
+  field-by-field against the catalogue and cross-checked against
+  `scripts/src/types.ts`).
+- The interface has **no** imports from `./generated/*` (Q8 satisfied —
+  pure hand-written domain types). The `"./aura-client": "./src/aura-client.ts"`
+  exports mapping was added to `packages/shared/package.json`.
+- **`ListArtifactsInput`** was added as a loose `{ [k: string]: unknown }`
+  index-signature type — the arch spec's method-signature section references
+  it but the "Domain type catalogue" does not enumerate its fields. The
+  call-site-migration task may tighten it.
+- **Naming note for `call-site-migration`:** the slice doc's test plan
+  references `TaskListQuery`, but the actual exported type is `ListTasksInput`
+  (per the arch spec, which is authoritative). The migration task should import
+  `ListTasksInput`, not `TaskListQuery`.
+- `npm run typecheck` passes in both `packages/shared` and `scripts` (the
+  scripts workspace resolves `@pi-aura/shared` types across the workspace
+  boundary).
