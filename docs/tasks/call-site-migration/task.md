@@ -168,3 +168,31 @@ runtime behavior, not a type-source duplication issue.
 Typecheck + build passed on first attempt — no removed-type references
 needed fixing, confirming Slices 1+2 had already migrated all call sites to
 domain types.
+
+### Architecture lessons (for `clients-cleanup`)
+
+- **`aura.ts` + `aura-digest.ts` no longer import `bearerClient`/`McpClient`
+  for Aura.** They use `createDefaultAuraClient()` from
+  `@pi-aura/shared/aura-client`. `bearerClient`'s Aura path is now dead and
+  can be removed in `clients-cleanup` (keep `atlassianClient`/
+  `readOAuthTokenFromKeyring`/`McpClient` — the Atlassian/devlinks path still
+  uses them).
+- **`scripts/src/generated/` is dead.** Both scripts now reach Aura via
+  `packages/shared/src/generated/` (through `HeyApiAuraClient`). The old
+  `scripts/src/generated/` tree + `scripts/openapi*` + the `@hey-api/*` deps
+  in `scripts/package.json` can be removed in `clients-cleanup`.
+- **`dbus-next` is an esbuild external.** `scripts/esbuild.config.mjs` marks
+  `dbus-next` external (transitively pulled in via `@pi-aura/shared` keyring
+  on Linux; its `address-x11.js` has an optional `require("x11")` that can't
+  bundle). Keep this entry; do NOT remove it when pruning `scripts` deps.
+- **Field renames to remember if old code is re-read:** Artifact
+  `current_version`→`latest_version`; KnowledgeNode `uuid`→`id`,
+  `version`→`latest_version`; UploadDocument pages `p.text`→`p.content`.
+- **`getKnowledgeNodeByPath` takes `(spaceSlug, path, opts)`** — the CLI
+  splits `--slug` at the first `/`. The MCP `slug`-as-full-path shape is gone.
+- **`types.ts` is now digest/report/diff/dev-link types only.** The
+  Aura-response shapes are single-sourced in `@pi-aura/shared/aura-client`.
+  `clients-cleanup` can prune `types.ts` further only if a digest type becomes
+  unused; the Aura shapes are already gone.
+- **`dataflow.tldraw`** is an unrelated tracked diagram file that editors
+  modify on open; revert it before any commit/merge if it shows as modified.
