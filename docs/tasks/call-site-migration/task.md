@@ -94,3 +94,34 @@ inherit this fix (shared config).
   compatible with domain `Task`); retype to `Task`.
 - Remove now-unused `Aura*` types from `types.ts`.
 - Stale line-21 comment still references `assertToolsAvailable` (cosmetic).
+
+### Slice: migrate-aura-cli (landed)
+
+All 11 Aura `callTool` calls in `scripts/src/aura.ts` replaced with
+`AuraClient` methods via `createDefaultAuraClient()`. `bearerClient` /
+`McpClient` / `loadSettings` imports removed; `AuraClient`, domain types
+(`Artifact`, `KnowledgeNode`, `WikiSearchResult`, `KnowledgeTree`,
+`UploadDocument`, `ArtifactKind`) imported from `@pi-aura/shared/aura-client`.
+All 11 async subcommand functions retyped `client: McpClient` →
+`client: AuraClient`. All `await client.close()` calls dropped (Seam A).
+Local interfaces `ArtifactDetail`, `WikiNodeDetail`, `UploadDocumentDetail`
+removed, replaced by domain types. `dbus-next` external inherited from
+`migrate-aura-digest` (no esbuild config change needed).
+
+**Field renames:** Artifact `current_version` → `latest_version`;
+KnowledgeNode `uuid` → `id`, `version` → `latest_version`; UploadDocument
+pages `p.text` → `p.content`.
+
+**Seam B (getKnowledgeNodeByPath):** CLI `--slug` split at first `/` into
+`spaceSlug` + `path`; if no `/`, whole slug is the space slug and path is
+empty string. `includeBody: true` opt passed to `getKnowledgeNode` and
+`getKnowledgeNodeByPath` for clarity (REST ignores it; always returns body).
+
+**Transitional items flagged for `dedupe-types` (Level 2):**
+- `wikiSearch` output: domain `WikiSearchHit` has `title`, `space_slug`,
+  `url`, `excerpt`, `heading_path`, `match_source`, `id` — no `slug` or
+  `score`. CLI now prints `title`/`space_slug`/`url` instead of `slug`/`score`.
+  Minor output format change; flagged for awareness.
+- `artifactCreate` kind casting: CLI `--kind` is `string` but
+  `CreateArtifactInput.kind` expects `ArtifactKind`; cast with
+  `opts.kind as ArtifactKind` (runtime value passed through unchanged).
