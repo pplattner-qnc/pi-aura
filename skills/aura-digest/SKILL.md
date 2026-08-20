@@ -160,9 +160,8 @@ a second arg to write to a file instead of stdout.
 
 ## Step 4: Present, save, and act
 
-Present the rendered digest. Then:
+Present the rendered digest. The digest does not mark notifications as read automatically. Then:
 
-- Mark notifications read via MCP: `aura-mcp-dev_markAllNotificationsRead()`
 - **Save the presented digest** as the last-digest store (so the next run can
   diff against it):
   ```bash
