@@ -175,3 +175,40 @@ from `settings.json` `aura` block (Q4), PAT from keyring (Q1), ~21 verbs
   5. `ArtifactReview.review_started_at` / `review_deadline_at`: generated
      type declares them required `string`, domain type has them optional.
      Passed through directly; `null` at runtime won't be caught by TS.
+
+### Architecture lessons (for `call-site-migration` + `clients-cleanup`)
+
+- **Domain types are the contract.** `@pi-aura/shared/aura-client` exports
+  `AuraClient` + domain types + `createDefaultAuraClient` + `HeyApiAuraClient` +
+  `AuraApiError`. Scripts import `AuraClient` + `createDefaultAuraClient` and
+  inject a fake `AuraClient` in tests. Generated types never appear in script
+  imports (Q8).
+- **`getArtifact` (non-MCP REST path), not `mcpGetArtifact`.** The scripts call
+  the non-MCP `getArtifact` operationId; the interface method is named
+  `getArtifact` either way.
+- **`include_body` is not a REST param.** `getKnowledgeNode`/`getKnowledgeNodeByPath`
+  always return the body on the REST path; drop the `include_body: true` the MCP
+  call sites pass — the `AuraClient` method accepts an `includeBody` opt for
+  interface symmetry but ignores it.
+- **`listArtifacts`/`listTasks`/`listNotifications` opts** are the domain
+  `*Input` types in the interface, but the impl narrows to the generated SDK's
+  query subset. Call sites can pass the full domain type; verify the specific
+  query fields (`role`, `view`, `status_slug`, `limit` for `listTasks`;
+  `pending_review`, `limit` for `listArtifacts`; `limit`, `sort_by`, `sort_dir`
+  for `listNotifications`) are forwarded.
+- **`BoardSummary.overdue` items** map from `BoardOverdueItem` — `since`/`link`/
+  `approvals_pending` are `undefined` on overdue items (only `waiting_on_me`/
+  `waiting_on_others` buckets populate them). `aura-digest.ts`'s
+  `toAttentionItem` must tolerate `undefined` for those fields.
+- **Error handling.** `HeyApiAuraClient` throws `AuraApiError` (status +
+  message) on SDK `error`; scripts should catch it or let it propagate
+  (replaces the MCP `callTool` error shape).
+- **PAT + base URL.** `createDefaultAuraClient()` requires `aura.baseUrl` in
+  `~/.pi/agent/settings.json` (new field) + a PAT in the keyring
+  (`{ service: "aura", name: "pat" }`, set via `/aura secrets discover`).
+  `scripts/src/settings.ts` still has its own reader (full settings move
+  deferred to this task); reconcile the two readers here.
+- **Two generated trees briefly coexist.** `scripts/src/generated/` (old) and
+  `packages/shared/src/generated/` (new) both exist until `call-site-migration`
+  rewires callers; `clients-cleanup` removes the old one + `scripts`'
+  `@hey-api/*` deps.

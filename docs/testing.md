@@ -1,27 +1,47 @@
 # Testing
 
-This repo has no automated test suite yet. Verification is manual + typecheck + build.
+The repo has two build targets with their own gates: the `scripts/` esbuild
+project (bundles `.mjs` for the skills) and the `@pi-aura/shared` workspace
+package (`.ts` sources consumed by both `scripts/` and the pi extension).
+Verification is typecheck + build + the shared package's unit tests.
 
 ## Framework
 
-_(None. `npm run typecheck` and `make build` are the gate; ad-hoc scripts are
-bundled with esbuild and run with `node` for smoke tests.)_
+- `scripts/`: `tsc --noEmit` + esbuild bundle (no test runner).
+- `packages/shared/`: `tsc --noEmit` + `tsx --test` (Node's built-in test
+  runner via `tsx` for `.ts` sources). Tests live in `packages/shared/test/`.
 
 ## Run commands
 
 ```bash
-# From scripts/
+# Root (workspaces root): one install populates scripts/ + packages/shared/
+npm install
+
+# packages/shared — the AuraClient interface, HeyApiAuraClient impl, keyring, settings
+cd packages/shared
+npm run codegen        # regenerate src/generated/ from openapi/openapi.yaml
+npm run typecheck      # tsc --noEmit
+npm test               # tsx --test test/*.test.ts
+
+# scripts — the skill bundles
+npm run codegen        # regenerate src/generated/ from openapi/openapi.yaml (legacy tree; moved to packages/shared)
 npm run typecheck      # tsc --noEmit
 npm run build          # esbuild -> skills/*/dist/*.mjs
-npm run codegen        # regenerate src/generated/ from openapi/openapi.yaml
 
-# Smoke test the keyring (pure-JS, no native bindings):
-#   bundle a one-off entry with esbuild and run with node — see keyring.ts
-#   development notes. No committed test runner yet.
+# Makefile wrappers (require `make` on PATH; not available on NixOS — use npm directly):
+make install          # root npm install
+make codegen          # cd packages/shared && npm run codegen
+make gen              # codegen + typecheck + build
+make build            # typecheck + bundle
 ```
 
 ## Mock conventions
 
-_(Not established yet. When tests are added, prefer injecting a fake
-`KeyringBackend` / a generated-client stub over hitting real Aura or the real
-OS keyring.)_
+- Inject a fake `Keyring` (returns a test PAT) over hitting the real OS
+  keyring — see `packages/shared/test/hey-api-aura-client.test.ts`.
+- Inject a fake generated SDK / `createClient` over hitting real Aura for
+  `HeyApiAuraClient` mapping tests; assert the domain<->generated mapping
+  without network calls.
+- The `AuraClient` interface is implementation-agnostic; tests of consumers
+  (`aura.ts`, `aura-digest.ts` after `call-site-migration`) should inject a
+  fake `AuraClient` rather than the real `HeyApiAuraClient`.
