@@ -1,2 +1,2 @@
-task: None
-slice: None
+task: aura-client
+slice: hey-api-impl-and-factory
