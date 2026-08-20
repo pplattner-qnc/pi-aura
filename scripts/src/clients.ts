@@ -38,32 +38,6 @@ function loadMcpConfig(path: string = MCP_CONFIG_PATH): McpConfig {
   return JSON.parse(readFileSync(path, "utf8")) as McpConfig;
 }
 
-/** Build an McpClient for an HTTP+bearer MCP server configured in mcp.json. */
-export function bearerClient(serverName: string, configPath: string = MCP_CONFIG_PATH): McpClient {
-  const config = loadMcpConfig(configPath);
-  const server = config.mcpServers[serverName];
-  if (!server) {
-    throw new Error(
-      `MCP server "${serverName}" not found in ${configPath}. Available: ${Object.keys(config.mcpServers).join(", ")}`
-    );
-  }
-  if (server.type !== "http" || !server.url) {
-    throw new Error(
-      `MCP server "${serverName}" is not an http server (type=${server.type}). Only http servers are supported.`
-    );
-  }
-  const token = server.bearerToken;
-  if (!token) {
-    throw new Error(`MCP server "${serverName}" has no bearerToken. Cannot authenticate.`);
-  }
-  return new McpClient({
-    serverName,
-    url: server.url,
-    authHeader: `Bearer ${token}`,
-    clientName: "aura-digest-script",
-  });
-}
-
 /** Read the OAuth access token that pi-mcp-adapter persisted for `serverName`
  * from the OS keyring. Returns null if no token is stored (user hasn't authed
  * that server via pi yet). Handles the adapter's chunked-payload format.
