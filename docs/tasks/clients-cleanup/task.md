@@ -4,7 +4,7 @@ type: feature
 slug: clients-cleanup
 title: Remove the Aura bearerClient path from clients.ts
 map: aura-access-rewrite
-status: ready
+status: done
 slices:
 - remove-aura-bearer-client
 ---
