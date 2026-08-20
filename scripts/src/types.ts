@@ -41,11 +41,24 @@ export interface RawAuraData {
 // digest.json contract.
 // ---------------------------------------------------------------------------
 
+export interface DigestNotifications {
+  /** Notifications that arrived since the last digest's `fetched_at` (minus a
+   * small safety margin so nothing at the exact fetch instant slips through).
+   * Includes both read and unread — "what happened while you were away", not
+   * just what still needs a click. Bounded by a hard fetch cap. */
+  since_last_run: string[];
+  /** Unread notifications older than the since-last-run boundary. Computed by
+   * fetching the newest N notifications at/older than the boundary (regardless
+   * of read state) and dropping the read ones — so this surfaces only items
+   * that still need attention. N is a small cap, not an unread count. */
+  older_unread: string[];
+}
+
 export interface DigestAttention {
   overdue: DigestAttentionItem[];
   waiting_on_you: DigestAttentionItem[];
   waiting_on_others: DigestAttentionItem[]; // artifacts/tasks awaiting others' review
-  notifications: string[]; // human-readable notification summaries
+  notifications: DigestNotifications;
 }
 
 export interface DigestAttentionItem {

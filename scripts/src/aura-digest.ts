@@ -49,6 +49,7 @@ import type {
   DigestAttentionItem,
   DigestCapacity,
   DigestDiff,
+  DigestNotifications,
   DigestQueueRow,
   DigestReview,
   LastDigestStore,
@@ -62,6 +63,11 @@ import type {
 // ---------------------------------------------------------------------------
 
 const WORKDAY_HOURS = 8;
+
+const NOTIF_PAGE_SIZE = 50;
+const NOTIF_FETCH_CAP = 500; // hard safety cap; ~10 pages
+const NOTIF_OLDER_FETCH = 20; // newest N older-than-boundary, then drop read
+const NOTIF_BOUNDARY_MARGIN_MS = 5 * 60 * 1000; // fetched_at - 5min
 
 function humanStatus(status: string): string {
   // "IN_REVIEW" -> "In Review", "READY_FOR_DEPLOYMENT" -> "Ready For Deployment"
@@ -157,17 +163,83 @@ function toAttentionItem(item: BoardItem): DigestAttentionItem {
   };
 }
 
+async function fetchNotifications(
+  aura: AuraClient,
+  lastFetchedAt: string | null,
+  warnings: string[]
+): Promise<{ since: Notification[]; older: Notification[] }> {
+  const sinceBoundary = lastFetchedAt
+    ? new Date(Date.parse(lastFetchedAt) - NOTIF_BOUNDARY_MARGIN_MS).toISOString()
+    : null;
+
+  const since: Notification[] = [];
+  const older: Notification[] = [];
+  let page = 1;
+  let totalFetched = 0;
+  let crossedBoundary = false;
+
+  while (totalFetched < NOTIF_FETCH_CAP) {
+    const resp = await aura.listNotifications({
+      sort_by: "created_at",
+      sort_dir: "desc",
+      page,
+      limit: NOTIF_PAGE_SIZE,
+    });
+    const items = resp.items ?? [];
+    if (items.length === 0) break;
+
+    for (const item of items) {
+      if (totalFetched >= NOTIF_FETCH_CAP) break;
+      totalFetched++;
+
+      if (sinceBoundary === null) {
+        if (older.length < NOTIF_OLDER_FETCH) {
+          older.push(item);
+        }
+        continue;
+      }
+
+      if (!crossedBoundary) {
+        const createdAt = Date.parse(item.created_at);
+        const boundaryTime = Date.parse(sinceBoundary);
+        if (Number.isNaN(createdAt) || createdAt <= boundaryTime) {
+          crossedBoundary = true;
+        }
+      }
+
+      if (!crossedBoundary) {
+        since.push(item);
+      } else if (older.length < NOTIF_OLDER_FETCH) {
+        older.push(item);
+      }
+    }
+
+    // First run: a single page of the newest items is enough.
+    if (sinceBoundary === null) break;
+    if (crossedBoundary && older.length >= NOTIF_OLDER_FETCH) break;
+    page++;
+  }
+
+  if (totalFetched >= NOTIF_FETCH_CAP) {
+    warnings.push(
+      `Notification fetch hit the hard cap of ${NOTIF_FETCH_CAP} items; some older items may have been skipped.`
+    );
+  }
+
+  return { since, older };
+}
+
 async function fetchAction(): Promise<void> {
   const outDir = join(tmpdir(), `aura-morning-${randomBytes(6).toString("hex")}`);
   mkdirSync(outDir, { recursive: true });
 
   const aura = await createDefaultAuraClient();
+  const warnings: string[] = [];
 
   // Parallel fetch of all base data.
   const [
     briefing,
     summary,
-    notifications,
     priorityQueue,
     capacity,
     pendingReviews,
@@ -176,11 +248,6 @@ async function fetchAction(): Promise<void> {
   ] = await Promise.all([
     aura.getBoardBriefing({ locale: "en" }),
     aura.getBoardSummary(),
-    aura.listNotifications({
-      limit: 20,
-      sort_by: "created_at",
-      sort_dir: "desc",
-    }),
     aura.getMyPriorityQueue(),
     aura.getMyCapacity(),
     aura.listArtifacts({
@@ -201,6 +268,17 @@ async function fetchAction(): Promise<void> {
     }),
   ]);
 
+  // Paginate notifications newest→oldest and split into "since last run"
+  // (read + unread) and "older unread" pools.
+  const lastDigest = loadLastDigest();
+  const lastFetchedAt = lastDigest?.fetched_at ?? null;
+  const { since: sinceNotifs, older: olderNotifs } = await fetchNotifications(
+    aura,
+    lastFetchedAt,
+    warnings
+  );
+  const allNotifs = [...sinceNotifs, ...olderNotifs];
+
   const fetchedAt = new Date().toISOString();
   const date = fetchedAt.slice(0, 10);
 
@@ -208,7 +286,10 @@ async function fetchAction(): Promise<void> {
     fetched_at: fetchedAt,
     briefing,
     summary,
-    notifications,
+    notifications: {
+      items: allNotifs,
+      pagination: { page: 1, limit: allNotifs.length, total: allNotifs.length },
+    },
     priority_queue: priorityQueue,
     capacity,
     pending_review_artifacts: pendingReviews,
@@ -287,7 +368,10 @@ async function fetchAction(): Promise<void> {
   const overdue = (summary.overdue?.items ?? []).map(toAttentionItem);
   const waitingOnYou = (summary.waiting_on_me?.items ?? []).map(toAttentionItem);
   const waitingOnOthers = (summary.waiting_on_others?.items ?? []).map(toAttentionItem);
-  const notifSummaries = summarizeNotifications(notifications.items ?? []);
+  const notifSummaries: DigestNotifications = {
+    since_last_run: summarizeNotifications(sinceNotifs),
+    older_unread: summarizeNotifications(olderNotifs.filter((n) => !n.read)),
+  };
   const attention: DigestAttention = {
     overdue,
     waiting_on_you: waitingOnYou,
@@ -334,7 +418,7 @@ async function fetchAction(): Promise<void> {
     (i) => safeString(i.link)
   );
   const { artifactsToVerify, notificationReviewEvents } = extractVerifyTargets(
-    notifications.items ?? [],
+    allNotifs,
     pendingReviews.items ?? [],
     waitingOnOthersLinks
   );
@@ -355,7 +439,6 @@ async function fetchAction(): Promise<void> {
   // unavailable. Disabled when no auraDigest settings are present.
   const settings = loadSettings();
   const devLinks: TaskDevLinks[] = [];
-  const warnings: string[] = [];
   if (!settings.digest) {
     warnings.push("Dev-links feature disabled: no `aura.digest` block in settings.json (set it to enable Teamwork Graph + GitHub + Bitbucket PR/branch lookup).");
   } else {
@@ -403,7 +486,7 @@ async function fetchAction(): Promise<void> {
   // from the first review I initiated (is_initiator: true) among the reviews
   // already in d.reviews; fallback: match reviewer by name "Plattner, Patric".
   const reviewsOwed: DigestReviewOwed[] = [];
-  const assignedNotif = (notifications.items ?? []).filter(
+  const assignedNotif = allNotifs.filter(
     (n) => safeString(n.type) === "artifact.review_assigned"
   );
   const candidateIds = new Set<string>();
@@ -564,10 +647,8 @@ async function verifyArtifacts(
 }
 
 function summarizeNotifications(items: Notification[]): string[] {
-  const unread = items.filter((n) => !n.read);
-  if (unread.length === 0) return ["No unread notifications."];
   const lines: string[] = [];
-  for (const n of unread) {
+  for (const n of items) {
     const date = safeString(n.created_at).slice(0, 10);
     const type = safeString(n.type) || "notification";
     const p = (n.i18n_params as Record<string, unknown> | undefined) ?? {};
@@ -702,10 +783,14 @@ function renderAttention(d: Digest): string {
   lines.push(attentionLine("🔴", "Overdue", d.attention.overdue));
   lines.push(attentionLine("🟡", "Waiting on you", d.attention.waiting_on_you));
   lines.push(attentionLine("🔵", "Waiting on others", d.attention.waiting_on_others ?? []));
-  const notif = d.attention.notifications.length > 0
-    ? d.attention.notifications.join("\n  - ")
+  const since = d.attention.notifications.since_last_run.length > 0
+    ? d.attention.notifications.since_last_run.join("\n  - ")
+    : "Nothing new since last run.";
+  lines.push(`- 📬 **Since last run:** ${since}`);
+  const older = d.attention.notifications.older_unread.length > 0
+    ? d.attention.notifications.older_unread.join("\n  - ")
     : "No unread notifications.";
-  lines.push(`- 📬 ${notif}`);
+  lines.push(`- 📬 **Older unread:** ${older}`);
   return lines.join("\n");
 }
 
