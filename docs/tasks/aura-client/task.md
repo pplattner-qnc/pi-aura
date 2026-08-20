@@ -4,7 +4,7 @@ type: feature
 slug: aura-client
 title: AuraClient interface + HeyApiAuraClient impl + createDefaultAuraClient() factory
 map: aura-access-rewrite
-status: ready
+status: done
 slices:
 - codegen-move-to-shared
 - aura-client-interface
