@@ -2,8 +2,8 @@
 kind: map
 slug: aura-access-rewrite
 title: Rewrite the Aura access layer to drop the MCP wrapper
-status: active
-tasks: "[{slug: aura-access-grilling, blocked_by: [], done: true}, {slug: keyring-key-redesign-grilling, blocked_by: [], done: true}, {slug: workspaces-bootstrap, blocked_by: [], done: true}, {slug: keyring-rewrite, blocked_by: [workspaces-bootstrap], done: true}, {slug: aura-client, blocked_by: [keyring-rewrite], done: true}, {slug: call-site-migration, blocked_by: [aura-client], done: true}, {slug: aura-secrets-command, blocked_by: [keyring-rewrite], done: true}, {slug: clients-cleanup, blocked_by: [call-site-migration], done: false}]"
+status: done
+tasks: "[{slug: aura-access-grilling, blocked_by: [], done: true}, {slug: keyring-key-redesign-grilling, blocked_by: [], done: true}, {slug: workspaces-bootstrap, blocked_by: [], done: true}, {slug: keyring-rewrite, blocked_by: [workspaces-bootstrap], done: true}, {slug: aura-client, blocked_by: [keyring-rewrite], done: true}, {slug: call-site-migration, blocked_by: [aura-client], done: true}, {slug: aura-secrets-command, blocked_by: [keyring-rewrite], done: true}, {slug: clients-cleanup, blocked_by: [call-site-migration], done: true}]"
 ---
 
 ## Destination
@@ -217,12 +217,12 @@ per-target install.
    verified), `createKeyring()` inline `switch(process.platform)` with
    dynamic import on Linux. `dbus-next@^0.10.2` added to shared deps.
 
-The ready frontier is now **one task**: `clients-cleanup` (unblocked by `call-site-migration`; all other children done). `call-site-migration` landed: `aura.ts`/`aura-digest.ts` use `AuraClient` + `createDefaultAuraClient()` from `@pi-aura/shared/aura-client`, and `scripts/src/types.ts` is deduped (20 Aura-response shapes removed, single-sourced in the shared domain types). `clients-cleanup` now removes `bearerClient`'s Aura path from `scripts/src/clients.ts`, the dead `scripts/src/generated/` tree + `scripts/openapi*`, and the `@hey-api/*` deps from `scripts/package.json` (keeping `atlassianClient`/`readOAuthTokenFromKeyring`/`McpClient` for the Atlassian/devlinks path).
+All children are done. `clients-cleanup` landed: `bearerClient` + the dead `aura-client.ts` shim + the dead `scripts/src/generated/` tree + `scripts/openapi*` + the `@hey-api/*` deps are gone; the Atlassian path (`atlassianClient`/`readOAuthTokenFromKeyring`/`McpClient`) stays. The `aura-access-rewrite` map is complete.
 
 Implementation tasks (from-scratch `keyring.ts` rewrite in `packages/shared/`;
 `AuraClient` + factory; call-site migration + type dedupe; `/aura secrets`
 extension; `clients.ts` cleanup) are spawned by Wayfinder as their blockers
-close. `aura-client` + `call-site-migration` are done; `clients-cleanup` is the next ready frontier.
+close. All implementation tasks are done; the map is complete.
 
 ## Fog
 
