@@ -10,6 +10,9 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
@@ -33,6 +36,596 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
+
+// ../packages/shared/src/keyring/file-keyring.ts
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { mkdir, readFile, writeFile, chmod } from "node:fs/promises";
+function packKey(key) {
+  return `${key.service}/${key.name}`;
+}
+var NAMESPACE, DEFAULT_STORE_PATH, KNOWN_SECRET_KEYS, FileKeyring;
+var init_file_keyring = __esm({
+  "../packages/shared/src/keyring/file-keyring.ts"() {
+    "use strict";
+    NAMESPACE = "aura-skills";
+    DEFAULT_STORE_PATH = join(homedir(), ".cache", NAMESPACE, "store.json");
+    KNOWN_SECRET_KEYS = [
+      { service: "aura", name: "pat" }
+    ];
+    FileKeyring = class {
+      storePath;
+      /** Test hook: override the store path. The public `Keyring` interface takes
+       *  no constructor args, so this is an internal seam. */
+      constructor(storePath) {
+        this.storePath = storePath ?? DEFAULT_STORE_PATH;
+      }
+      /** Always true — the file backend is the universal fallback. */
+      static isAvailable() {
+        return true;
+      }
+      async setSecret(key, secret) {
+        const data = await this.load();
+        data[packKey(key)] = secret;
+        await this.save(data);
+      }
+      async getSecret(key) {
+        const data = await this.load();
+        const value = data[packKey(key)];
+        return typeof value === "string" ? value : null;
+      }
+      async deleteSecret(key) {
+        const data = await this.load();
+        const packed = packKey(key);
+        if (!(packed in data)) return false;
+        delete data[packed];
+        await this.save(data);
+        return true;
+      }
+      async listSecrets() {
+        const data = await this.load();
+        const out = [];
+        for (const known of KNOWN_SECRET_KEYS) {
+          const packed = packKey(known);
+          const secret = data[packed];
+          if (typeof secret === "string") {
+            out.push({ key: known, secret });
+          }
+        }
+        return out;
+      }
+      /** Load the JSON store. Missing or corrupt files return an empty map. */
+      async load() {
+        try {
+          const raw = await readFile(this.storePath, "utf8");
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            return parsed;
+          }
+        } catch {
+        }
+        return {};
+      }
+      /** Persist the JSON store, creating the parent directory and tightening
+       *  permissions best-effort. */
+      async save(data) {
+        await mkdir(dirname(this.storePath), { recursive: true });
+        await writeFile(
+          this.storePath,
+          JSON.stringify(data, null, 2) + "\n",
+          { mode: 384, encoding: "utf8" }
+        );
+        try {
+          await chmod(this.storePath, 384);
+        } catch {
+        }
+      }
+    };
+  }
+});
+
+// ../packages/shared/src/keyring/internal.ts
+import { spawn } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
+function run(file, args, opts = {}) {
+  return new Promise((resolve2, reject) => {
+    const child = spawn(file, args, { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => stdout += d.toString("utf8"));
+    child.stderr.on("data", (d) => stderr += d.toString("utf8"));
+    child.on("error", (e) => {
+      if (e.code === "ENOENT" || e.code === "EACCES") {
+        reject(new ToolMissingError(file, e.message ?? e.code ?? "spawn error"));
+      } else {
+        reject(e);
+      }
+    });
+    child.on("close", (exitCode) => {
+      const code = exitCode ?? 1;
+      if (opts.ignoreExitCodes?.has(code)) {
+        resolve2({ stdout, stderr, exitCode: code });
+        return;
+      }
+      if (code === 0) {
+        resolve2({ stdout, stderr, exitCode: 0 });
+        return;
+      }
+      reject(new ExecError(file, args, code, stderr, stdout));
+    });
+    if (opts.input !== void 0) {
+      child.stdin.on("error", () => {
+      });
+      child.stdin.end(opts.input, "utf8");
+    } else {
+      child.stdin.end();
+    }
+  });
+}
+function isFile(p) {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+var ToolMissingError, ExecError;
+var init_internal = __esm({
+  "../packages/shared/src/keyring/internal.ts"() {
+    "use strict";
+    ToolMissingError = class extends Error {
+      code = "TOOL_MISSING";
+      tool;
+      constructor(tool, message) {
+        super(message);
+        this.name = "ToolMissingError";
+        this.tool = tool;
+      }
+    };
+    ExecError = class extends Error {
+      exitCode;
+      cmd;
+      stderr;
+      stdout;
+      constructor(file, args, exitCode, stderr, stdout) {
+        super(`${file} ${args.join(" ")} exited ${exitCode}: ${stderr.slice(0, 500)}`);
+        this.name = "ExecError";
+        this.exitCode = exitCode;
+        this.cmd = `${file} ${args.join(" ")}`;
+        this.stderr = stderr;
+        this.stdout = stdout;
+      }
+    };
+  }
+});
+
+// ../packages/shared/src/keyring/macos-keyring.ts
+function packKey2(key) {
+  return { service: NAMESPACE2, account: `${key.service}/${key.name}` };
+}
+function unpackKey(service, account) {
+  if (service !== NAMESPACE2) return void 0;
+  const known = KNOWN_SECRET_KEYS2.find((k2) => `${k2.service}/${k2.name}` === account);
+  return known;
+}
+function indicatesLockedKeychain(stderr) {
+  const lower = stderr.toLowerCase();
+  return lower.includes("user interaction is not allowed") || lower.includes("the user name or passphrase you entered is not correct") || lower.includes("a password is required") || lower.includes("keychain is locked");
+}
+var NAMESPACE2, SECURITY_BINARY, KNOWN_SECRET_KEYS2, MacosKeyring;
+var init_macos_keyring = __esm({
+  "../packages/shared/src/keyring/macos-keyring.ts"() {
+    "use strict";
+    init_keyring();
+    init_internal();
+    NAMESPACE2 = "aura-skills";
+    SECURITY_BINARY = "/usr/bin/security";
+    KNOWN_SECRET_KEYS2 = [
+      { service: "aura", name: "pat" }
+    ];
+    MacosKeyring = class {
+      /** True on macOS when `/usr/bin/security` exists. */
+      static isAvailable() {
+        return process.platform === "darwin" && isFile(SECURITY_BINARY);
+      }
+      async getSecret(key) {
+        const { service, account } = packKey2(key);
+        try {
+          const res = await run(
+            SECURITY_BINARY,
+            ["find-generic-password", "-s", service, "-a", account, "-w"],
+            { ignoreExitCodes: /* @__PURE__ */ new Set([44]) }
+          );
+          if (res.exitCode === 44) return null;
+          return res.stdout.replace(/\r?\n$/, "");
+        } catch (e) {
+          throw this.mapError("getSecret", e);
+        }
+      }
+      async setSecret(key, secret) {
+        const { service, account } = packKey2(key);
+        try {
+          await run(
+            SECURITY_BINARY,
+            ["delete-generic-password", "-s", service, "-a", account],
+            { ignoreExitCodes: /* @__PURE__ */ new Set([44, 128]) }
+          );
+          await run(SECURITY_BINARY, [
+            "add-generic-password",
+            "-s",
+            service,
+            "-a",
+            account,
+            "-w",
+            secret
+          ]);
+        } catch (e) {
+          throw this.mapError("setSecret", e);
+        }
+      }
+      async deleteSecret(key) {
+        const { service, account } = packKey2(key);
+        try {
+          const res = await run(
+            SECURITY_BINARY,
+            ["delete-generic-password", "-s", service, "-a", account],
+            { ignoreExitCodes: /* @__PURE__ */ new Set([44, 128]) }
+          );
+          return res.exitCode === 0;
+        } catch (e) {
+          throw this.mapError("deleteSecret", e);
+        }
+      }
+      async listSecrets() {
+        try {
+          const res = await run(SECURITY_BINARY, ["dump-keychain"], {
+            ignoreExitCodes: /* @__PURE__ */ new Set([0])
+          });
+          const out = [];
+          const blocks = res.stdout.split(/(?=^keychain: ")/m);
+          for (const block of blocks) {
+            const svce = block.match(/"svce"<blob>="([^"]*)"/);
+            const acct = block.match(/"acct"<blob>="([^"]*)"/);
+            if (!svce || !acct) continue;
+            const key = unpackKey(svce[1], acct[1]);
+            if (!key) continue;
+            const secret = await this.getSecret(key);
+            if (secret !== null) {
+              out.push({ key, secret });
+            }
+          }
+          return out;
+        } catch (e) {
+          throw this.mapError("listSecrets", e);
+        }
+      }
+      /** Map low-level exec errors to domain errors where appropriate. */
+      mapError(op, e) {
+        if (e instanceof ExecError && indicatesLockedKeychain(e.stderr)) {
+          return new KeyringLockedError("macos-keychain", `macOS keychain is locked during ${op}: ${e.stderr.slice(0, 200)}`);
+        }
+        return e;
+      }
+    };
+  }
+});
+
+// ../packages/shared/src/keyring/secret-service-keyring.ts
+var secret_service_keyring_exports = {};
+__export(secret_service_keyring_exports, {
+  SecretServiceKeyring: () => SecretServiceKeyring
+});
+import dbus, { Variant } from "dbus-next";
+import {
+  getDiffieHellman,
+  hkdfSync,
+  randomBytes,
+  createCipheriv,
+  createDecipheriv
+} from "node:crypto";
+function packAttributes(key) {
+  return {
+    "xdg:schema": NAMESPACE3,
+    service: key.service,
+    name: key.name
+  };
+}
+function padDhSecret(secret, length = 128) {
+  if (secret.length >= length) return secret;
+  return Buffer.concat([Buffer.alloc(length - secret.length, 0), secret]);
+}
+function deriveAesKey(sharedSecret) {
+  const key = hkdfSync(
+    "sha256",
+    padDhSecret(sharedSecret),
+    HKDF_SALT,
+    HKDF_INFO,
+    AES_KEY_BYTES
+  );
+  return Buffer.from(key);
+}
+function buildItemProperties(key) {
+  return {
+    "org.freedesktop.Secret.Item.Attributes": new Variant(
+      "a{ss}",
+      packAttributes(key)
+    ),
+    "org.freedesktop.Secret.Item.Label": new Variant(
+      "s",
+      `${key.service}/${key.name}`
+    )
+  };
+}
+function buildSecret(sessionPath, aesKey, plaintext) {
+  const iv = randomBytes(AES_IV_BYTES);
+  const cipher = createCipheriv("aes-128-cbc", aesKey, iv);
+  const value = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  return [sessionPath, iv, value, "text/plain"];
+}
+function decryptSecret(secretStruct, aesKey) {
+  const [sessionPath, iv, value, contentType2] = secretStruct;
+  const decipher = createDecipheriv("aes-128-cbc", aesKey, iv);
+  return Buffer.concat([decipher.update(value), decipher.final()]).toString("utf8");
+}
+function isLockedDbusError(e) {
+  if (e instanceof dbus.DBusError) {
+    const type = e.type.toLowerCase();
+    const text = e.text.toLowerCase();
+    return type.includes("islocked") || type.includes("locked") || text.includes("locked") || text.includes("not unlocked") || text.includes("user interaction");
+  }
+  if (e instanceof Error) {
+    const text = e.message.toLowerCase();
+    return text.includes("locked") || text.includes("not unlocked");
+  }
+  return false;
+}
+function wrapDbusError(e) {
+  if (e instanceof KeyringLockedError || e instanceof KeyringDBusError) {
+    return e;
+  }
+  if (isLockedDbusError(e)) {
+    const message2 = e instanceof Error ? e.message : "Secret Service is locked";
+    return new KeyringLockedError("secret-service", message2);
+  }
+  const message = e instanceof Error ? e.message : "D-Bus keyring error";
+  return new KeyringDBusError(message);
+}
+var NAMESPACE3, DH_ALGORITHM, DH_GROUP, AES_KEY_BYTES, AES_IV_BYTES, HKDF_SALT, HKDF_INFO, SECRETS_DESTINATION, SECRETS_PATH, SERVICE_INTERFACE, COLLECTION_INTERFACE, ITEM_INTERFACE, KNOWN_SECRET_KEYS3, SecretServiceKeyring;
+var init_secret_service_keyring = __esm({
+  "../packages/shared/src/keyring/secret-service-keyring.ts"() {
+    "use strict";
+    init_keyring();
+    NAMESPACE3 = "aura-skills";
+    DH_ALGORITHM = "dh-ietf1024-sha256-aes128-cbc-pkcs7";
+    DH_GROUP = "modp2";
+    AES_KEY_BYTES = 16;
+    AES_IV_BYTES = 16;
+    HKDF_SALT = Buffer.alloc(32, 0);
+    HKDF_INFO = Buffer.alloc(0);
+    SECRETS_DESTINATION = "org.freedesktop.secrets";
+    SECRETS_PATH = "/org/freedesktop/secrets";
+    SERVICE_INTERFACE = "org.freedesktop.Secret.Service";
+    COLLECTION_INTERFACE = "org.freedesktop.Secret.Collection";
+    ITEM_INTERFACE = "org.freedesktop.Secret.Item";
+    KNOWN_SECRET_KEYS3 = [
+      { service: "aura", name: "pat" }
+    ];
+    SecretServiceKeyring = class {
+      /** True on Linux when the D-Bus session bus is reachable and a Secret
+       *  Service is registered. Returns a Promise because D-Bus reachability can
+       *  only be determined asynchronously. */
+      static async isAvailable() {
+        if (process.platform !== "linux") return false;
+        let bus;
+        try {
+          bus = dbus.sessionBus();
+          bus.on("error", () => {
+          });
+          const available = await Promise.race([
+            bus.getProxyObject(SECRETS_DESTINATION, SECRETS_PATH).then((obj) => obj.getInterface(SERVICE_INTERFACE)).then((service) => service.ReadAlias("default")).then(() => true),
+            new Promise((resolve2) => setTimeout(() => resolve2(false), 3e3))
+          ]);
+          return available;
+        } catch {
+          return false;
+        } finally {
+          bus?.disconnect();
+        }
+      }
+      /** Resolve the default collection path.
+       *
+       *  1. Use the alias "default" if it is set.
+       *  2. Fall back to the well-known login collection.
+       *  3. If neither exists, create a new collection aliased as "default".
+       *
+       *  Collection creation may return a prompt object path on a locked or
+       *  prompting keyring; in that case we surface a domain error. */
+      async resolveDefaultCollectionPath(service, bus) {
+        const alias = await service.ReadAlias("default");
+        if (alias && alias !== "/") return alias;
+        const loginPath = "/org/freedesktop/secrets/collection/login";
+        try {
+          await bus.getProxyObject(SECRETS_DESTINATION, loginPath);
+          return loginPath;
+        } catch {
+        }
+        const [collectionPath, promptPath] = await service.CreateCollection(
+          {
+            "org.freedesktop.Secret.Collection.Label": new Variant("s", "Default")
+          },
+          "default"
+        );
+        if (promptPath && promptPath !== "/") {
+          throw new KeyringLockedError(
+            "secret-service",
+            "Secret Service requires a prompt to create the default collection"
+          );
+        }
+        if (!collectionPath || collectionPath === "/") {
+          throw new KeyringDBusError("Could not create default Secret Service collection");
+        }
+        return collectionPath;
+      }
+      /** Open a temporary encrypted session and run `fn` inside it. */
+      async withSession(fn) {
+        let bus;
+        try {
+          bus = dbus.sessionBus();
+          bus.on("error", () => {
+          });
+          const serviceObj = await bus.getProxyObject(SECRETS_DESTINATION, SECRETS_PATH);
+          const service = serviceObj.getInterface(SERVICE_INTERFACE);
+          const dh = getDiffieHellman(DH_GROUP);
+          dh.generateKeys();
+          const clientPublic = dh.getPublicKey();
+          const [serverPublicVar, sessionPath] = await service.OpenSession(
+            DH_ALGORITHM,
+            new Variant("ay", clientPublic)
+          );
+          const serverPublic = serverPublicVar.value;
+          const shared = dh.computeSecret(serverPublic);
+          const aesKey = deriveAesKey(shared);
+          const defaultCollectionPath = await this.resolveDefaultCollectionPath(service, bus);
+          return await fn({ bus, sessionPath, aesKey, defaultCollectionPath });
+        } catch (e) {
+          throw wrapDbusError(e);
+        } finally {
+          bus?.disconnect();
+        }
+      }
+      async getSecret(key) {
+        return this.withSession(async (ctx) => {
+          const collectionObj = await ctx.bus.getProxyObject(
+            SECRETS_DESTINATION,
+            ctx.defaultCollectionPath
+          );
+          const collection = collectionObj.getInterface(COLLECTION_INTERFACE);
+          const items = await collection.SearchItems(packAttributes(key));
+          if (!items || items.length === 0) return null;
+          const itemObj = await ctx.bus.getProxyObject(SECRETS_DESTINATION, items[0]);
+          const item = itemObj.getInterface(ITEM_INTERFACE);
+          const secretStruct = await item.GetSecret(ctx.sessionPath);
+          return decryptSecret(secretStruct, ctx.aesKey);
+        });
+      }
+      async setSecret(key, secret) {
+        await this.withSession(async (ctx) => {
+          const collectionObj = await ctx.bus.getProxyObject(
+            SECRETS_DESTINATION,
+            ctx.defaultCollectionPath
+          );
+          const collection = collectionObj.getInterface(COLLECTION_INTERFACE);
+          const [itemPath] = await collection.CreateItem(
+            buildItemProperties(key),
+            buildSecret(ctx.sessionPath, ctx.aesKey, secret),
+            true
+          );
+          if (!itemPath || itemPath === "/") {
+            throw new KeyringLockedError(
+              "secret-service",
+              "Secret Service collection is locked during setSecret"
+            );
+          }
+        });
+      }
+      async deleteSecret(key) {
+        return this.withSession(async (ctx) => {
+          const collectionObj = await ctx.bus.getProxyObject(
+            SECRETS_DESTINATION,
+            ctx.defaultCollectionPath
+          );
+          const collection = collectionObj.getInterface(COLLECTION_INTERFACE);
+          const before = await collection.SearchItems(packAttributes(key));
+          if (!before || before.length === 0) return false;
+          for (const itemPath of before) {
+            const itemObj = await ctx.bus.getProxyObject(SECRETS_DESTINATION, itemPath);
+            const item = itemObj.getInterface(ITEM_INTERFACE);
+            await item.Delete();
+          }
+          const after = await collection.SearchItems(packAttributes(key));
+          return (after?.length ?? 0) === 0;
+        });
+      }
+      async listSecrets() {
+        const out = [];
+        for (const key of KNOWN_SECRET_KEYS3) {
+          const secret = await this.getSecret(key);
+          if (secret !== null) {
+            out.push({ key, secret });
+          }
+        }
+        return out;
+      }
+    };
+  }
+});
+
+// ../packages/shared/src/keyring/keyring.ts
+async function createKeyring() {
+  switch (process.platform) {
+    case "darwin": {
+      if (await MacosKeyring.isAvailable()) {
+        return new MacosKeyring();
+      }
+      if (await FileKeyring.isAvailable()) {
+        return new FileKeyring();
+      }
+      throw new KeyringUnavailableError(["MacosKeyring", "FileKeyring"]);
+    }
+    case "linux": {
+      const { SecretServiceKeyring: SecretServiceKeyring2 } = await Promise.resolve().then(() => (init_secret_service_keyring(), secret_service_keyring_exports));
+      if (await SecretServiceKeyring2.isAvailable()) {
+        return new SecretServiceKeyring2();
+      }
+      if (await FileKeyring.isAvailable()) {
+        return new FileKeyring();
+      }
+      throw new KeyringUnavailableError([
+        "SecretServiceKeyring",
+        "FileKeyring"
+      ]);
+    }
+    default: {
+      if (await FileKeyring.isAvailable()) {
+        return new FileKeyring();
+      }
+      throw new KeyringUnavailableError(["FileKeyring"]);
+    }
+  }
+}
+var KeyringUnavailableError, KeyringLockedError, KeyringDBusError;
+var init_keyring = __esm({
+  "../packages/shared/src/keyring/keyring.ts"() {
+    "use strict";
+    init_file_keyring();
+    init_macos_keyring();
+    KeyringUnavailableError = class extends Error {
+      code = "KEYRING_UNAVAILABLE";
+      tried;
+      constructor(tried, message) {
+        super(message ?? `No keyring backend available. Tried: ${tried.join(", ")}`);
+        this.name = "KeyringUnavailableError";
+        this.tried = tried;
+      }
+    };
+    KeyringLockedError = class extends Error {
+      code = "KEYRING_LOCKED";
+      backendId;
+      constructor(backendId, message) {
+        super(message);
+        this.name = "KeyringLockedError";
+        this.backendId = backendId;
+      }
+    };
+    KeyringDBusError = class extends Error {
+      code = "KEYRING_DBUS_ERROR";
+      constructor(message) {
+        super(message ?? "D-Bus keyring error");
+        this.name = "KeyringDBusError";
+      }
+    };
+  }
+});
 
 // ../node_modules/ajv/dist/compile/codegen/code.js
 var require_code = __commonJS({
@@ -159,15 +752,15 @@ var require_code = __commonJS({
       return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str`${c1}${c2}`;
     }
     exports.strConcat = strConcat;
-    function interpolate(x) {
-      return typeof x == "number" || typeof x == "boolean" || x === null ? x : safeStringify(Array.isArray(x) ? x.join(",") : x);
+    function interpolate(x2) {
+      return typeof x2 == "number" || typeof x2 == "boolean" || x2 === null ? x2 : safeStringify(Array.isArray(x2) ? x2.join(",") : x2);
     }
-    function stringify(x) {
-      return new _Code(safeStringify(x));
+    function stringify(x2) {
+      return new _Code(safeStringify(x2));
     }
     exports.stringify = stringify;
-    function safeStringify(x) {
-      return JSON.stringify(x).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+    function safeStringify(x2) {
+      return JSON.stringify(x2).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     }
     exports.safeStringify = safeStringify;
     function getProperty(key) {
@@ -1030,8 +1623,8 @@ var require_codegen = __commonJS({
       for (const n in from)
         names[n] = (names[n] || 0) - (from[n] || 0);
     }
-    function not(x) {
-      return typeof x == "boolean" || typeof x == "number" || x === null ? !x : (0, code_1._)`!${par(x)}`;
+    function not(x2) {
+      return typeof x2 == "boolean" || typeof x2 == "number" || x2 === null ? !x2 : (0, code_1._)`!${par(x2)}`;
     }
     exports.not = not;
     var andCode = mappend(exports.operators.AND);
@@ -1045,10 +1638,10 @@ var require_codegen = __commonJS({
     }
     exports.or = or;
     function mappend(op) {
-      return (x, y) => x === code_1.nil ? y : y === code_1.nil ? x : (0, code_1._)`${par(x)} ${op} ${par(y)}`;
+      return (x2, y) => x2 === code_1.nil ? y : y === code_1.nil ? x2 : (0, code_1._)`${par(x2)} ${op} ${par(y)}`;
     }
-    function par(x) {
-      return x instanceof code_1.Name ? x : (0, code_1._)`(${x})`;
+    function par(x2) {
+      return x2 instanceof code_1.Name ? x2 : (0, code_1._)`(${x2})`;
     }
   }
 });
@@ -1138,8 +1731,8 @@ var require_util = __commonJS({
     exports.unescapeJsonPointer = unescapeJsonPointer;
     function eachItem(xs, f) {
       if (Array.isArray(xs)) {
-        for (const x of xs)
-          f(x);
+        for (const x2 of xs)
+          f(x2);
       } else {
         f(xs);
       }
@@ -1329,7 +1922,7 @@ var require_errors = __commonJS({
         gen.return(false);
       }
     }
-    var E = {
+    var E2 = {
       keyword: new codegen_1.Name("keyword"),
       schemaPath: new codegen_1.Name("schemaPath"),
       // also used in JTD errors
@@ -1363,20 +1956,20 @@ var require_errors = __commonJS({
       if (schemaPath) {
         schPath = (0, codegen_1.str)`${schPath}${(0, util_1.getErrorPath)(schemaPath, util_1.Type.Str)}`;
       }
-      return [E.schemaPath, schPath];
+      return [E2.schemaPath, schPath];
     }
     function extraErrorProps(cxt, { params, message }, keyValues) {
       const { keyword, data, schemaValue, it } = cxt;
       const { opts, propertyName, topSchemaRef, schemaPath } = it;
-      keyValues.push([E.keyword, keyword], [E.params, typeof params == "function" ? params(cxt) : params || (0, codegen_1._)`{}`]);
+      keyValues.push([E2.keyword, keyword], [E2.params, typeof params == "function" ? params(cxt) : params || (0, codegen_1._)`{}`]);
       if (opts.messages) {
-        keyValues.push([E.message, typeof message == "function" ? message(cxt) : message]);
+        keyValues.push([E2.message, typeof message == "function" ? message(cxt) : message]);
       }
       if (opts.verbose) {
-        keyValues.push([E.schema, schemaValue], [E.parentSchema, (0, codegen_1._)`${topSchemaRef}${schemaPath}`], [names_1.default.data, data]);
+        keyValues.push([E2.schema, schemaValue], [E2.parentSchema, (0, codegen_1._)`${topSchemaRef}${schemaPath}`], [names_1.default.data, data]);
       }
       if (propertyName)
-        keyValues.push([E.propertyName, propertyName]);
+        keyValues.push([E2.propertyName, propertyName]);
     }
   }
 });
@@ -1440,8 +2033,8 @@ var require_rules = __commonJS({
     exports.getRules = exports.isJSONType = void 0;
     var _jsonTypes = ["string", "number", "integer", "boolean", "null", "object", "array"];
     var jsonTypes = new Set(_jsonTypes);
-    function isJSONType(x) {
-      return typeof x == "string" && jsonTypes.has(x);
+    function isJSONType(x2) {
+      return typeof x2 == "string" && jsonTypes.has(x2);
     }
     exports.isJSONType = isJSONType;
     function getRules() {
@@ -4106,17 +4699,17 @@ var require_core = __commonJS({
         return this.opts.defaultMeta = typeof meta2 == "object" ? meta2[schemaId] || meta2 : void 0;
       }
       validate(schemaKeyRef, data) {
-        let v;
+        let v2;
         if (typeof schemaKeyRef == "string") {
-          v = this.getSchema(schemaKeyRef);
-          if (!v)
+          v2 = this.getSchema(schemaKeyRef);
+          if (!v2)
             throw new Error(`no schema with key or ref "${schemaKeyRef}"`);
         } else {
-          v = this.compile(schemaKeyRef);
+          v2 = this.compile(schemaKeyRef);
         }
-        const valid = v(data);
-        if (!("$async" in v))
-          this.errors = v.errors;
+        const valid = v2(data);
+        if (!("$async" in v2))
+          this.errors = v2.errors;
         return valid;
       }
       compile(schema, _meta) {
@@ -4313,7 +4906,7 @@ var require_core = __commonJS({
           type: (0, dataType_1.getJSONTypes)(def.type),
           schemaType: (0, dataType_1.getJSONTypes)(def.schemaType)
         };
-        (0, util_1.eachItem)(keyword, definition.type.length === 0 ? (k) => addRule.call(this, k, definition) : (k) => definition.type.forEach((t) => addRule.call(this, k, definition, t)));
+        (0, util_1.eachItem)(keyword, definition.type.length === 0 ? (k2) => addRule.call(this, k2, definition) : (k2) => definition.type.forEach((t) => addRule.call(this, k2, definition, t)));
         return this;
       }
       getKeyword(keyword) {
@@ -4610,8 +5203,8 @@ var require_ref = __commonJS({
           return callRef(cxt, (0, codegen_1._)`${rootName}.validate`, root, root.$async);
         }
         function callValidate(sch) {
-          const v = getValidate(cxt, sch);
-          callRef(cxt, v, sch, sch.$async);
+          const v2 = getValidate(cxt, sch);
+          callRef(cxt, v2, sch, sch.$async);
         }
         function inlineRefSchema(sch) {
           const schName = gen.scopeValue("schema", opts.code.source === true ? { ref: sch, code: (0, codegen_1.stringify)(sch) } : { ref: sch });
@@ -4633,7 +5226,7 @@ var require_ref = __commonJS({
       return sch.validate ? gen.scopeValue("validate", { ref: sch.validate }) : (0, codegen_1._)`${gen.scopeValue("wrapper", { ref: sch })}.validate`;
     }
     exports.getValidate = getValidate;
-    function callRef(cxt, v, sch, $async) {
+    function callRef(cxt, v2, sch, $async) {
       const { gen, it } = cxt;
       const { allErrors, schemaEnv: env, opts } = it;
       const passCxt = opts.passContext ? names_1.default.this : codegen_1.nil;
@@ -4646,8 +5239,8 @@ var require_ref = __commonJS({
           throw new Error("async schema referenced by sync schema");
         const valid = gen.let("valid");
         gen.try(() => {
-          gen.code((0, codegen_1._)`await ${(0, code_1.callValidateCode)(cxt, v, passCxt)}`);
-          addEvaluatedFrom(v);
+          gen.code((0, codegen_1._)`await ${(0, code_1.callValidateCode)(cxt, v2, passCxt)}`);
+          addEvaluatedFrom(v2);
           if (!allErrors)
             gen.assign(valid, true);
         }, (e) => {
@@ -4659,7 +5252,7 @@ var require_ref = __commonJS({
         cxt.ok(valid);
       }
       function callSyncRef() {
-        cxt.result((0, code_1.callValidateCode)(cxt, v, passCxt), () => addEvaluatedFrom(v), () => addErrorsFrom(v));
+        cxt.result((0, code_1.callValidateCode)(cxt, v2, passCxt), () => addEvaluatedFrom(v2), () => addErrorsFrom(v2));
       }
       function addErrorsFrom(source) {
         const errs = (0, codegen_1._)`${source}.errors`;
@@ -5035,8 +5628,8 @@ var require_uniqueItems = __commonJS({
     var util_1 = require_util();
     var equal_1 = require_equal();
     var error2 = {
-      message: ({ params: { i, j } }) => (0, codegen_1.str)`must NOT have duplicate items (items ## ${j} and ${i} are identical)`,
-      params: ({ params: { i, j } }) => (0, codegen_1._)`{i: ${i}, j: ${j}}`
+      message: ({ params: { i, j: j2 } }) => (0, codegen_1.str)`must NOT have duplicate items (items ## ${j2} and ${i} are identical)`,
+      params: ({ params: { i, j: j2 } }) => (0, codegen_1._)`{i: ${i}, j: ${j2}}`
     };
     var def = {
       keyword: "uniqueItems",
@@ -5054,15 +5647,15 @@ var require_uniqueItems = __commonJS({
         cxt.ok(valid);
         function validateUniqueItems() {
           const i = gen.let("i", (0, codegen_1._)`${data}.length`);
-          const j = gen.let("j");
-          cxt.setParams({ i, j });
+          const j2 = gen.let("j");
+          cxt.setParams({ i, j: j2 });
           gen.assign(valid, true);
-          gen.if((0, codegen_1._)`${i} > 1`, () => (canOptimize() ? loopN : loopN2)(i, j));
+          gen.if((0, codegen_1._)`${i} > 1`, () => (canOptimize() ? loopN : loopN2)(i, j2));
         }
         function canOptimize() {
           return itemTypes.length > 0 && !itemTypes.some((t) => t === "object" || t === "array");
         }
-        function loopN(i, j) {
+        function loopN(i, j2) {
           const item = gen.name("item");
           const wrongType = (0, dataType_1.checkDataTypes)(itemTypes, item, it.opts.strictNumbers, dataType_1.DataType.Wrong);
           const indices = gen.const("indices", (0, codegen_1._)`{}`);
@@ -5072,16 +5665,16 @@ var require_uniqueItems = __commonJS({
             if (itemTypes.length > 1)
               gen.if((0, codegen_1._)`typeof ${item} == "string"`, (0, codegen_1._)`${item} += "_"`);
             gen.if((0, codegen_1._)`typeof ${indices}[${item}] == "number"`, () => {
-              gen.assign(j, (0, codegen_1._)`${indices}[${item}]`);
+              gen.assign(j2, (0, codegen_1._)`${indices}[${item}]`);
               cxt.error();
               gen.assign(valid, false).break();
             }).code((0, codegen_1._)`${indices}[${item}] = ${i}`);
           });
         }
-        function loopN2(i, j) {
+        function loopN2(i, j2) {
           const eql = (0, util_1.useFunc)(gen, equal_1.default);
           const outer = gen.name("outer");
-          gen.label(outer).for((0, codegen_1._)`;${i}--;`, () => gen.for((0, codegen_1._)`${j} = ${i}; ${j}--;`, () => gen.if((0, codegen_1._)`${eql}(${data}[${i}], ${data}[${j}])`, () => {
+          gen.label(outer).for((0, codegen_1._)`;${i}--;`, () => gen.for((0, codegen_1._)`${j2} = ${i}; ${j2}--;`, () => gen.if((0, codegen_1._)`${eql}(${data}[${i}], ${data}[${j2}])`, () => {
             cxt.error();
             gen.assign(valid, false).break(outer);
           })));
@@ -5158,7 +5751,7 @@ var require_enum = __commonJS({
         cxt.pass(valid);
         function loopEnum() {
           gen.assign(valid, false);
-          gen.forOf("v", schemaCode, (v) => gen.if((0, codegen_1._)`${getEql()}(${data}, ${v})`, () => gen.assign(valid, true).break()));
+          gen.forOf("v", schemaCode, (v2) => gen.if((0, codegen_1._)`${getEql()}(${data}, ${v2})`, () => gen.assign(valid, true).break()));
         }
         function equalCode(vSchema, i) {
           const sch = schema[i];
@@ -6544,7 +7137,7 @@ var require_ajv = __commonJS({
     var Ajv2 = class extends core_1.default {
       _addVocabularies() {
         super._addVocabularies();
-        draft7_1.default.forEach((v) => this.addVocabulary(v));
+        draft7_1.default.forEach((v2) => this.addVocabulary(v2));
         if (this.opts.discriminator)
           this.addKeyword(discriminator_1.default);
       }
@@ -7021,15 +7614,931 @@ var require_content_type = __commonJS({
 });
 
 // src/aura-digest.ts
-import { mkdirSync, writeFileSync, readFileSync as readFileSync4, rmSync, existsSync as existsSync2 } from "node:fs";
-import { resolve, join as join4 } from "node:path";
-import { tmpdir, homedir as homedir4 } from "node:os";
-import { randomBytes } from "node:crypto";
+import { mkdirSync, writeFileSync, readFileSync as readFileSync5, rmSync, existsSync as existsSync4 } from "node:fs";
+import { resolve, join as join6 } from "node:path";
+import { tmpdir, homedir as homedir6 } from "node:os";
+import { randomBytes as randomBytes2 } from "node:crypto";
+
+// ../node_modules/@hey-api/client-fetch/dist/index.js
+var A = async (s, r) => {
+  let e = typeof r == "function" ? await r(s) : r;
+  if (e) return s.scheme === "bearer" ? `Bearer ${e}` : s.scheme === "basic" ? `Basic ${btoa(e)}` : e;
+};
+var O = { bodySerializer: (s) => JSON.stringify(s, (r, e) => typeof e == "bigint" ? e.toString() : e) };
+var U = { $body_: "body", $headers_: "headers", $path_: "path", $query_: "query" };
+var D = Object.entries(U);
+var B = (s) => {
+  switch (s) {
+    case "label":
+      return ".";
+    case "matrix":
+      return ";";
+    case "simple":
+      return ",";
+    default:
+      return "&";
+  }
+};
+var N = (s) => {
+  switch (s) {
+    case "form":
+      return ",";
+    case "pipeDelimited":
+      return "|";
+    case "spaceDelimited":
+      return "%20";
+    default:
+      return ",";
+  }
+};
+var Q = (s) => {
+  switch (s) {
+    case "label":
+      return ".";
+    case "matrix":
+      return ";";
+    case "simple":
+      return ",";
+    default:
+      return "&";
+  }
+};
+var S = ({ allowReserved: s, explode: r, name: e, style: a, value: i }) => {
+  if (!r) {
+    let t = (s ? i : i.map((l) => encodeURIComponent(l))).join(N(a));
+    switch (a) {
+      case "label":
+        return `.${t}`;
+      case "matrix":
+        return `;${e}=${t}`;
+      case "simple":
+        return t;
+      default:
+        return `${e}=${t}`;
+    }
+  }
+  let o = B(a), n = i.map((t) => a === "label" || a === "simple" ? s ? t : encodeURIComponent(t) : m({ allowReserved: s, name: e, value: t })).join(o);
+  return a === "label" || a === "matrix" ? o + n : n;
+};
+var m = ({ allowReserved: s, name: r, value: e }) => {
+  if (e == null) return "";
+  if (typeof e == "object") throw new Error("Deeply-nested arrays/objects aren\u2019t supported. Provide your own `querySerializer()` to handle these.");
+  return `${r}=${s ? e : encodeURIComponent(e)}`;
+};
+var q = ({ allowReserved: s, explode: r, name: e, style: a, value: i, valueOnly: o }) => {
+  if (i instanceof Date) return o ? i.toISOString() : `${e}=${i.toISOString()}`;
+  if (a !== "deepObject" && !r) {
+    let l = [];
+    Object.entries(i).forEach(([p, d]) => {
+      l = [...l, p, s ? d : encodeURIComponent(d)];
+    });
+    let u = l.join(",");
+    switch (a) {
+      case "form":
+        return `${e}=${u}`;
+      case "label":
+        return `.${u}`;
+      case "matrix":
+        return `;${e}=${u}`;
+      default:
+        return u;
+    }
+  }
+  let n = Q(a), t = Object.entries(i).map(([l, u]) => m({ allowReserved: s, name: a === "deepObject" ? `${e}[${l}]` : l, value: u })).join(n);
+  return a === "label" || a === "matrix" ? n + t : t;
+};
+var J = /\{[^{}]+\}/g;
+var M = ({ path: s, url: r }) => {
+  let e = r, a = r.match(J);
+  if (a) for (let i of a) {
+    let o = false, n = i.substring(1, i.length - 1), t = "simple";
+    n.endsWith("*") && (o = true, n = n.substring(0, n.length - 1)), n.startsWith(".") ? (n = n.substring(1), t = "label") : n.startsWith(";") && (n = n.substring(1), t = "matrix");
+    let l = s[n];
+    if (l == null) continue;
+    if (Array.isArray(l)) {
+      e = e.replace(i, S({ explode: o, name: n, style: t, value: l }));
+      continue;
+    }
+    if (typeof l == "object") {
+      e = e.replace(i, q({ explode: o, name: n, style: t, value: l, valueOnly: true }));
+      continue;
+    }
+    if (t === "matrix") {
+      e = e.replace(i, `;${m({ name: n, value: l })}`);
+      continue;
+    }
+    let u = encodeURIComponent(t === "label" ? `.${l}` : l);
+    e = e.replace(i, u);
+  }
+  return e;
+};
+var k = ({ allowReserved: s, array: r, object: e } = {}) => (i) => {
+  let o = [];
+  if (i && typeof i == "object") for (let n in i) {
+    let t = i[n];
+    if (t != null) if (Array.isArray(t)) {
+      let l = S({ allowReserved: s, explode: true, name: n, style: "form", value: t, ...r });
+      l && o.push(l);
+    } else if (typeof t == "object") {
+      let l = q({ allowReserved: s, explode: true, name: n, style: "deepObject", value: t, ...e });
+      l && o.push(l);
+    } else {
+      let l = m({ allowReserved: s, name: n, value: t });
+      l && o.push(l);
+    }
+  }
+  return o.join("&");
+};
+var E = (s) => {
+  if (!s) return "stream";
+  let r = s.split(";")[0]?.trim();
+  if (r) {
+    if (r.startsWith("application/json") || r.endsWith("+json")) return "json";
+    if (r === "multipart/form-data") return "formData";
+    if (["application/", "audio/", "image/", "video/"].some((e) => r.startsWith(e))) return "blob";
+    if (r.startsWith("text/")) return "text";
+  }
+};
+var $ = async ({ security: s, ...r }) => {
+  for (let e of s) {
+    let a = await A(e, r.auth);
+    if (!a) continue;
+    let i = e.name ?? "Authorization";
+    switch (e.in) {
+      case "query":
+        r.query || (r.query = {}), r.query[i] = a;
+        break;
+      case "cookie":
+        r.headers.append("Cookie", `${i}=${a}`);
+        break;
+      case "header":
+      default:
+        r.headers.set(i, a);
+        break;
+    }
+    return;
+  }
+};
+var C = (s) => L({ baseUrl: s.baseUrl, path: s.path, query: s.query, querySerializer: typeof s.querySerializer == "function" ? s.querySerializer : k(s.querySerializer), url: s.url });
+var L = ({ baseUrl: s, path: r, query: e, querySerializer: a, url: i }) => {
+  let o = i.startsWith("/") ? i : `/${i}`, n = (s ?? "") + o;
+  r && (n = M({ path: r, url: n }));
+  let t = e ? a(e) : "";
+  return t.startsWith("?") && (t = t.substring(1)), t && (n += `?${t}`), n;
+};
+var x = (s, r) => {
+  let e = { ...s, ...r };
+  return e.baseUrl?.endsWith("/") && (e.baseUrl = e.baseUrl.substring(0, e.baseUrl.length - 1)), e.headers = j(s.headers, r.headers), e;
+};
+var j = (...s) => {
+  let r = new Headers();
+  for (let e of s) {
+    if (!e || typeof e != "object") continue;
+    let a = e instanceof Headers ? e.entries() : Object.entries(e);
+    for (let [i, o] of a) if (o === null) r.delete(i);
+    else if (Array.isArray(o)) for (let n of o) r.append(i, n);
+    else o !== void 0 && r.set(i, typeof o == "object" ? JSON.stringify(o) : o);
+  }
+  return r;
+};
+var g = class {
+  _fns;
+  constructor() {
+    this._fns = [];
+  }
+  clear() {
+    this._fns = [];
+  }
+  getInterceptorIndex(r) {
+    return typeof r == "number" ? this._fns[r] ? r : -1 : this._fns.indexOf(r);
+  }
+  exists(r) {
+    let e = this.getInterceptorIndex(r);
+    return !!this._fns[e];
+  }
+  eject(r) {
+    let e = this.getInterceptorIndex(r);
+    this._fns[e] && (this._fns[e] = null);
+  }
+  update(r, e) {
+    let a = this.getInterceptorIndex(r);
+    return this._fns[a] ? (this._fns[a] = e, r) : false;
+  }
+  use(r) {
+    return this._fns = [...this._fns, r], this._fns.length - 1;
+  }
+};
+var v = () => ({ error: new g(), request: new g(), response: new g() });
+var V = k({ allowReserved: false, array: { explode: true, style: "form" }, object: { explode: true, style: "deepObject" } });
+var F = { "Content-Type": "application/json" };
+var w = (s = {}) => ({ ...O, headers: F, parseAs: "auto", querySerializer: V, ...s });
+var G = (s = {}) => {
+  let r = x(w(), s), e = () => ({ ...r }), a = (n) => (r = x(r, n), e()), i = v(), o = async (n) => {
+    let t = { ...r, ...n, fetch: n.fetch ?? r.fetch ?? globalThis.fetch, headers: j(r.headers, n.headers) };
+    t.security && await $({ ...t, security: t.security }), t.body && t.bodySerializer && (t.body = t.bodySerializer(t.body)), (t.body === void 0 || t.body === "") && t.headers.delete("Content-Type");
+    let l = C(t), u = { redirect: "follow", ...t }, p = new Request(l, u);
+    for (let f of i.request._fns) f && (p = await f(p, t));
+    let d = t.fetch, c = await d(p);
+    for (let f of i.response._fns) f && (c = await f(c, p, t));
+    let b = { request: p, response: c };
+    if (c.ok) {
+      if (c.status === 204 || c.headers.get("Content-Length") === "0") return t.responseStyle === "data" ? {} : { data: {}, ...b };
+      let f = (t.parseAs === "auto" ? E(c.headers.get("Content-Type")) : t.parseAs) ?? "json";
+      if (f === "stream") return t.responseStyle === "data" ? c.body : { data: c.body, ...b };
+      let h = await c[f]();
+      return f === "json" && (t.responseValidator && await t.responseValidator(h), t.responseTransformer && (h = await t.responseTransformer(h))), t.responseStyle === "data" ? h : { data: h, ...b };
+    }
+    let R = await c.text();
+    try {
+      R = JSON.parse(R);
+    } catch {
+    }
+    let y = R;
+    for (let f of i.error._fns) f && (y = await f(R, c, p, t));
+    if (y = y || {}, t.throwOnError) throw y;
+    return t.responseStyle === "data" ? void 0 : { error: y, ...b };
+  };
+  return { buildUrl: C, connect: (n) => o({ ...n, method: "CONNECT" }), delete: (n) => o({ ...n, method: "DELETE" }), get: (n) => o({ ...n, method: "GET" }), getConfig: e, head: (n) => o({ ...n, method: "HEAD" }), interceptors: i, options: (n) => o({ ...n, method: "OPTIONS" }), patch: (n) => o({ ...n, method: "PATCH" }), post: (n) => o({ ...n, method: "POST" }), put: (n) => o({ ...n, method: "PUT" }), request: o, setConfig: a, trace: (n) => o({ ...n, method: "TRACE" }) };
+};
+
+// ../packages/shared/src/keyring/index.ts
+init_keyring();
+
+// ../packages/shared/src/settings.ts
+import { readFileSync, existsSync as existsSync2 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { join as join2 } from "node:path";
+var SETTINGS_PATH = join2(homedir2(), ".pi", "agent", "settings.json");
+function loadAuraClientSettings(settingsPath = SETTINGS_PATH) {
+  if (!existsSync2(settingsPath)) return {};
+  try {
+    const raw = readFileSync(settingsPath, "utf8");
+    const settings = JSON.parse(raw);
+    const aura = settings.aura;
+    if (!aura) return {};
+    return { baseUrl: aura.baseUrl };
+  } catch {
+    return {};
+  }
+}
+
+// ../packages/shared/src/generated/client.gen.ts
+var client = G(w({
+  baseUrl: "http://localhost:3000/api"
+}));
+
+// ../packages/shared/src/generated/sdk.gen.ts
+var mcpCreateArtifact = (options) => {
+  return (options.client ?? client).post({
+    url: "/mcp/artifacts",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers
+    }
+  });
+};
+var mcpUpdateArtifact = (options) => {
+  return (options.client ?? client).patch({
+    url: "/mcp/artifacts/{id}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers
+    }
+  });
+};
+var mcpCreateUploadDocument = (options) => {
+  return (options.client ?? client).post({
+    url: "/mcp/upload-documents",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers
+    }
+  });
+};
+var mcpGetUploadDocument = (options) => {
+  return (options.client ?? client).get({
+    url: "/mcp/upload-documents/{id}",
+    ...options
+  });
+};
+var mcpWikiSearch = (options) => {
+  return (options.client ?? client).get({
+    url: "/mcp/wiki-search",
+    ...options
+  });
+};
+var listTasks = (options) => {
+  return (options?.client ?? client).get({
+    url: "/tasks",
+    ...options
+  });
+};
+var getMyPriorityQueue = (options) => {
+  return (options?.client ?? client).get({
+    url: "/tasks/my-priority",
+    ...options
+  });
+};
+var getTaskByHumanKey = (options) => {
+  return (options.client ?? client).get({
+    url: "/tasks/by-key/{key}",
+    ...options
+  });
+};
+var getMyCapacity = (options) => {
+  return (options?.client ?? client).get({
+    url: "/capacity/me",
+    ...options
+  });
+};
+var listArtifacts = (options) => {
+  return (options?.client ?? client).get({
+    url: "/artifacts",
+    ...options
+  });
+};
+var getArtifact = (options) => {
+  return (options.client ?? client).get({
+    url: "/artifacts/{id}",
+    ...options
+  });
+};
+var getArtifactApprovals = (options) => {
+  return (options.client ?? client).get({
+    url: "/artifacts/{id}/approvals",
+    ...options
+  });
+};
+var getArtifactReview = (options) => {
+  return (options.client ?? client).get({
+    url: "/artifacts/{id}/review",
+    ...options
+  });
+};
+var getKnowledgeTree = (options) => {
+  return (options.client ?? client).get({
+    url: "/knowledge/spaces/{slug}/nodes",
+    ...options
+  });
+};
+var createKnowledgeNode = (options) => {
+  return (options.client ?? client).post({
+    url: "/knowledge/spaces/{slug}/nodes",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers
+    }
+  });
+};
+var getKnowledgeNodeByPath = (options) => {
+  return (options.client ?? client).get({
+    url: "/knowledge/spaces/{slug}/nodes/by-path",
+    ...options
+  });
+};
+var getKnowledgeNode = (options) => {
+  return (options.client ?? client).get({
+    url: "/knowledge/nodes/{uuid}",
+    ...options
+  });
+};
+var saveKnowledgeNodeBody = (options) => {
+  return (options.client ?? client).put({
+    url: "/knowledge/nodes/{uuid}/body",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers
+    }
+  });
+};
+var getBoardSummary = (options) => {
+  return (options?.client ?? client).get({
+    url: "/boards",
+    ...options
+  });
+};
+var getBoardBriefing = (options) => {
+  return (options?.client ?? client).get({
+    url: "/boards/briefing",
+    ...options
+  });
+};
+var listNotifications = (options) => {
+  return (options?.client ?? client).get({
+    url: "/notifications",
+    ...options
+  });
+};
+
+// ../packages/shared/src/hey-api-aura-client.ts
+var AuraApiError = class extends Error {
+  status;
+  constructor(status, message) {
+    super(`Aura API error ${status}: ${message}`);
+    this.name = "AuraApiError";
+    this.status = status;
+  }
+};
+async function unwrap(res, mapper) {
+  if (res.error !== void 0) {
+    const status = res.response?.status ?? 0;
+    let msg = "unknown error";
+    if (res.error && typeof res.error === "object" && "detail" in res.error) {
+      msg = String(res.error.detail);
+    } else if (typeof res.error === "string") {
+      msg = res.error;
+    } else {
+      msg = JSON.stringify(res.error);
+    }
+    throw new AuraApiError(status, msg);
+  }
+  if (res.data === void 0 || res.data === null) {
+    throw new AuraApiError(res.response?.status ?? 0, "empty response");
+  }
+  return mapper(res.data);
+}
+var HeyApiAuraClient = class {
+  keyring;
+  client;
+  pat;
+  constructor(opts) {
+    this.keyring = opts.keyring;
+    this.client = G({ baseUrl: opts.baseUrl });
+    this.pat = opts.pat ?? null;
+    this.client.interceptors.request.use(async (req) => {
+      const pat = await this.ensurePat();
+      req.headers.set("Authorization", `Bearer ${pat}`);
+      return req;
+    });
+  }
+  /** Lazily read the PAT from the keyring on first request, cache it. */
+  async ensurePat() {
+    if (this.pat !== null) return this.pat;
+    const pat = await this.keyring.getSecret({ service: "aura", name: "pat" });
+    if (pat === null) {
+      throw new Error(
+        'No Aura PAT found in the OS keyring. Run `/aura secrets discover` to store one (service: "aura", name: "pat").'
+      );
+    }
+    this.pat = pat;
+    return pat;
+  }
+  // -------------------------------------------------------------------------
+  // Artifacts
+  // -------------------------------------------------------------------------
+  async getArtifact(id) {
+    const res = await getArtifact({ client: this.client, path: { id } });
+    return unwrap(res, mapArtifact);
+  }
+  async mcpCreateArtifact(input) {
+    const res = await mcpCreateArtifact({
+      client: this.client,
+      body: {
+        title: input.title,
+        body: input.body,
+        summary: input.summary,
+        kind: input.kind
+      }
+    });
+    return unwrap(res, mapArtifact);
+  }
+  async mcpUpdateArtifact(input) {
+    const res = await mcpUpdateArtifact({
+      client: this.client,
+      path: { id: input.id },
+      body: {
+        mode: input.mode,
+        body: input.body,
+        summary: input.summary,
+        target_heading: input.target_heading,
+        expected_version: input.expected_version,
+        confirm_full_replace: input.confirm_full_replace
+      }
+    });
+    return unwrap(res, (d) => {
+      const g2 = d;
+      return {
+        status: g2.status,
+        id: g2.id,
+        title: g2.title,
+        version: g2.version,
+        mode: g2.mode,
+        affected_heading: g2.affected_heading
+      };
+    });
+  }
+  async listArtifacts(opts) {
+    const res = await listArtifacts({ client: this.client, query: opts });
+    return unwrap(res, mapArtifactList);
+  }
+  // -------------------------------------------------------------------------
+  // Knowledge / wiki
+  // -------------------------------------------------------------------------
+  async getKnowledgeNode(uuid2, _opts) {
+    const res = await getKnowledgeNode({
+      client: this.client,
+      path: { uuid: uuid2 }
+    });
+    return unwrap(res, mapKnowledgeNode);
+  }
+  async getKnowledgeNodeByPath(spaceSlug, path, _opts) {
+    const res = await getKnowledgeNodeByPath({
+      client: this.client,
+      path: { slug: spaceSlug },
+      query: { path }
+    });
+    return unwrap(res, mapKnowledgeNode);
+  }
+  async saveKnowledgeNodeBody(input) {
+    const res = await saveKnowledgeNodeBody({
+      client: this.client,
+      path: { uuid: input.uuid },
+      body: { body: input.body, summary: input.summary }
+    });
+    return unwrap(res, mapKnowledgeNode);
+  }
+  async mcpWikiSearch(input) {
+    const res = await mcpWikiSearch({
+      client: this.client,
+      query: { query: input.query, space_slug: input.space_slug, limit: input.limit }
+    });
+    return unwrap(res, (d) => {
+      const g2 = d;
+      return {
+        items: g2.items.map((h) => ({
+          id: h.id,
+          space_slug: h.space_slug,
+          space_kind: h.space_kind,
+          title: h.title,
+          url: h.url,
+          heading_path: h.heading_path,
+          excerpt: h.excerpt,
+          match_source: h.match_source
+        }))
+      };
+    });
+  }
+  async getKnowledgeTree(spaceSlug) {
+    const res = await getKnowledgeTree({
+      client: this.client,
+      path: { slug: spaceSlug }
+    });
+    return unwrap(res, (d) => {
+      const g2 = d;
+      return {
+        space_id: g2.space_id,
+        nodes: g2.nodes.map(mapKnowledgeNode)
+      };
+    });
+  }
+  async createKnowledgeNode(input) {
+    const res = await createKnowledgeNode({
+      client: this.client,
+      path: { slug: input.space_slug },
+      body: {
+        kind: input.kind,
+        title: input.title,
+        slug: input.slug,
+        parent_id: input.parent_id,
+        order: input.order
+      }
+    });
+    return unwrap(res, mapKnowledgeNode);
+  }
+  // -------------------------------------------------------------------------
+  // Upload documents
+  // -------------------------------------------------------------------------
+  async mcpCreateUploadDocument(input) {
+    const res = await mcpCreateUploadDocument({
+      client: this.client,
+      body: {
+        filename: input.filename,
+        content_base64: input.content_base64,
+        mime_type: input.mime_type
+      }
+    });
+    return unwrap(res, mapUploadDocument);
+  }
+  async mcpGetUploadDocument(id) {
+    const res = await mcpGetUploadDocument({ client: this.client, path: { id } });
+    return unwrap(res, mapUploadDocument);
+  }
+  // -------------------------------------------------------------------------
+  // Boards
+  // -------------------------------------------------------------------------
+  async getBoardBriefing(opts) {
+    const res = await getBoardBriefing({
+      client: this.client,
+      query: opts
+    });
+    return unwrap(res, (d) => {
+      const g2 = d;
+      return {
+        text: g2.text,
+        generated_at: g2.generated_at
+      };
+    });
+  }
+  async getBoardSummary() {
+    const res = await getBoardSummary({ client: this.client });
+    return unwrap(res, mapBoardSummary);
+  }
+  // -------------------------------------------------------------------------
+  // Notifications
+  // -------------------------------------------------------------------------
+  async listNotifications(opts) {
+    const res = await listNotifications({ client: this.client, query: opts });
+    return unwrap(res, mapNotificationList);
+  }
+  // -------------------------------------------------------------------------
+  // My board
+  // -------------------------------------------------------------------------
+  async getMyPriorityQueue() {
+    const res = await getMyPriorityQueue({ client: this.client });
+    return unwrap(res, mapPriorityQueue);
+  }
+  async getMyCapacity() {
+    const res = await getMyCapacity({ client: this.client });
+    return unwrap(res, mapCapacity);
+  }
+  // -------------------------------------------------------------------------
+  // Lists
+  // -------------------------------------------------------------------------
+  async listTasks(opts) {
+    const res = await listTasks({ client: this.client, query: opts });
+    return unwrap(res, mapTaskList);
+  }
+  // -------------------------------------------------------------------------
+  // Reviews / approvals
+  // -------------------------------------------------------------------------
+  async getArtifactApprovals(id, opts) {
+    const res = await getArtifactApprovals({
+      client: this.client,
+      path: { id },
+      query: opts?.version !== void 0 ? { version: opts.version } : void 0
+    });
+    return unwrap(res, mapArtifactApprovals);
+  }
+  async getTaskByHumanKey(key) {
+    const res = await getTaskByHumanKey({ client: this.client, path: { key } });
+    return unwrap(res, mapTask);
+  }
+  async getArtifactReview(id) {
+    const res = await getArtifactReview({ client: this.client, path: { id } });
+    return unwrap(res, mapArtifactReview);
+  }
+};
+function mapPagination(p) {
+  const d = p;
+  return { page: d.page, limit: d.limit, total: d.total, total_pages: d.total_pages };
+}
+function mapArtifact(d) {
+  const g2 = d;
+  return {
+    id: g2.id,
+    title: g2.title,
+    latest_version: g2.latest_version,
+    version: g2.version,
+    body: g2.body,
+    summary: g2.summary,
+    kind: g2.kind,
+    created_at: g2.created_at,
+    updated_at: g2.updated_at
+  };
+}
+function mapArtifactListItem(d) {
+  const g2 = d;
+  return {
+    id: g2.id,
+    title: g2.title,
+    latest_version: g2.latest_version,
+    created_at: g2.created_at,
+    updated_at: g2.updated_at,
+    kind: g2.kind,
+    pending_for_me: g2.pending_for_me
+  };
+}
+function mapArtifactList(d) {
+  const g2 = d;
+  return {
+    items: g2.items.map(mapArtifactListItem),
+    pagination: mapPagination(g2.pagination)
+  };
+}
+function mapKnowledgeNode(d) {
+  const g2 = d;
+  return {
+    id: g2.id,
+    space_id: g2.space_id,
+    space_slug: g2.space_slug,
+    kind: g2.kind,
+    title: g2.title,
+    slug: g2.slug,
+    latest_version: g2.latest_version,
+    body: g2.body
+  };
+}
+function mapUploadDocument(d) {
+  const g2 = d;
+  return {
+    id: g2.id,
+    filename: g2.filename,
+    mime_type: g2.mime_type,
+    byte_size: g2.byte_size,
+    summary: g2.summary,
+    page_count: g2.page_count,
+    ingest_status: g2.ingest_status,
+    portal_url: g2.portal_url,
+    pages: g2.pages
+  };
+}
+function mapBoardBucketItem(d) {
+  return {
+    kind: d.kind,
+    task: d.task,
+    title: d.title,
+    since: d.since,
+    waiting_days: d.waiting_days,
+    link: d.link,
+    approvals_pending: d.approvals_pending
+  };
+}
+function mapBoardSummary(d) {
+  const g2 = d;
+  return {
+    overdue: g2.overdue ? { count: g2.overdue.count, items: g2.overdue.items.map((i) => ({
+      // BoardOverdueItem has task + deadline + days, not kind/title/since.
+      kind: void 0,
+      task: i.task ? { uuid: i.task.uuid, human_key: i.task.human_key, title: i.task.title, status: i.task.status, status_type: i.task.status_type } : void 0,
+      title: i.task?.title ?? "",
+      since: void 0,
+      waiting_days: i.days !== void 0 ? Math.abs(i.days) : void 0,
+      link: void 0,
+      approvals_pending: void 0
+    })) } : void 0,
+    waiting_on_me: g2.waiting_on_me ? { count: g2.waiting_on_me.count, items: g2.waiting_on_me.items.map(mapBoardBucketItem) } : void 0,
+    waiting_on_others: g2.waiting_on_others ? { count: g2.waiting_on_others.count, items: g2.waiting_on_others.items.map(mapBoardBucketItem) } : void 0
+  };
+}
+function mapNotification(d) {
+  const g2 = d;
+  return {
+    id: g2.id,
+    type: g2.type,
+    read: g2.read,
+    created_at: g2.created_at
+  };
+}
+function mapNotificationList(d) {
+  const g2 = d;
+  return {
+    items: g2.items.map(mapNotification),
+    pagination: mapPagination(g2.pagination)
+  };
+}
+function mapHumanKeyRef(d) {
+  const g2 = d;
+  return { id: g2.id, title: g2.title, level: g2.level ?? "" };
+}
+function mapPriorityQueueItem(d) {
+  const g2 = d;
+  return {
+    id: g2.id,
+    human_key: g2.human_key,
+    title: g2.title,
+    status: g2.status,
+    status_type: g2.status_type,
+    level: g2.level,
+    block: g2.block,
+    rank: g2.rank,
+    asap: g2.asap,
+    blocked_by: g2.blocked_by.map((b) => b.human_key),
+    context_path: g2.context_path.map((c) => mapHumanKeyRef(c)),
+    governing_date: g2.governing_date,
+    capacity_percent: g2.capacity_percent
+  };
+}
+function mapPriorityQueue(d) {
+  const g2 = d;
+  return {
+    items: g2.items.map(mapPriorityQueueItem),
+    total: g2.total,
+    unordered_count: g2.unordered_count
+  };
+}
+function mapCapacityTask(d) {
+  const g2 = d;
+  return {
+    task_id: g2.task_id,
+    human_key: g2.human_key,
+    task_title: g2.task_title,
+    task_status: g2.task_status,
+    roles: g2.roles,
+    capacity_percent: g2.capacity_percent,
+    task_level: g2.task_level,
+    hierarchy_path: g2.hierarchy_path.map(mapHumanKeyRef)
+  };
+}
+function mapCapacity(d) {
+  const g2 = d;
+  return {
+    base_percent: g2.base_percent,
+    committed_percent: g2.committed_percent,
+    free_percent: g2.free_percent,
+    utilization_percent: g2.utilization_percent,
+    over: g2.over,
+    base_capacity_note: g2.base_capacity_note,
+    tasks: g2.tasks.map(mapCapacityTask)
+  };
+}
+function mapTask(d) {
+  const g2 = d;
+  const jira = "jira_issues" in g2 ? g2.jira_issues ?? [] : [];
+  const children = "children" in g2 ? g2.children ?? [] : [];
+  return {
+    id: g2.id,
+    human_key: g2.human_key,
+    title: g2.title,
+    description: g2.description,
+    status: g2.status,
+    status_type: g2.status_type,
+    level: g2.level,
+    jira_issues: jira.map((j2) => ({ issue_key: j2.issue_key, summary: j2.summary })),
+    children: children.map((c) => ({ human_key: c.human_key, title: c.title }))
+  };
+}
+function mapTaskList(d) {
+  const g2 = d;
+  return {
+    items: g2.items.map((t) => mapTask(t)),
+    pagination: mapPagination(g2.pagination)
+  };
+}
+function mapArtifactApprovals(d) {
+  const g2 = d;
+  return {
+    version: g2.version,
+    latest_version: g2.latest_version,
+    decided_count: g2.decided_count,
+    total_required: g2.total_required,
+    open_reviews: g2.open_reviews.map((r) => ({
+      user_id: r.user_id ?? "",
+      user_name: r.user_name ?? "",
+      decided: r.decided
+    })),
+    decisions: g2.decisions.map((dec) => ({
+      user_name: dec.user_name,
+      decision: dec.decision,
+      decided: true
+    }))
+  };
+}
+function mapArtifactReview(d) {
+  const g2 = d;
+  return {
+    version: g2.version,
+    review_state: g2.review_state,
+    reviewers: g2.reviewers.map((r) => ({
+      user_id: r.user_id,
+      user_name: r.user_name,
+      status: r.status
+    })),
+    review_artifacts: g2.review_artifacts.map((a) => ({ title: a.title })),
+    initiator: g2.initiator ? { user_id: g2.initiator.user_id, user_name: g2.initiator.user_name } : null,
+    review_started_at: g2.review_started_at,
+    review_deadline_at: g2.review_deadline_at,
+    is_initiator: g2.is_initiator
+  };
+}
+async function createDefaultAuraClient() {
+  const settings = loadAuraClientSettings();
+  if (!settings.baseUrl) {
+    throw new Error(
+      'Missing `aura.baseUrl` in ~/.pi/agent/settings.json. Add the Aura REST API base URL (e.g. "https://aura.dev-anwalt.de/api") to the `aura` block.'
+    );
+  }
+  const keyring = await createKeyring();
+  const pat = await keyring.getSecret({ service: "aura", name: "pat" });
+  if (pat === null) {
+    throw new Error(
+      'No Aura PAT found in the OS keyring. Run `/aura secrets discover` to store one (service: "aura", name: "pat").'
+    );
+  }
+  return new HeyApiAuraClient({ keyring, baseUrl: settings.baseUrl, pat });
+}
+
+// src/devlinks.ts
+import { execFileSync } from "node:child_process";
 
 // src/clients.ts
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { readFileSync as readFileSync2 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { join as join3 } from "node:path";
 import { createHash } from "node:crypto";
 
 // ../node_modules/zod/v4/core/core.js
@@ -7058,9 +8567,9 @@ function $constructor(name, initializer3, params) {
     const proto = _.prototype;
     const keys = Object.keys(proto);
     for (let i = 0; i < keys.length; i++) {
-      const k = keys[i];
-      if (!(k in inst)) {
-        inst[k] = proto[k].bind(inst);
+      const k2 = keys[i];
+      if (!(k2 in inst)) {
+        inst[k2] = proto[k2].bind(inst);
       }
     }
   }
@@ -7190,8 +8699,8 @@ function assertNever(_x) {
 function assert(_) {
 }
 function getEnumValues(entries) {
-  const numericValues = Object.values(entries).filter((v) => typeof v === "number");
-  const values = Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
+  const numericValues = Object.values(entries).filter((v2) => typeof v2 === "number");
+  const values = Object.entries(entries).filter(([k2, _]) => numericValues.indexOf(+k2) === -1).map(([_, v2]) => v2);
   return values;
 }
 function joinValues(array2, separator = "|") {
@@ -7245,9 +8754,9 @@ function defineLazy(object3, key, getter) {
       }
       return value;
     },
-    set(v) {
+    set(v2) {
       Object.defineProperty(object3, key, {
-        value: v
+        value: v2
         // configurable: true,
       });
     },
@@ -7319,8 +8828,8 @@ var allowsEval = /* @__PURE__ */ cached(() => {
     return false;
   }
   try {
-    const F = Function;
-    new F("");
+    const F2 = Function;
+    new F2("");
     return true;
   } catch (_) {
     return false;
@@ -7481,8 +8990,8 @@ function stringifyPrimitive(value) {
   return `${value}`;
 }
 function optionalKeys(shape) {
-  return Object.keys(shape).filter((k) => {
-    return shape[k]._zod.optin === "optional" && shape[k]._zod.optout === "optional";
+  return Object.keys(shape).filter((k2) => {
+    return shape[k2]._zod.optin === "optional" && shape[k2]._zod.optout === "optional";
   });
 }
 var NUMBER_FORMAT_RANGES = {
@@ -7668,21 +9177,21 @@ function required(Class2, schema, mask) {
   });
   return clone(schema, def);
 }
-function aborted(x, startIndex = 0) {
-  if (x.aborted === true)
+function aborted(x2, startIndex = 0) {
+  if (x2.aborted === true)
     return true;
-  for (let i = startIndex; i < x.issues.length; i++) {
-    if (x.issues[i]?.continue !== true) {
+  for (let i = startIndex; i < x2.issues.length; i++) {
+    if (x2.issues[i]?.continue !== true) {
       return true;
     }
   }
   return false;
 }
-function explicitlyAborted(x, startIndex = 0) {
-  if (x.aborted === true)
+function explicitlyAborted(x2, startIndex = 0) {
+  if (x2.aborted === true)
     return true;
-  for (let i = startIndex; i < x.issues.length; i++) {
-    if (x.issues[i]?.continue === false) {
+  for (let i = startIndex; i < x2.issues.length; i++) {
+    if (x2.issues[i]?.continue === false) {
       return true;
     }
   }
@@ -7759,8 +9268,8 @@ function issue(...args) {
   return { ...iss };
 }
 function cleanEnum(obj) {
-  return Object.entries(obj).filter(([k, _]) => {
-    return Number.isNaN(Number.parseInt(k, 10));
+  return Object.entries(obj).filter(([k2, _]) => {
+    return Number.isNaN(Number.parseInt(k2, 10));
   }).map((el) => el[1]);
 }
 function base64ToUint8Array(base642) {
@@ -8421,19 +9930,19 @@ var Doc = class {
       return;
     }
     const content = arg;
-    const lines = content.split("\n").filter((x) => x);
-    const minIndent = Math.min(...lines.map((x) => x.length - x.trimStart().length));
-    const dedented = lines.map((x) => x.slice(minIndent)).map((x) => " ".repeat(this.indent * 2) + x);
+    const lines = content.split("\n").filter((x2) => x2);
+    const minIndent = Math.min(...lines.map((x2) => x2.length - x2.trimStart().length));
+    const dedented = lines.map((x2) => x2.slice(minIndent)).map((x2) => " ".repeat(this.indent * 2) + x2);
     for (const line of dedented) {
       this.content.push(line);
     }
   }
   compile() {
-    const F = Function;
+    const F2 = Function;
     const args = this?.args;
     const content = this?.content ?? [``];
-    const lines = [...content.map((x) => `  ${x}`)];
-    return new F(...args, lines.join("\n"));
+    const lines = [...content.map((x2) => `  ${x2}`)];
+    return new F2(...args, lines.join("\n"));
   }
 };
 
@@ -8596,10 +10105,10 @@ var $ZodUUID = /* @__PURE__ */ $constructor("$ZodUUID", (inst, def) => {
       v7: 7,
       v8: 8
     };
-    const v = versionMap[def.version];
-    if (v === void 0)
+    const v2 = versionMap[def.version];
+    if (v2 === void 0)
       throw new Error(`Invalid UUID version: "${def.version}"`);
-    def.pattern ?? (def.pattern = uuid(v));
+    def.pattern ?? (def.pattern = uuid(v2));
   } else
     def.pattern ?? (def.pattern = uuid());
   $ZodStringFormat.init(inst, def);
@@ -9060,9 +10569,9 @@ function handlePropertyResult(result, final, key, input, isOptionalIn, isOptiona
 }
 function normalizeDef(def) {
   const keys = Object.keys(def.shape);
-  for (const k of keys) {
-    if (!def.shape?.[k]?._zod?.traits?.has("$ZodType")) {
-      throw new Error(`Invalid element at key "${k}": expected a Zod schema`);
+  for (const k2 of keys) {
+    if (!def.shape?.[k2]?._zod?.traits?.has("$ZodType")) {
+      throw new Error(`Invalid element at key "${k2}": expected a Zod schema`);
     }
   }
   const okeys = optionalKeys(def.shape);
@@ -9134,8 +10643,8 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
       const field = shape[key]._zod;
       if (field.values) {
         propValues[key] ?? (propValues[key] = /* @__PURE__ */ new Set());
-        for (const v of field.values)
-          propValues[key].add(v);
+        for (const v2 of field.values)
+          propValues[key].add(v2);
       }
     }
     return propValues;
@@ -9183,8 +10692,8 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     const doc = new Doc(["shape", "payload", "ctx"]);
     const normalized = _normalized.value;
     const parseStr = (key) => {
-      const k = esc(key);
-      return `shape[${k}]._zod.run({ value: input[${k}], issues: [] }, ctx)`;
+      const k2 = esc(key);
+      return `shape[${k2}]._zod.run({ value: input[${k2}], issues: [] }, ctx)`;
     };
     doc.write(`const input = payload.value;`);
     const ids = /* @__PURE__ */ Object.create(null);
@@ -9195,7 +10704,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     doc.write(`const newResult = {};`);
     for (const key of normalized.keys) {
       const id = ids[key];
-      const k = esc(key);
+      const k2 = esc(key);
       const schema = shape[key];
       const isOptionalIn = schema?._zod?.optin === "optional";
       const isOptionalOut = schema?._zod?.optout === "optional";
@@ -9203,30 +10712,30 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
       if (isOptionalIn && isOptionalOut) {
         doc.write(`
         if (${id}.issues.length) {
-          if (${k} in input) {
+          if (${k2} in input) {
             payload.issues = payload.issues.concat(${id}.issues.map(iss => ({
               ...iss,
-              path: iss.path ? [${k}, ...iss.path] : [${k}]
+              path: iss.path ? [${k2}, ...iss.path] : [${k2}]
             })));
           }
         }
         
         if (${id}.value === undefined) {
-          if (${k} in input) {
-            newResult[${k}] = undefined;
+          if (${k2} in input) {
+            newResult[${k2}] = undefined;
           }
         } else {
-          newResult[${k}] = ${id}.value;
+          newResult[${k2}] = ${id}.value;
         }
         
       `);
       } else if (!isOptionalIn) {
         doc.write(`
-        const ${id}_present = ${k} in input;
+        const ${id}_present = ${k2} in input;
         if (${id}.issues.length) {
           payload.issues = payload.issues.concat(${id}.issues.map(iss => ({
             ...iss,
-            path: iss.path ? [${k}, ...iss.path] : [${k}]
+            path: iss.path ? [${k2}, ...iss.path] : [${k2}]
           })));
         }
         if (!${id}_present && !${id}.issues.length) {
@@ -9234,15 +10743,15 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
             code: "invalid_type",
             expected: "nonoptional",
             input: undefined,
-            path: [${k}]
+            path: [${k2}]
           });
         }
 
         if (${id}_present) {
           if (${id}.value === undefined) {
-            newResult[${k}] = undefined;
+            newResult[${k2}] = undefined;
           } else {
-            newResult[${k}] = ${id}.value;
+            newResult[${k2}] = ${id}.value;
           }
         }
 
@@ -9252,16 +10761,16 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
         if (${id}.issues.length) {
           payload.issues = payload.issues.concat(${id}.issues.map(iss => ({
             ...iss,
-            path: iss.path ? [${k}, ...iss.path] : [${k}]
+            path: iss.path ? [${k2}, ...iss.path] : [${k2}]
           })));
         }
         
         if (${id}.value === undefined) {
-          if (${k} in input) {
-            newResult[${k}] = undefined;
+          if (${k2} in input) {
+            newResult[${k2}] = undefined;
           }
         } else {
-          newResult[${k}] = ${id}.value;
+          newResult[${k2}] = ${id}.value;
         }
         
       `);
@@ -9377,11 +10886,11 @@ var $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUnio
       const pv = option._zod.propValues;
       if (!pv || Object.keys(pv).length === 0)
         throw new Error(`Invalid discriminated union option at index "${def.options.indexOf(option)}"`);
-      for (const [k, v] of Object.entries(pv)) {
-        if (!propValues[k])
-          propValues[k] = /* @__PURE__ */ new Set();
-        for (const val of v) {
-          propValues[k].add(val);
+      for (const [k2, v2] of Object.entries(pv)) {
+        if (!propValues[k2])
+          propValues[k2] = /* @__PURE__ */ new Set();
+        for (const val of v2) {
+          propValues[k2].add(val);
         }
       }
     }
@@ -9394,11 +10903,11 @@ var $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUnio
       const values = o._zod.propValues?.[def.discriminator];
       if (!values || values.size === 0)
         throw new Error(`Invalid discriminated union option at index "${def.options.indexOf(o)}"`);
-      for (const v of values) {
-        if (map.has(v)) {
-          throw new Error(`Duplicate discriminator value "${String(v)}"`);
+      for (const v2 of values) {
+        if (map.has(v2)) {
+          throw new Error(`Duplicate discriminator value "${String(v2)}"`);
         }
-        map.set(v, o);
+        map.set(v2, o);
       }
     }
     return map;
@@ -9499,10 +11008,10 @@ function handleIntersectionResults(result, left, right) {
   for (const iss of left.issues) {
     if (iss.code === "unrecognized_keys") {
       unrecIssue ?? (unrecIssue = iss);
-      for (const k of iss.keys) {
-        if (!unrecKeys.has(k))
-          unrecKeys.set(k, {});
-        unrecKeys.get(k).l = true;
+      for (const k2 of iss.keys) {
+        if (!unrecKeys.has(k2))
+          unrecKeys.set(k2, {});
+        unrecKeys.get(k2).l = true;
       }
     } else {
       result.issues.push(iss);
@@ -9510,16 +11019,16 @@ function handleIntersectionResults(result, left, right) {
   }
   for (const iss of right.issues) {
     if (iss.code === "unrecognized_keys") {
-      for (const k of iss.keys) {
-        if (!unrecKeys.has(k))
-          unrecKeys.set(k, {});
-        unrecKeys.get(k).r = true;
+      for (const k2 of iss.keys) {
+        if (!unrecKeys.has(k2))
+          unrecKeys.set(k2, {});
+        unrecKeys.get(k2).r = true;
       }
     } else {
       result.issues.push(iss);
     }
   }
-  const bothKeys = [...unrecKeys].filter(([, f]) => f.l && f.r).map(([k]) => k);
+  const bothKeys = [...unrecKeys].filter(([, f]) => f.l && f.r).map(([k2]) => k2);
   if (bothKeys.length && unrecIssue) {
     result.issues.push({ ...unrecIssue, keys: bothKeys });
   }
@@ -9663,7 +11172,7 @@ var $ZodEnum = /* @__PURE__ */ $constructor("$ZodEnum", (inst, def) => {
   const values = getEnumValues(def.entries);
   const valuesSet = new Set(values);
   inst._zod.values = valuesSet;
-  inst._zod.pattern = new RegExp(`^(${values.filter((k) => propertyKeyTypes.has(typeof k)).map((o) => typeof o === "string" ? escapeRegex(o) : o.toString()).join("|")})$`);
+  inst._zod.pattern = new RegExp(`^(${values.filter((k2) => propertyKeyTypes.has(typeof k2)).map((o) => typeof o === "string" ? escapeRegex(o) : o.toString()).join("|")})$`);
   inst._zod.parse = (payload, _ctx) => {
     const input = payload.value;
     if (valuesSet.has(input)) {
@@ -9822,8 +11331,8 @@ var $ZodPrefault = /* @__PURE__ */ $constructor("$ZodPrefault", (inst, def) => {
 var $ZodNonOptional = /* @__PURE__ */ $constructor("$ZodNonOptional", (inst, def) => {
   $ZodType.init(inst, def);
   defineLazy(inst._zod, "values", () => {
-    const v = def.innerType._zod.values;
-    return v ? new Set([...v].filter((x) => x !== void 0)) : void 0;
+    const v2 = def.innerType._zod.values;
+    return v2 ? new Set([...v2].filter((x2) => x2 !== void 0)) : void 0;
   });
   inst._zod.parse = (payload, ctx) => {
     const result = def.innerType._zod.run(payload, ctx);
@@ -11175,9 +12684,9 @@ var dateProcessor = (_schema, ctx, _json, _params) => {
 var enumProcessor = (schema, _ctx, json, _params) => {
   const def = schema._zod.def;
   const values = getEnumValues(def.entries);
-  if (values.every((v) => typeof v === "number"))
+  if (values.every((v2) => typeof v2 === "number"))
     json.type = "number";
-  if (values.every((v) => typeof v === "string"))
+  if (values.every((v2) => typeof v2 === "string"))
     json.type = "string";
   json.enum = values;
 };
@@ -11210,13 +12719,13 @@ var literalProcessor = (schema, ctx, json, _params) => {
       json.const = val;
     }
   } else {
-    if (vals.every((v) => typeof v === "number"))
+    if (vals.every((v2) => typeof v2 === "number"))
       json.type = "number";
-    if (vals.every((v) => typeof v === "string"))
+    if (vals.every((v2) => typeof v2 === "string"))
       json.type = "string";
-    if (vals.every((v) => typeof v === "boolean"))
+    if (vals.every((v2) => typeof v2 === "boolean"))
       json.type = "boolean";
-    if (vals.every((v) => v === null))
+    if (vals.every((v2) => v2 === null))
       json.type = "null";
     json.enum = vals;
   }
@@ -11259,11 +12768,11 @@ var objectProcessor = (schema, ctx, _json, params) => {
   }
   const allKeys = new Set(Object.keys(shape));
   const requiredKeys = new Set([...allKeys].filter((key) => {
-    const v = def.shape[key]._zod;
+    const v2 = def.shape[key]._zod;
     if (ctx.io === "input") {
-      return v.optin === void 0;
+      return v2.optin === void 0;
     } else {
-      return v.optout === void 0;
+      return v2.optout === void 0;
     }
   }));
   if (requiredKeys.size > 0) {
@@ -11284,7 +12793,7 @@ var objectProcessor = (schema, ctx, _json, params) => {
 var unionProcessor = (schema, ctx, json, params) => {
   const def = schema._zod.def;
   const isExclusive = def.inclusive === false;
-  const options = def.options.map((x, i) => process2(x, ctx, {
+  const options = def.options.map((x2, i) => process2(x2, ctx, {
     ...params,
     path: [...params.path, isExclusive ? "oneOf" : "anyOf", i]
   }));
@@ -11341,7 +12850,7 @@ var recordProcessor = (schema, ctx, _json, params) => {
   }
   const keyValues = keyType._zod.values;
   if (keyValues) {
-    const validKeyValues = [...keyValues].filter((v) => typeof v === "string" || typeof v === "number");
+    const validKeyValues = [...keyValues].filter((v2) => typeof v2 === "string" || typeof v2 === "number");
     if (validKeyValues.length > 0) {
       json.required = validKeyValues;
     }
@@ -11598,12 +13107,12 @@ function _installLazyMethods(inst, group, methods) {
         });
         return bound;
       },
-      set(v) {
+      set(v2) {
         Object.defineProperty(this, key, {
           configurable: true,
           writable: true,
           enumerable: true,
-          value: v
+          value: v2
         });
       }
     });
@@ -12241,7 +13750,7 @@ var ZodEnum = /* @__PURE__ */ $constructor("ZodEnum", (inst, def) => {
   };
 });
 function _enum(values, params) {
-  const entries = Array.isArray(values) ? Object.fromEntries(values.map((v) => [v, v])) : values;
+  const entries = Array.isArray(values) ? Object.fromEntries(values.map((v2) => [v2, v2])) : values;
   return new ZodEnum({
     type: "enum",
     entries,
@@ -12507,7 +14016,7 @@ var LATEST_PROTOCOL_VERSION = "2025-11-25";
 var SUPPORTED_PROTOCOL_VERSIONS = [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 var RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task";
 var JSONRPC_VERSION = "2.0";
-var AssertObjectSchema = custom((v) => v !== null && (typeof v === "object" || typeof v === "function"));
+var AssertObjectSchema = custom((v2) => v2 !== null && (typeof v2 === "object" || typeof v2 === "function"));
 var ProgressTokenSchema = union([string2(), number2().int()]);
 var CursorSchema = string2();
 var TaskCreationParamsSchema = looseObject({
@@ -14994,15 +16503,15 @@ function isPlainObject2(value) {
 function mergeCapabilities(base, additional) {
   const result = { ...base };
   for (const key in additional) {
-    const k = key;
-    const addValue = additional[k];
+    const k2 = key;
+    const addValue = additional[k2];
     if (addValue === void 0)
       continue;
-    const baseValue = result[k];
+    const baseValue = result[k2];
     if (isPlainObject2(baseValue) && isPlainObject2(addValue)) {
-      result[k] = { ...baseValue, ...addValue };
+      result[k2] = { ...baseValue, ...addValue };
     } else {
-      result[k] = addValue;
+      result[k2] = addValue;
     }
   }
   return result;
@@ -15824,7 +17333,7 @@ function createFetchWithInit(baseFetch = fetch, baseInit) {
 var crypto;
 crypto = globalThis.crypto?.webcrypto ?? // Node.js [18-16] REPL
 globalThis.crypto ?? // Node.js >18
-import("node:crypto").then((m) => m.webcrypto);
+import("node:crypto").then((m2) => m2.webcrypto);
 async function getRandomValues(size) {
   return (await crypto).getRandomValues(new Uint8Array(size));
 }
@@ -15833,8 +17342,8 @@ async function random(size) {
   const evenDistCutoff = Math.pow(2, 8) - Math.pow(2, 8) % mask.length;
   let result = "";
   while (result.length < size) {
-    const randomBytes2 = await getRandomValues(size - result.length);
-    for (const randomByte of randomBytes2) {
+    const randomBytes3 = await getRandomValues(size - result.length);
+    for (const randomByte of randomBytes3) {
       if (randomByte < evenDistCutoff) {
         result += mask[randomByte % mask.length];
       }
@@ -17344,33 +18853,9 @@ var McpClient = class {
 };
 
 // src/clients.ts
-var MCP_CONFIG_PATH = join(homedir(), ".config", "mcp", "mcp.json");
+var MCP_CONFIG_PATH = join3(homedir3(), ".config", "mcp", "mcp.json");
 function loadMcpConfig(path = MCP_CONFIG_PATH) {
-  return JSON.parse(readFileSync(path, "utf8"));
-}
-function bearerClient(serverName, configPath = MCP_CONFIG_PATH) {
-  const config2 = loadMcpConfig(configPath);
-  const server = config2.mcpServers[serverName];
-  if (!server) {
-    throw new Error(
-      `MCP server "${serverName}" not found in ${configPath}. Available: ${Object.keys(config2.mcpServers).join(", ")}`
-    );
-  }
-  if (server.type !== "http" || !server.url) {
-    throw new Error(
-      `MCP server "${serverName}" is not an http server (type=${server.type}). Only http servers are supported.`
-    );
-  }
-  const token = server.bearerToken;
-  if (!token) {
-    throw new Error(`MCP server "${serverName}" has no bearerToken. Cannot authenticate.`);
-  }
-  return new McpClient({
-    serverName,
-    url: server.url,
-    authHeader: `Bearer ${token}`,
-    clientName: "aura-digest-script"
-  });
+  return JSON.parse(readFileSync2(path, "utf8"));
 }
 var keyringEntryCtor = null;
 var keyringLoadFailed = false;
@@ -17448,16 +18933,13 @@ async function atlassianClient(serverName = "atlassian") {
   });
 }
 
-// src/devlinks.ts
-import { execFileSync } from "node:child_process";
-
 // src/bitbucket.ts
-import { readFileSync as readFileSync2 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { join as join2 } from "node:path";
-var MCP_CONFIG_PATH2 = join2(homedir2(), ".config", "mcp", "mcp.json");
+import { readFileSync as readFileSync3 } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { join as join4 } from "node:path";
+var MCP_CONFIG_PATH2 = join4(homedir4(), ".config", "mcp", "mcp.json");
 function loadCreds(serverName = "atlassian-bitbucket") {
-  const config2 = JSON.parse(readFileSync2(MCP_CONFIG_PATH2, "utf8"));
+  const config2 = JSON.parse(readFileSync3(MCP_CONFIG_PATH2, "utf8"));
   const env = config2.mcpServers[serverName]?.env;
   if (!env) throw new Error(`${serverName} server not found in mcp.json`);
   const email2 = env.ATLASSIAN_USER_EMAIL;
@@ -17471,7 +18953,7 @@ function loadCreds(serverName = "atlassian-bitbucket") {
 async function bbFetch(path, query, serverName = "atlassian-bitbucket") {
   const creds = loadCreds(serverName);
   const url2 = new URL(`https://api.bitbucket.org/2.0${path}`);
-  for (const [k, v] of Object.entries(query)) url2.searchParams.set(k, v);
+  for (const [k2, v2] of Object.entries(query)) url2.searchParams.set(k2, v2);
   const res = await fetch(url2, {
     headers: {
       Authorization: "Basic " + Buffer.from(`${creds.email}:${creds.token}`).toString("base64"),
@@ -17493,24 +18975,24 @@ async function listWorkspaceRepos(workspace, serverName = "atlassian-bitbucket")
       { pagelen: "100", page: String(page), sort: "updated_on", fields: "values.slug,pagelen,page,next" },
       serverName
     );
-    slugs.push(...data.values.map((v) => v.slug));
+    slugs.push(...data.values.map((v2) => v2.slug));
     if (!data.next) break;
     page++;
   }
   return slugs;
 }
-async function searchRepoPRs(workspace, repo, q, serverName = "atlassian-bitbucket") {
+async function searchRepoPRs(workspace, repo, q2, serverName = "atlassian-bitbucket") {
   const data = await bbFetch(
     `/repositories/${workspace}/${repo}/pullrequests`,
-    { pagelen: "50", q, fields: "values.id,values.title,values.state,values.source.branch.name,values.destination.branch.name,values.links.html.href" },
+    { pagelen: "50", q: q2, fields: "values.id,values.title,values.state,values.source.branch.name,values.destination.branch.name,values.links.html.href" },
     serverName
   );
   return data.values;
 }
-async function searchRepoBranches(workspace, repo, q, serverName = "atlassian-bitbucket") {
+async function searchRepoBranches(workspace, repo, q2, serverName = "atlassian-bitbucket") {
   const data = await bbFetch(
     `/repositories/${workspace}/${repo}/refs/branches`,
-    { pagelen: "50", q, fields: "values.name,values.target.hash" },
+    { pagelen: "50", q: q2, fields: "values.name,values.target.hash" },
     serverName
   );
   return data.values;
@@ -17544,14 +19026,14 @@ function similarity(repoSlug, taskText2) {
   return overlap / Math.sqrt(rt.size);
 }
 function topReposBySimilarity(allRepos, taskText2, n) {
-  return allRepos.map((slug) => ({ slug, score: similarity(slug, taskText2) })).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).slice(0, n).map((x) => x.slug);
+  return allRepos.map((slug) => ({ slug, score: similarity(slug, taskText2) })).filter((x2) => x2.score > 0).sort((a, b) => b.score - a.score).slice(0, n).map((x2) => x2.slug);
 }
 function taskText(task, jiraSummaries) {
   return [task.title, task.description ?? "", ...jiraSummaries].join(" ");
 }
 async function fetchTaskDevLinks(task, settings, mcpServers, atlassian) {
   const taskKey = task.human_key;
-  const jiraKeys = (task.jira_issues ?? []).map((j) => j.issue_key);
+  const jiraKeys = (task.jira_issues ?? []).map((j2) => j2.issue_key);
   const errors = [];
   const prs = [];
   const branches = [];
@@ -17657,7 +19139,7 @@ async function fetchTaskDevLinks(task, settings, mcpServers, atlassian) {
   if (!found) {
     try {
       const allRepos = await listWorkspaceRepos(ws, mcpServers.atlassianBitbucket);
-      const jiraSummaries = (task.jira_issues ?? []).map((j) => j.summary ?? "");
+      const jiraSummaries = (task.jira_issues ?? []).map((j2) => j2.summary ?? "");
       const candidates = topReposBySimilarity(allRepos, taskText(task, jiraSummaries), 5).filter((r) => !preferred.includes(r));
       for (const repo of candidates) {
         await tryRepo(repo);
@@ -17704,20 +19186,20 @@ async function buildAtlassianClient(serverName = "atlassian") {
 }
 
 // src/settings.ts
-import { readFileSync as readFileSync3, existsSync } from "node:fs";
-import { homedir as homedir3 } from "node:os";
-import { join as join3 } from "node:path";
-var SETTINGS_PATH = join3(homedir3(), ".pi", "agent", "settings.json");
+import { readFileSync as readFileSync4, existsSync as existsSync3 } from "node:fs";
+import { homedir as homedir5 } from "node:os";
+import { join as join5 } from "node:path";
+var SETTINGS_PATH2 = join5(homedir5(), ".pi", "agent", "settings.json");
 var DEFAULT_MCP_SERVERS = {
   aura: "aura-mcp-dev",
   atlassian: "atlassian",
   atlassianBitbucket: "atlassian-bitbucket"
 };
-function loadSettings(settingsPath = SETTINGS_PATH) {
+function loadSettings(settingsPath = SETTINGS_PATH2) {
   const defaults = { mcpServers: { ...DEFAULT_MCP_SERVERS }, digest: null };
-  if (!existsSync(settingsPath)) return defaults;
+  if (!existsSync3(settingsPath)) return defaults;
   try {
-    const raw = readFileSync3(settingsPath, "utf8");
+    const raw = readFileSync4(settingsPath, "utf8");
     const settings = JSON.parse(raw);
     const aura = settings.aura;
     if (!aura) return defaults;
@@ -17733,7 +19215,7 @@ function loadSettings(settingsPath = SETTINGS_PATH) {
 // src/aura-digest.ts
 var WORKDAY_HOURS = 8;
 function humanStatus(status) {
-  return status.toLowerCase().split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+  return status.toLowerCase().split("_").map((w2) => w2.charAt(0).toUpperCase() + w2.slice(1)).join(" ");
 }
 function pctToHours(pct) {
   if (pct === null) return null;
@@ -17743,8 +19225,8 @@ function fmtHours(hours) {
   if (hours === null) return "\u2014";
   const rounded = Math.round(hours / 0.25) * 0.25;
   const h = Math.floor(rounded);
-  const m = Math.round((rounded - h) * 60);
-  return `~${h}:${String(m).padStart(2, "0")}`;
+  const m2 = Math.round((rounded - h) * 60);
+  return `~${h}:${String(m2).padStart(2, "0")}`;
 }
 function gitColumnSummary(link) {
   if (!link) return "";
@@ -17759,8 +19241,8 @@ function gitColumnSummary(link) {
   if (link.branches.length > 0) parts.push(`${link.branches.length}: \u{1F33F}`);
   return parts.join(", ");
 }
-function safeString(v) {
-  return typeof v === "string" ? v : "";
+function safeString(v2) {
+  return typeof v2 === "string" ? v2 : "";
 }
 function fmtPct(pct) {
   if (pct === null) return "\u2014";
@@ -17778,20 +19260,8 @@ var USAGE = `Usage:
   node aura.mjs save <dir>            save <dir>/digest.json as the last presented digest
   node aura.mjs diff <dir>            print what changed since the last saved digest (JSON)
   node aura.mjs last                  print the last saved digest (JSON)`;
-var LAST_DIGEST_PATH = join4(homedir4(), ".pi", "aura", "last-digest.json");
+var LAST_DIGEST_PATH = join6(homedir6(), ".pi", "aura", "last-digest.json");
 var LAST_DIGEST_SCHEMA_VERSION = 1;
-var REQUIRED_TOOLS = [
-  "getBoardBriefing",
-  "getBoardSummary",
-  "listNotifications",
-  "getMyPriorityQueue",
-  "getMyCapacity",
-  "listArtifacts",
-  "listTasks",
-  "getArtifactApprovals",
-  "getTaskByHumanKey",
-  "getArtifactReview"
-];
 var ACTIVE_STATUS_TYPES = /* @__PURE__ */ new Set([
   "ACTIVE"
   // IN_DEVELOPMENT / IN_REFINEMENT / IN_REVIEW / IN_ALIGNMENT
@@ -17807,11 +19277,9 @@ function toAttentionItem(item) {
   };
 }
 async function fetchAction() {
-  const outDir = join4(tmpdir(), `aura-morning-${randomBytes(6).toString("hex")}`);
+  const outDir = join6(tmpdir(), `aura-morning-${randomBytes2(6).toString("hex")}`);
   mkdirSync(outDir, { recursive: true });
-  const client = bearerClient(loadSettings().mcpServers.aura);
-  await client.connect();
-  client.assertToolsAvailable(REQUIRED_TOOLS);
+  const aura = await createDefaultAuraClient();
   const [
     briefing,
     summary,
@@ -17822,26 +19290,26 @@ async function fetchAction() {
     alignmentTasks,
     reviewTasks
   ] = await Promise.all([
-    client.callTool("getBoardBriefing", { locale: "en" }),
-    client.callTool("getBoardSummary"),
-    client.callTool("listNotifications", {
+    aura.getBoardBriefing({ locale: "en" }),
+    aura.getBoardSummary(),
+    aura.listNotifications({
       limit: 20,
       sort_by: "created_at",
       sort_dir: "desc"
     }),
-    client.callTool("getMyPriorityQueue"),
-    client.callTool("getMyCapacity"),
-    client.callTool("listArtifacts", {
+    aura.getMyPriorityQueue(),
+    aura.getMyCapacity(),
+    aura.listArtifacts({
       pending_review: true,
       limit: 10
     }),
-    client.callTool("listTasks", {
+    aura.listTasks({
       role: "STAKEHOLDER",
       view: "mine",
       status_slug: "IN_ALIGNMENT",
       limit: 5
     }),
-    client.callTool("listTasks", {
+    aura.listTasks({
       role: "STAKEHOLDER",
       view: "mine",
       status_slug: "IN_REVIEW",
@@ -17863,7 +19331,7 @@ async function fetchAction() {
   };
   const capTaskById = /* @__PURE__ */ new Map();
   for (const t of capacity.tasks) {
-    capTaskById.set(t.task_id, { pct: t.capacity_percent, role: t.roles[0] ?? "OWNER" });
+    capTaskById.set(t.task_id, { pct: t.capacity_percent ?? null, role: t.roles[0] ?? "OWNER" });
   }
   const seenIds = /* @__PURE__ */ new Set();
   const queueRows = [];
@@ -17885,18 +19353,18 @@ async function fetchAction() {
     seenIds.add(item.id);
   };
   for (const item of priorityQueue.items) {
-    const cap = capTaskById.get(item.id)?.pct ?? item.capacity_percent;
+    const cap = capTaskById.get(item.id)?.pct ?? item.capacity_percent ?? null;
     if (cap !== null && cap > 0) addItem(item);
   }
   for (const item of priorityQueue.items) {
-    const cap = capTaskById.get(item.id)?.pct ?? item.capacity_percent;
+    const cap = capTaskById.get(item.id)?.pct ?? item.capacity_percent ?? null;
     if ((cap === null || cap === 0) && ACTIVE_STATUS_TYPES.has(item.status_type)) {
       addItem(item);
     }
   }
   for (const t of capacity.tasks) {
     if (seenIds.has(t.task_id)) continue;
-    const pct = t.capacity_percent;
+    const pct = t.capacity_percent ?? null;
     if (pct === null || pct === 0) continue;
     queueRows.push({
       rank: ++rank,
@@ -17933,7 +19401,7 @@ async function fetchAction() {
     const r = {
       artifact_id: a.id,
       title: a.title,
-      version: a.current_version ?? 0,
+      version: a.latest_version ?? 0,
       decisions: [],
       decided_count: 0,
       total_required: 0
@@ -17942,10 +19410,10 @@ async function fetchAction() {
     reviewById.set(a.id, r);
   }
   for (const item of summary.waiting_on_others?.items ?? []) {
-    const m = safeString(item.link).match(/artifact=([0-9a-f-]+)/i);
-    if (m && !reviewById.has(m[1])) {
+    const m2 = safeString(item.link).match(/artifact=([0-9a-f-]+)/i);
+    if (m2 && !reviewById.has(m2[1])) {
       const r = {
-        artifact_id: m[1],
+        artifact_id: m2[1],
         title: item.title ?? "",
         version: 0,
         // filled by the orchestrator from getArtifactApprovals
@@ -17954,7 +19422,7 @@ async function fetchAction() {
         total_required: item.approvals_pending ?? 0
       };
       reviews.push(r);
-      reviewById.set(m[1], r);
+      reviewById.set(m2[1], r);
     }
   }
   const suggestedActions = seedSuggestedActions(overdue, waitingOnYou, reviews, queueRows);
@@ -17966,7 +19434,7 @@ async function fetchAction() {
     pendingReviews.items ?? [],
     waitingOnOthersLinks
   );
-  const verifications = await verifyArtifacts(client, artifactsToVerify);
+  const verifications = await verifyArtifacts(aura, artifactsToVerify);
   const settings = loadSettings();
   const devLinks = [];
   const warnings = [];
@@ -17978,7 +19446,7 @@ async function fetchAction() {
     try {
       const taskDetails = await Promise.all(
         queueRows.map(
-          (row) => client.callTool("getTaskByHumanKey", { key: row.key }).catch(() => null)
+          (row) => aura.getTaskByHumanKey(row.key).catch(() => null)
         )
       );
       for (const detail of taskDetails) {
@@ -17987,7 +19455,7 @@ async function fetchAction() {
         if (childKeys.length > 0) {
           const childDetails = await Promise.all(
             childKeys.map(
-              (k) => client.callTool("getTaskByHumanKey", { key: k }).catch(() => null)
+              (k2) => aura.getTaskByHumanKey(k2).catch(() => null)
             )
           );
           const childJira = childDetails.filter((c) => c !== null).flatMap((c) => c.jira_issues ?? []);
@@ -18020,7 +19488,7 @@ async function fetchAction() {
     let myUserId = null;
     for (const r of reviews) {
       try {
-        const ar = await client.callTool("getArtifactReview", { id: r.artifact_id });
+        const ar = await aura.getArtifactReview(r.artifact_id);
         if (ar.is_initiator && ar.initiator) {
           myUserId = ar.initiator.user_id;
           break;
@@ -18031,7 +19499,7 @@ async function fetchAction() {
     const myName = "Plattner, Patric";
     for (const id of candidateIds) {
       try {
-        const ar = await client.callTool("getArtifactReview", { id });
+        const ar = await aura.getArtifactReview(id);
         const me = ar.reviewers.find(
           (rv) => myUserId && rv.user_id === myUserId || rv.user_name === myName
         );
@@ -18049,7 +19517,6 @@ async function fetchAction() {
       }
     }
   }
-  await client.close();
   const devLinksByTask = new Map(devLinks.map((l) => [l.task_key, l]));
   for (const row of queueRows) {
     row.git_summary = gitColumnSummary(devLinksByTask.get(row.key));
@@ -18084,7 +19551,7 @@ async function fetchAction() {
     pending_review_summary: (pendingReviews.items ?? []).map((a) => ({
       artifact_id: a.id,
       title: a.title,
-      current_version: a.current_version
+      current_version: a.latest_version
     })),
     notification_review_events: notificationReviewEvents
   };
@@ -18096,17 +19563,14 @@ async function fetchAction() {
   console.error(`  raw:     ${rawPath}`);
   console.error(`  digest:  ${digestPath}`);
   console.error(`  report:  ${reportPath}`);
-  console.error(`  queue rows: ${queueRows.length}, artifacts verified: ${verifications.length} (${verifications.filter((v) => v.stale).length} stale), dev links: ${devLinks.length} tasks`);
+  console.error(`  queue rows: ${queueRows.length}, artifacts verified: ${verifications.length} (${verifications.filter((v2) => v2.stale).length} stale), dev links: ${devLinks.length} tasks`);
 }
-async function verifyArtifacts(client, candidates) {
+async function verifyArtifacts(client2, candidates) {
   const isActionable = (d) => d === "REJECTED" || d === "NEEDS_REVISION";
   const results = await Promise.all(
     candidates.map(async (c) => {
       try {
-        const current = await client.callTool(
-          "getArtifactApprovals",
-          { id: c.artifact_id }
-        );
+        const current = await client2.getArtifactApprovals(c.artifact_id);
         const reportedVersion = c.reported_version;
         const currentVersion = current.version;
         const stale = isActionable(c.reported_decision) && reportedVersion !== null && currentVersion > reportedVersion;
@@ -18170,14 +19634,14 @@ function seedSuggestedActions(overdue, waitingOnYou, reviews, queue) {
   for (const o of overdue.slice(0, 3)) {
     actions.push(`Move overdue ${o.key} \u2014 ${o.title}${o.days ? ` (${o.days}d)` : ""}`);
   }
-  for (const w of waitingOnYou.slice(0, 3)) {
-    actions.push(`Unblock ${w.key} \u2014 ${w.title}`);
+  for (const w2 of waitingOnYou.slice(0, 3)) {
+    actions.push(`Unblock ${w2.key} \u2014 ${w2.title}`);
   }
   for (const r of reviews.slice(0, 3)) {
     actions.push(`Review ${r.title} (v${r.version})`);
   }
-  for (const q of queue.filter((row) => row.capacity_pct && row.capacity_pct > 0).slice(0, 3)) {
-    actions.push(`Advance ${q.key} \u2014 ${q.title} (${q.status})`);
+  for (const q2 of queue.filter((row) => row.capacity_pct && row.capacity_pct > 0).slice(0, 3)) {
+    actions.push(`Advance ${q2.key} \u2014 ${q2.title} (${q2.status})`);
   }
   return actions.slice(0, 6);
 }
@@ -18221,17 +19685,17 @@ function extractVerifyTargets(notifications, pendingArtifacts, waitingOnOthersLi
       byId.set(a.id, {
         artifact_id: a.id,
         title: a.title,
-        reported_version: a.current_version ?? null,
+        reported_version: a.latest_version ?? null,
         reported_decision: null,
         source: "pending_review"
       });
     }
   }
   for (const link of waitingOnOthersLinks) {
-    const m = link.match(/artifact=([0-9a-f-]+)/i);
-    if (m && !byId.has(m[1])) {
-      byId.set(m[1], {
-        artifact_id: m[1],
+    const m2 = link.match(/artifact=([0-9a-f-]+)/i);
+    if (m2 && !byId.has(m2[1])) {
+      byId.set(m2[1], {
+        artifact_id: m2[1],
         title: "",
         reported_version: null,
         reported_decision: null,
@@ -18368,7 +19832,7 @@ function renderWarnings(d) {
   const warnings = d.warnings ?? [];
   if (warnings.length === 0) return "";
   const lines = ["### \u26A0\uFE0F Warnings", ""];
-  for (const w of warnings) lines.push(`- ${w}`);
+  for (const w2 of warnings) lines.push(`- ${w2}`);
   return lines.join("\n");
 }
 function stateEmoji(state) {
@@ -18431,19 +19895,19 @@ function render(d) {
   sections.push(renderCorrections(d), "");
   sections.push(renderDevLinks(d), "");
   sections.push(renderSuggestedActions(d), "");
-  const w = renderWarnings(d);
-  if (w) sections.push(w, "");
+  const w2 = renderWarnings(d);
+  if (w2) sections.push(w2, "");
   return sections.join("\n") + "\n";
 }
 function renderAction() {
   const dir = process.argv[3];
   const outPath = process.argv[4];
   if (!dir) fail("render: missing <dir> argument", USAGE);
-  const digestPath = join4(dir, "digest.json");
-  if (!existsSync2(digestPath)) fail(`render: ${digestPath} not found`);
+  const digestPath = join6(dir, "digest.json");
+  if (!existsSync4(digestPath)) fail(`render: ${digestPath} not found`);
   let d;
   try {
-    d = JSON.parse(readFileSync4(digestPath, "utf8"));
+    d = JSON.parse(readFileSync5(digestPath, "utf8"));
   } catch (e) {
     fail(`render: failed to parse ${digestPath}: ${e instanceof Error ? e.message : String(e)}`, void 0, 1);
   }
@@ -18458,14 +19922,14 @@ function renderAction() {
 function cleanupAction() {
   const dir = process.argv[3];
   if (!dir) fail("cleanup: missing <dir> argument", USAGE);
-  if (!existsSync2(dir)) fail(`cleanup: ${dir} not found`);
+  if (!existsSync4(dir)) fail(`cleanup: ${dir} not found`);
   rmSync(dir, { recursive: true, force: true });
   console.error(`cleaned up ${dir}`);
 }
 function loadLastDigest() {
-  if (!existsSync2(LAST_DIGEST_PATH)) return null;
+  if (!existsSync4(LAST_DIGEST_PATH)) return null;
   try {
-    return JSON.parse(readFileSync4(LAST_DIGEST_PATH, "utf8"));
+    return JSON.parse(readFileSync5(LAST_DIGEST_PATH, "utf8"));
   } catch (e) {
     console.error(`warning: could not parse ${LAST_DIGEST_PATH}: ${e instanceof Error ? e.message : String(e)}`);
     return null;
@@ -18474,9 +19938,9 @@ function loadLastDigest() {
 function saveAction() {
   const dir = process.argv[3];
   if (!dir) fail("save: missing <dir> argument", USAGE);
-  const digestPath = join4(dir, "digest.json");
-  if (!existsSync2(digestPath)) fail(`save: ${digestPath} not found`);
-  const digest = JSON.parse(readFileSync4(digestPath, "utf8"));
+  const digestPath = join6(dir, "digest.json");
+  if (!existsSync4(digestPath)) fail(`save: ${digestPath} not found`);
+  const digest = JSON.parse(readFileSync5(digestPath, "utf8"));
   const presentedAt = (/* @__PURE__ */ new Date()).toISOString();
   const store = {
     schema_version: LAST_DIGEST_SCHEMA_VERSION,
@@ -18484,7 +19948,7 @@ function saveAction() {
     fetched_at: digest.meta?.generated_at ?? presentedAt,
     digest
   };
-  mkdirSync(join4(homedir4(), ".pi", "aura"), { recursive: true });
+  mkdirSync(join6(homedir6(), ".pi", "aura"), { recursive: true });
   writeFileSync(LAST_DIGEST_PATH, JSON.stringify(store, null, 2) + "\n", "utf8");
   console.error(`saved last digest to ${LAST_DIGEST_PATH} (presented ${presentedAt})`);
 }
@@ -18544,15 +20008,15 @@ function computeDiff(prev, cur) {
 function diffAction() {
   const dir = process.argv[3];
   if (!dir) fail("diff: missing <dir> argument", USAGE);
-  const curPath = join4(dir, "digest.json");
-  if (!existsSync2(curPath)) fail(`diff: ${curPath} not found`);
+  const curPath = join6(dir, "digest.json");
+  if (!existsSync4(curPath)) fail(`diff: ${curPath} not found`);
   const last = loadLastDigest();
   if (!last) {
     console.error(`no previous digest found at ${LAST_DIGEST_PATH}`);
     process.stdout.write(JSON.stringify({ first_run: true }, null, 2) + "\n");
     return;
   }
-  const cur = JSON.parse(readFileSync4(curPath, "utf8"));
+  const cur = JSON.parse(readFileSync5(curPath, "utf8"));
   const diff = computeDiff(last.digest, cur);
   process.stdout.write(JSON.stringify(diff, null, 2) + "\n");
 }
