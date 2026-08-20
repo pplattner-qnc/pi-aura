@@ -3,7 +3,7 @@ kind: map
 slug: aura-access-rewrite
 title: Rewrite the Aura access layer to drop the MCP wrapper
 status: active
-tasks: "[{slug: aura-access-grilling, blocked_by: [], done: true}, {slug: keyring-key-redesign-grilling, blocked_by: [], done: true}, {slug: workspaces-bootstrap, blocked_by: [], done: true}, {slug: keyring-rewrite, blocked_by: [workspaces-bootstrap], done: true}, {slug: aura-client, blocked_by: [keyring-rewrite], done: false}, {slug: call-site-migration, blocked_by: [aura-client], done: false}, {slug: aura-secrets-command, blocked_by: [keyring-rewrite], done: true}, {slug: clients-cleanup, blocked_by: [call-site-migration], done: false}]"
+tasks: "[{slug: aura-access-grilling, blocked_by: [], done: true}, {slug: keyring-key-redesign-grilling, blocked_by: [], done: true}, {slug: workspaces-bootstrap, blocked_by: [], done: true}, {slug: keyring-rewrite, blocked_by: [workspaces-bootstrap], done: true}, {slug: aura-client, blocked_by: [keyring-rewrite], done: true}, {slug: call-site-migration, blocked_by: [aura-client], done: false}, {slug: aura-secrets-command, blocked_by: [keyring-rewrite], done: true}, {slug: clients-cleanup, blocked_by: [call-site-migration], done: false}]"
 ---
 
 ## Destination
@@ -217,16 +217,12 @@ per-target install.
    verified), `createKeyring()` inline `switch(process.platform)` with
    dynamic import on Linux. `dbus-next@^0.10.2` added to shared deps.
 
-The ready frontier is now **two tasks**: `aura-client` and
-`aura-secrets-command` (both unblocked by `keyring-rewrite`; independent of
-each other). `aura-client` has an open architectural decision (see Fog) about
-where the generated client lives relative to `packages/shared/`.
+The ready frontier is now **one task**: `call-site-migration` (unblocked by `aura-client`; `aura-secrets-command` already done). `call-site-migration` rewires `aura.ts`/`aura-digest.ts` to use `AuraClient` + `createDefaultAuraClient()` from `@pi-aura/shared/aura-client`, dedupes `scripts/src/types.ts` against the shared domain types, and reconciles the two settings readers; then `clients-cleanup` removes the MCP wrapper + the old generated tree.
 
 Implementation tasks (from-scratch `keyring.ts` rewrite in `packages/shared/`;
 `AuraClient` + factory; call-site migration + type dedupe; `/aura secrets`
 extension; `clients.ts` cleanup) are spawned by Wayfinder as their blockers
-close. `keyring-rewrite` is the next ready frontier (its only blocker,
-`workspaces-bootstrap`, is done).
+close. `aura-client` is done; `call-site-migration` is the next ready frontier.
 
 ## Fog
 
