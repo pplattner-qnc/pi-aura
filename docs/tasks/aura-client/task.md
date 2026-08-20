@@ -132,3 +132,46 @@ from `settings.json` `aura` block (Q4), PAT from keyring (Q1), ~21 verbs
 - `npm run typecheck` passes in both `packages/shared` and `scripts` (the
   scripts workspace resolves `@pi-aura/shared` types across the workspace
   boundary).
+
+### slice 3 — hey-api-impl-and-factory (done)
+
+- `packages/shared/src/hey-api-aura-client.ts` (735 lines) implements the
+  `AuraClient` interface by delegating to the generated `@hey-api/client-fetch`
+  SDK. All 21 methods map domain types <-> generated types internally via
+  private mapper functions (generated types `G`-prefixed, never leak into
+  `aura-client.ts` interface signatures).
+- `createDefaultAuraClient()` factory: reads `aura.baseUrl` from
+  `~/.pi/agent/settings.json` via `packages/shared/src/settings.ts`, builds a
+  keyring via `createKeyring()`, validates the PAT (throws actionable error
+  pointing at `/aura secrets discover` if missing), and constructs
+  `HeyApiAuraClient`. The validated PAT is passed into the constructor to
+  avoid a double keyring read (open decision #3 permissible refinement).
+- `packages/shared/src/aura-client.ts` re-exports `HeyApiAuraClient`,
+  `createDefaultAuraClient`, `AuraApiError`, and `HeyApiAuraClientOptions`
+  from the sibling impl file.
+- `packages/shared/test/hey-api-aura-client.test.ts` — 4 smoke tests
+  (construction, structural `AuraClient` check, `AuraApiError`, missing-PAT
+  error). `tsx` added as devDependency; `test` script (`tsx --test`)
+  + `test/**/*.ts` in `tsconfig.json` include.
+- **Divergences (see deviation report for detail):**
+  1. `getKnowledgeNode` / `getKnowledgeNodeByPath` `includeBody` opt accepted
+     for interface compat but not forwarded (`_opts` prefix) — the generated
+     SDK has no `include_body` param for either endpoint. The
+     call-site-migration task should note `include_body` is not needed on the
+     REST path.
+  2. `unwrap` helper uses `unknown` instead of a typed generic — the
+     `@hey-api/client-fetch` `RequestResult` resolves `data` to a
+     status-code-keyed union, not `TData` itself. Each mapper casts
+     `unknown` -> the specific generated type internally.
+  3. `BoardSummary.overdue` maps `BoardOverdueItem` (fields: task,
+     target_status, deadline, ampel, days) -> `BoardAttentionBucket`/
+     `BoardItem` (fields: kind, task, title, since, waiting_days, link,
+     approvals_pending). `BoardOverdueItem.days` -> `BoardItem.waiting_days`
+     (abs value); remaining fields left `undefined` (optional in domain type).
+  4. `listArtifacts` / `listTasks` / `listNotifications` opts typed as
+     `Record<string, unknown>` (not the domain `*Input` types) — the
+     generated SDK's query params are a subset; passing the full domain type
+     triggers a type error. Interface signatures still use the domain types.
+  5. `ArtifactReview.review_started_at` / `review_deadline_at`: generated
+     type declares them required `string`, domain type has them optional.
+     Passed through directly; `null` at runtime won't be caught by TS.
