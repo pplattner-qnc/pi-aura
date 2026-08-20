@@ -14,10 +14,11 @@
 #   make watch      rebuild on source change (assumes deps are installed)
 
 SCRIPTS_DIR := scripts
+SHARED_DIR   := packages/shared
 DIGEST_DIST := skills/aura-digest/dist
 AURA_DIST    := skills/aura/dist
-OPENAPI_DIR  := $(SCRIPTS_DIR)/openapi
-GEN_DIR      := $(SCRIPTS_DIR)/src/generated
+OPENAPI_DIR  := $(SHARED_DIR)/openapi
+GEN_DIR      := $(SHARED_DIR)/src/generated
 ENTRY_OUTS   := $(DIGEST_DIST)/aura-digest.mjs $(AURA_DIST)/aura.mjs
 
 .PHONY: all install typecheck build clean watch codegen
@@ -30,7 +31,7 @@ install:
 # Regenerate the typed Aura REST client from openapi/openapi.yaml into
 # src/generated/ (gitignored — rebuild after changing the spec).
 codegen:
-	cd $(SCRIPTS_DIR) && npm run codegen
+	cd $(SHARED_DIR) && npm run codegen
 
 # Regenerate the client, then typecheck + bundle. Use this after touching the spec.
 gen: codegen typecheck build

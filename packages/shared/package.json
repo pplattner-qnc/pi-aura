@@ -4,12 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "codegen": "openapi-ts -f openapi-ts.config.ts"
   },
   "dependencies": {
+    "@hey-api/client-fetch": "^0.13.1",
     "dbus-next": "^0.10.2"
   },
   "devDependencies": {
+    "@hey-api/openapi-ts": "^0.64.2",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0"
   },
