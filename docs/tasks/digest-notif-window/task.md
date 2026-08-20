@@ -352,3 +352,18 @@ have the new shape) and the rendered markdown.
   build + manual smoke tests, per the slice doc's test plan.
 - SKILL.md changes are **not** part of this slice — they are the separate
   `skill-drop-markread` slice (slice 2).
+
+### Slice: skill-drop-markread (landed)
+
+- Documentation-only slice. `skills/aura-digest/SKILL.md` Step 4 no longer
+  instructs the orchestrator to call `aura-mcp-dev_markAllNotificationsRead()`;
+  the bullet was deleted and a one-line note ("The digest does not mark
+  notifications as read automatically.") added to the Step 4 intro.
+- The `save` and `cleanup` bullets remain intact and in order; the
+  `diff`/`last` sections still reference `last-digest.json`.
+- Diff confined to Step 4 (1 insertion, 2 deletions); no other section
+  changed.
+- No linter configured in the repo; verification was a read-through plus
+  `npm run typecheck` (scripts + packages/shared) and `packages/shared`
+  tests (4/4), all green.
+- No divergence from plan.
