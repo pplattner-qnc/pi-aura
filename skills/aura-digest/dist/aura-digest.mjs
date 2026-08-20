@@ -19214,6 +19214,10 @@ function loadSettings(settingsPath = SETTINGS_PATH2) {
 
 // src/aura-digest.ts
 var WORKDAY_HOURS = 8;
+var NOTIF_PAGE_SIZE = 50;
+var NOTIF_FETCH_CAP = 500;
+var NOTIF_OLDER_FETCH = 20;
+var NOTIF_BOUNDARY_MARGIN_MS = 5 * 60 * 1e3;
 function humanStatus(status) {
   return status.toLowerCase().split("_").map((w2) => w2.charAt(0).toUpperCase() + w2.slice(1)).join(" ");
 }
@@ -19276,14 +19280,63 @@ function toAttentionItem(item) {
     since: item.since ?? void 0
   };
 }
+async function fetchNotifications(aura, lastFetchedAt, warnings) {
+  const sinceBoundary = lastFetchedAt ? new Date(Date.parse(lastFetchedAt) - NOTIF_BOUNDARY_MARGIN_MS).toISOString() : null;
+  const since = [];
+  const older = [];
+  let page = 1;
+  let totalFetched = 0;
+  let crossedBoundary = false;
+  while (totalFetched < NOTIF_FETCH_CAP) {
+    const resp = await aura.listNotifications({
+      sort_by: "created_at",
+      sort_dir: "desc",
+      page,
+      limit: NOTIF_PAGE_SIZE
+    });
+    const items = resp.items ?? [];
+    if (items.length === 0) break;
+    for (const item of items) {
+      if (totalFetched >= NOTIF_FETCH_CAP) break;
+      totalFetched++;
+      if (sinceBoundary === null) {
+        if (older.length < NOTIF_OLDER_FETCH) {
+          older.push(item);
+        }
+        continue;
+      }
+      if (!crossedBoundary) {
+        const createdAt = Date.parse(item.created_at);
+        const boundaryTime = Date.parse(sinceBoundary);
+        if (Number.isNaN(createdAt) || createdAt <= boundaryTime) {
+          crossedBoundary = true;
+        }
+      }
+      if (!crossedBoundary) {
+        since.push(item);
+      } else if (older.length < NOTIF_OLDER_FETCH) {
+        older.push(item);
+      }
+    }
+    if (sinceBoundary === null) break;
+    if (crossedBoundary && older.length >= NOTIF_OLDER_FETCH) break;
+    page++;
+  }
+  if (totalFetched >= NOTIF_FETCH_CAP) {
+    warnings.push(
+      `Notification fetch hit the hard cap of ${NOTIF_FETCH_CAP} items; some older items may have been skipped.`
+    );
+  }
+  return { since, older };
+}
 async function fetchAction() {
   const outDir = join6(tmpdir(), `aura-morning-${randomBytes2(6).toString("hex")}`);
   mkdirSync(outDir, { recursive: true });
   const aura = await createDefaultAuraClient();
+  const warnings = [];
   const [
     briefing,
     summary,
-    notifications,
     priorityQueue,
     capacity,
     pendingReviews,
@@ -19292,11 +19345,6 @@ async function fetchAction() {
   ] = await Promise.all([
     aura.getBoardBriefing({ locale: "en" }),
     aura.getBoardSummary(),
-    aura.listNotifications({
-      limit: 20,
-      sort_by: "created_at",
-      sort_dir: "desc"
-    }),
     aura.getMyPriorityQueue(),
     aura.getMyCapacity(),
     aura.listArtifacts({
@@ -19316,13 +19364,24 @@ async function fetchAction() {
       limit: 5
     })
   ]);
+  const lastDigest = loadLastDigest();
+  const lastFetchedAt = lastDigest?.fetched_at ?? null;
+  const { since: sinceNotifs, older: olderNotifs } = await fetchNotifications(
+    aura,
+    lastFetchedAt,
+    warnings
+  );
+  const allNotifs = [...sinceNotifs, ...olderNotifs];
   const fetchedAt = (/* @__PURE__ */ new Date()).toISOString();
   const date4 = fetchedAt.slice(0, 10);
   const raw = {
     fetched_at: fetchedAt,
     briefing,
     summary,
-    notifications,
+    notifications: {
+      items: allNotifs,
+      pagination: { page: 1, limit: allNotifs.length, total: allNotifs.length }
+    },
     priority_queue: priorityQueue,
     capacity,
     pending_review_artifacts: pendingReviews,
@@ -19388,7 +19447,10 @@ async function fetchAction() {
   const overdue = (summary.overdue?.items ?? []).map(toAttentionItem);
   const waitingOnYou = (summary.waiting_on_me?.items ?? []).map(toAttentionItem);
   const waitingOnOthers = (summary.waiting_on_others?.items ?? []).map(toAttentionItem);
-  const notifSummaries = summarizeNotifications(notifications.items ?? []);
+  const notifSummaries = {
+    since_last_run: summarizeNotifications(sinceNotifs),
+    older_unread: summarizeNotifications(olderNotifs.filter((n) => !n.read))
+  };
   const attention = {
     overdue,
     waiting_on_you: waitingOnYou,
@@ -19430,14 +19492,13 @@ async function fetchAction() {
     (i) => safeString(i.link)
   );
   const { artifactsToVerify, notificationReviewEvents } = extractVerifyTargets(
-    notifications.items ?? [],
+    allNotifs,
     pendingReviews.items ?? [],
     waitingOnOthersLinks
   );
   const verifications = await verifyArtifacts(aura, artifactsToVerify);
   const settings = loadSettings();
   const devLinks = [];
-  const warnings = [];
   if (!settings.digest) {
     warnings.push("Dev-links feature disabled: no `aura.digest` block in settings.json (set it to enable Teamwork Graph + GitHub + Bitbucket PR/branch lookup).");
   } else {
@@ -19470,7 +19531,7 @@ async function fetchAction() {
     }
   }
   const reviewsOwed = [];
-  const assignedNotif = (notifications.items ?? []).filter(
+  const assignedNotif = allNotifs.filter(
     (n) => safeString(n.type) === "artifact.review_assigned"
   );
   const candidateIds = /* @__PURE__ */ new Set();
@@ -19607,10 +19668,8 @@ async function verifyArtifacts(client2, candidates) {
   return results;
 }
 function summarizeNotifications(items) {
-  const unread = items.filter((n) => !n.read);
-  if (unread.length === 0) return ["No unread notifications."];
   const lines = [];
-  for (const n of unread) {
+  for (const n of items) {
     const date4 = safeString(n.created_at).slice(0, 10);
     const type = safeString(n.type) || "notification";
     const p = n.i18n_params ?? {};
@@ -19722,8 +19781,10 @@ function renderAttention(d) {
   lines.push(attentionLine("\u{1F534}", "Overdue", d.attention.overdue));
   lines.push(attentionLine("\u{1F7E1}", "Waiting on you", d.attention.waiting_on_you));
   lines.push(attentionLine("\u{1F535}", "Waiting on others", d.attention.waiting_on_others ?? []));
-  const notif = d.attention.notifications.length > 0 ? d.attention.notifications.join("\n  - ") : "No unread notifications.";
-  lines.push(`- \u{1F4EC} ${notif}`);
+  const since = d.attention.notifications.since_last_run.length > 0 ? d.attention.notifications.since_last_run.join("\n  - ") : "Nothing new since last run.";
+  lines.push(`- \u{1F4EC} **Since last run:** ${since}`);
+  const older = d.attention.notifications.older_unread.length > 0 ? d.attention.notifications.older_unread.join("\n  - ") : "No unread notifications.";
+  lines.push(`- \u{1F4EC} **Older unread:** ${older}`);
   return lines.join("\n");
 }
 function renderQueue(d) {
