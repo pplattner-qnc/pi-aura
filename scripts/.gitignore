@@ -3,7 +3,3 @@
 node_modules/
 package-lock.json
 
-# Generated Aura REST client (regenerate with `make codegen`).
-src/generated/
-# Transient openapi-ts error logs.
-openapi-ts-error-*.log
