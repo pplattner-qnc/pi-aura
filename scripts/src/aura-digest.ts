@@ -17,8 +17,9 @@
 //                                            saved digest.
 //   node dist/aura.mjs last                  Print the last saved digest (JSON).
 //
-// fetch is deterministic (same API state -> same files) and does tool discovery
-// first (assertToolsAvailable) so a missing tool fails fast with a clear error.
+// fetch is deterministic (same API state -> same files). It constructs an
+// AuraClient (via createDefaultAuraClient) and calls the typed methods;
+// a missing PAT/base URL fails fast at construction with a clear error.
 // render renders whatever sections are present in digest.json, skipping nulls.
 // cleanup removes the temp directory created by fetch. save/diff/last manage
 // the persistent last-digest store at ~/.pi/aura/last-digest.json.
