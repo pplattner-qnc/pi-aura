@@ -30,6 +30,7 @@ import { tmpdir, homedir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { createDefaultAuraClient } from "@pi-aura/shared/aura-client";
 import type {
+  ApprovalDecision,
   AuraClient,
   BoardItem,
   Notification,
@@ -40,7 +41,6 @@ import type {
 import { buildAtlassianClient, fetchTaskDevLinks } from "./devlinks.js";
 import { loadSettings } from "./settings.js";
 import type {
-  ArtifactApprovalDecision,
   ArtifactToVerify,
   ArtifactVerification,
   AuraReport,
@@ -204,11 +204,7 @@ async function fetchAction(): Promise<void> {
   const fetchedAt = new Date().toISOString();
   const date = fetchedAt.slice(0, 10);
 
-  // The domain types use `undefined` where the transitional RawAuraData types
-  // use `null` (e.g. PriorityQueueItem.level). Structurally equivalent for
-  // JSON serialization; dedupe-types (Level 2) reconciles RawAuraData to the
-  // domain types and removes this cast.
-  const raw = {
+  const raw: RawAuraData = {
     fetched_at: fetchedAt,
     briefing,
     summary,
@@ -218,7 +214,7 @@ async function fetchAction(): Promise<void> {
     pending_review_artifacts: pendingReviews,
     stakeholder_alignment_tasks: alignmentTasks,
     stakeholder_review_tasks: reviewTasks,
-  } as unknown as RawAuraData;
+  };
 
   // --- Build the queue table: committed tasks + active open tasks ---------
   const capTaskById = new Map<string, { pct: number | null; role: string }>();
@@ -748,7 +744,7 @@ function renderCapacity(d: Digest): string {
   ].join("\n");
 }
 
-function decisionEmoji(d: ArtifactApprovalDecision): string {
+function decisionEmoji(d: ApprovalDecision): string {
   if (!d.decided) return "⏳";
   const dec = d.decision.toUpperCase();
   if (dec === "APPROVED") return "✅";

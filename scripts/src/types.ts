@@ -3,197 +3,23 @@
 // digest.json is the versioned contract between fetch.ts (producer of the
 // preliminary draft), the orchestrator (fills `summary`, `corrections`,
 // re-ranks `suggested_actions`), and render.ts (renderer).
+//
+// The Aura API-response shapes that were hand-maintained here have been
+// replaced by the domain types in @pi-aura/shared/aura-client. This file now
+// owns only the digest/report/diff/dev-link types that have no spec
+// equivalent.
 
-// ---------------------------------------------------------------------------
-// Aura API response shapes (subset we actually use).
-// ---------------------------------------------------------------------------
-
-export interface AuraHumanKey {
-  human_key: string;
-  title: string;
-  level: string;
-  rank: number | null;
-}
-
-export interface AuraCapacityTask {
-  task_id: string;
-  human_key: string;
-  task_title: string;
-  task_status: string;
-  roles: string[];
-  capacity_percent: number | null;
-  task_level: string | null;
-  hierarchy_path: { id: string; title: string; level: string }[];
-}
-
-export interface AuraCapacity {
-  base_percent: number;
-  committed_percent: number;
-  free_percent: number;
-  utilization_percent: number;
-  over: boolean;
-  base_capacity_note: string | null;
-  tasks: AuraCapacityTask[];
-}
-
-export interface AuraPriorityQueueItem {
-  id: string;
-  human_key: string;
-  title: string;
-  status: string;
-  status_type: string;
-  level: string | null;
-  block: string;
-  rank: number | null;
-  asap: boolean;
-  blocked_by: string[];
-  context_path: AuraHumanKey[];
-  governing_date: string | null;
-  capacity_percent: number | null;
-}
-
-export interface AuraPriorityQueue {
-  items: AuraPriorityQueueItem[];
-  total: number;
-  unordered_count: number;
-}
-
-export interface AuraNotification {
-  id: string;
-  type: string;
-  read: boolean;
-  created_at: string;
-  // Shape varies by type; we keep it loose and pull fields defensively.
-  [key: string]: unknown;
-}
-
-export interface AuraNotificationList {
-  items: AuraNotification[];
-  total?: number;
-}
-
-export interface AuraArtifact {
-  id: string;
-  title: string;
-  status?: string;
-  current_version?: number;
-  [key: string]: unknown;
-}
-
-export interface AuraArtifactList {
-  items: AuraArtifact[];
-  total?: number;
-}
-
-export interface AuraBoardBriefing {
-  text?: string;
-  generated_at?: string;
-  [key: string]: unknown;
-}
-
-export interface AuraBoardSummaryItem {
-  kind?: string; // e.g. "artifact_in_review"
-  task?: {
-    uuid: string;
-    human_key: string;
-    title: string;
-    status: string;
-    status_type: string;
-  };
-  title?: string;
-  since?: string;
-  waiting_days?: number;
-  link?: string; // e.g. "/artifacts?artifact=<uuid>"
-  approvals_pending?: number;
-  [key: string]: unknown;
-}
-
-export interface AuraBoardSummaryBucket {
-  count: number;
-  items: AuraBoardSummaryItem[];
-}
-
-export interface AuraBoardSummary {
-  overdue?: AuraBoardSummaryBucket;
-  waiting_on_me?: AuraBoardSummaryBucket;
-  waiting_on_others?: AuraBoardSummaryBucket;
-  [key: string]: unknown;
-}
-
-export interface AuraAttentionItem {
-  task_id?: string;
-  human_key?: string;
-  title?: string;
-  task_title?: string;
-  task_status?: string;
-  status?: string;
-  waiting_since?: string;
-  days_waiting?: number;
-  [key: string]: unknown;
-}
-
-export interface AuraTask {
-  id: string;
-  human_key: string;
-  title: string;
-  status: string;
-  [key: string]: unknown;
-}
-
-export interface AuraTaskList {
-  items: AuraTask[];
-  total?: number;
-}
-
-/** Detail returned by aura-mcp-dev_getTaskByHumanKey. We only use the fields
- * the dev-links feature needs: human_key, title, description, jira_issues. */
-export interface AuraTaskDetail {
-  id: string;
-  human_key: string;
-  title: string;
-  description?: string;
-  jira_issues?: { issue_key: string; summary?: string }[];
-  children?: { human_key: string; title?: string }[];
-  [key: string]: unknown;
-}
-
-/** Response from aura-mcp-dev_getArtifactReview (the review overview). Used to
- * derive the "reviews I owe" list: filter to artifacts where my reviewer status
- * is ASSIGNED (not yet decided). */
-export interface ArtifactReview {
-  version: number;
-  review_state: string; // IN_REVIEW | APPROVED | NEEDS_REVISION | UNCHECKED
-  initiator?: { user_id: string; user_name: string } | null;
-  review_started_at?: string | null;
-  review_deadline_at?: string | null;
-  is_initiator?: boolean;
-  reviewers: Array<{
-    user_id: string;
-    user_name: string;
-    status: string; // ASSIGNED | APPROVED | REJECTED | NEEDS_REVISION
-    [k: string]: unknown;
-  }>;
-  review_artifacts?: Array<{ title?: string }>;
-  [k: string]: unknown;
-}
-// ---------------------------------------------------------------------------
-// Artifact-review verification (produced by the orchestrator, not fetch.ts).
-// ---------------------------------------------------------------------------
-
-export interface ArtifactApprovalDecision {
-  user_name: string;
-  decision: string; // "APPROVED" | "REJECTED" | "NEEDS_REVISION" | …
-  decided: boolean;
-}
-
-export interface ArtifactApprovalState {
-  version: number;
-  latest_version: number;
-  decided_count: number;
-  total_required: number;
-  open_reviews: { user_id: string; user_name: string; decided: boolean }[];
-  decisions: ArtifactApprovalDecision[];
-}
+import type {
+  ApprovalDecision,
+  ArtifactApprovals,
+  ArtifactList,
+  BoardBriefing,
+  BoardSummary,
+  Capacity,
+  NotificationList,
+  PriorityQueue,
+  TaskList,
+} from "@pi-aura/shared/aura-client";
 
 // ---------------------------------------------------------------------------
 // Raw API bundle written by fetch.ts -> raw.json.
@@ -201,14 +27,14 @@ export interface ArtifactApprovalState {
 
 export interface RawAuraData {
   fetched_at: string; // ISO timestamp
-  briefing: AuraBoardBriefing;
-  summary: AuraBoardSummary;
-  notifications: AuraNotificationList;
-  priority_queue: AuraPriorityQueue;
-  capacity: AuraCapacity;
-  pending_review_artifacts: AuraArtifactList;
-  stakeholder_alignment_tasks: AuraTaskList;
-  stakeholder_review_tasks: AuraTaskList;
+  briefing: BoardBriefing;
+  summary: BoardSummary;
+  notifications: NotificationList;
+  priority_queue: PriorityQueue;
+  capacity: Capacity;
+  pending_review_artifacts: ArtifactList;
+  stakeholder_alignment_tasks: TaskList;
+  stakeholder_review_tasks: TaskList;
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +82,7 @@ export interface DigestReview {
   title: string;
   version: number;
   reported_decision?: string; // e.g. "REJECTED" from a notification
-  decisions: ArtifactApprovalDecision[];
+  decisions: ApprovalDecision[];
   decided_count: number;
   total_required: number;
 }
@@ -280,7 +106,7 @@ export interface DigestCorrection {
   reported_version: number | null;
   reported_decision: string | null;
   current_version: number;
-  current_decisions: ArtifactApprovalDecision[];
+  current_decisions: ApprovalDecision[];
   stale: boolean;
   note: string;
 }
@@ -331,7 +157,7 @@ export interface ArtifactVerification {
     source: string;
   };
   /** What getArtifactApprovals returned for the current version. */
-  current: ArtifactApprovalState | null; // null if the lookup failed
+  current: ArtifactApprovals | null; // null if the lookup failed
   error?: string; // present if the lookup failed (current is null)
   /** True iff a rejection/revision was reported on an older version and the
    * artifact has since been advanced (current version > reported). The

@@ -23,11 +23,11 @@ import {
   type BbBranch,
 } from "./bitbucket.js";
 import type {
-  AuraTaskDetail,
   DevLinkBranch,
   DevLinkPullRequest,
   TaskDevLinks,
 } from "./types.js";
+import type { Task } from "@pi-aura/shared/aura-client";
 import type { AuraDigestSettings, McpServerNames } from "./settings.js";
 
 // --- Atlassian Teamwork Graph shapes (subset) -----------------------------
@@ -131,13 +131,13 @@ function topReposBySimilarity(allRepos: string[], taskText: string, n: number): 
 
 /** Build the task text used for the Bitbucket similarity fallback: title +
  *  description + Jira summaries (if we fetched the task detail). */
-function taskText(task: AuraTaskDetail, jiraSummaries: string[]): string {
+function taskText(task: Task, jiraSummaries: string[]): string {
   return [task.title, task.description ?? "", ...jiraSummaries].join(" ");
 }
 
 /** Fetch dev-links for a single task across all layers. */
 export async function fetchTaskDevLinks(
-  task: AuraTaskDetail,
+  task: Task,
   settings: AuraDigestSettings,
   mcpServers: McpServerNames,
   atlassian: McpClient | null,
