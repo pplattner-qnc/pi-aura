@@ -1,0 +1,104 @@
+---
+description: Tracker-neutral conventions for task artifacts — the plan file is canonical and the tracker entry is a window onto it, where plan files live (active/archive, subtask layout), the summary format, the mandatory description structure, the depth limit, and the canonical Fibonacci story-point scale. Owned here; adapters and skills reference it.
+alwaysApply: false
+globs: "docs/tasks/**/*.md"
+---
+
+# Task artifact conventions
+
+How a piece of planned work is shaped: the plan file in the repo, the short entry in whatever tracker is configured, and the estimate attached to both. None of this depends on which tracker is in use — the tracker-specific mechanics live in the adapter (`tracker-selection` picks it).
+
+## The plan file is canonical; the tracker entry is a window
+
+Two artifacts describe the same work, and they are **not** peers:
+
+- **The plan file in the repo** is the source of truth. It is what an implementation works from. Its depth spans a spectrum: a captured idea has no file at all, a small ticket gets a short write-up, a substantial one gets a full plan with technical design, affected areas, a step-by-step approach and — once sliced — its own per-slice files.
+- **The tracker entry** carries the short version: what and why, the acceptance signals, and a link to the plan. It is a **window** onto the plan, never a copy of it.
+
+Everything that would go stale in two places belongs in exactly one: schema fields, endpoint paths, function names and step lists go into the plan, not into the tracker description.
+
+One consequence worth naming: because the plan is written in the language the work was instructed in (the target repo's `AGENTS.md` → key `Doc language`) while tracker content is English, **the TL;DR effectively exists twice** — same content, not literally identical. Translation goes plan → tracker only, never back. The language split itself is owned by `general-language-policy`.
+
+## Where the files live
+
+The root comes from the target repo's `AGENTS.md` → key `Task folder root`. Below it there are exactly **two** lifecycle folders, and no others:
+
+- **`active/`** — everything still alive: planned, ready, in progress, in review.
+- **`archive/`** — finished or dropped. The folder is moved here on completion by hand; the tracker status is authoritative, the folder mirrors it.
+
+One folder per top-level piece of work, named `<KEY>-<slug>/`, with the plan as `task-<slug>.md` and slices under `subtasks/S<n>-<KEY>-<slug>.md` (slice number first). No size token and no sequential numbering in any name — the estimate lives in the header, not in a file name.
+
+```text
+docs/tasks/active/ANW-6336-mcp-gateway-mcpjungle/
+  task-mcp-gateway-mcpjungle.md
+  subtasks/
+    S1-ANW-6337-config-yaml-schema.md
+```
+
+Each slice file carries its own TL;DR, a link to its parent plan, and a mandatory `## Human test` block with numbered steps — the slice is the increment a human tests against.
+
+**Linking a plan from the tracker:** the URL schema is a value (the target repo's `AGENTS.md` → key `Plan-link schema`), and the link is always **real Markdown link syntax** `[text](url)` with the file name as the text. A bare URL frequently renders as unclickable text. When a folder moves from `active/` to `archive/`, update the link and note the move.
+
+**The legacy stock is not renamed.** Older folders may carry a `[<size>]` token in their name; link to the **actual** name and URL-encode the brackets (`[` → `%5B`, `]` → `%5D`). Older tracker entries may carry a size token or a historical project prefix in their title; they stay as they are. New artifacts get neither.
+
+## Summary / title format
+
+```text
+[<Area>] <Title in English>
+```
+
+- **No size or effort token.** Effort lives in the estimate, not the title.
+- **The area token is optional** and freely derived: a short English term in brackets for the functional area the work concerns (`Repositories`, `Chats`, `Auth`, `Infra`, `Tasks`, `Wiki`, …). There is **no** fixed list.
+  - Set it only when the work clearly belongs to **one** area. For genuinely cross-cutting work, or when unsure, **omit it** — never force a placeholder like `[General]`.
+  - When set, it comes first, in Title Case, singular or plural as the product says it.
+- A slice **inherits** its parent's area token if there is one.
+
+## Description structure
+
+Mandatory order. Optional sections may be dropped when they add nothing; TL;DR, Why and Definition of Done never may. **Every section is a real `##` heading**, not a bare bold line.
+
+1. `## TL;DR (ELI5)` — **mandatory.** Two or three sentences a non-technical colleague can follow. No jargon, no implementation detail.
+2. `## Why` — **mandatory.** Two to four sentences on context and value: which problem this solves.
+3. `## What we deliver` (or `## Acceptance`) — **mandatory.** Three to six bullets of **visible results** from the end-state perspective ("users see …"), not tasks. For a defect: `## Repro` with steps plus `## Expected behaviour` instead.
+4. `## Plan (canonical, in repo)` — **mandatory once the plan file exists.** The Markdown link to it, nothing else.
+5. `## Definition of Done` — **mandatory.** Four to six objectively checkable signals ("CI green", "verified in staging").
+6. `## Out of scope` — optional, max three bullets, only where its absence would mislead.
+7. `## Dependencies` — optional. Other work, external systems or open decisions that must come first.
+8. `## Notes` — optional. Risks and open design questions that do not fit under Dependencies. Nothing substantial → omit.
+
+**Depth:** the description stays under roughly 250 words. Anything longer belongs in the plan. No task or slice lists in the description — slices are linked artifacts of their own.
+
+## Story points
+
+Whether work is estimated at all is a value (the target repo's `AGENTS.md` → key `Story Points: whether`). Where the number lives is fixed: **the plan file's header**. Whether a tracker field additionally carries it is the adapter's business, not this rule's.
+
+This is the **only** place the scale is defined. Everything else — skills, adapters, prompt fragments — references it.
+
+| SP | Meaning (volume · complexity · uncertainty) |
+|---|---|
+| `1` | trivial: one file, clear path, no risk |
+| `2` | small and unambiguous, maybe one test |
+| `3` | small change in **one** layer, clear path |
+| `5` | several touchpoints or moderate logic, some uncertainty |
+| `8` | cross-cutting (API + UI + infra), many steps or real unknowns |
+| `13` | large or uncertain → **candidate for slicing**, do not build in one go |
+
+Modified Fibonacci, capped at `13`. State which of the three axes drives the number — an estimate without its axis cannot be argued with. When the effort turns out different during implementation, adjust the value.
+
+## Four principles
+
+- **Pick the type deliberately, or ask.** Which types exist is the adapter's table; that the choice is made consciously rather than defaulted into is universal. When the character of the work is not obvious from the input, ask.
+- **A newly created item never stays in a triage intermediate.** Whatever the tracker calls its "just created" state, the create operation is not finished until the item sits in a real backlog state. This applies to a bare idea as much as to a full write-up.
+- **A slice is never a second top-level item.** Splitting produces child artifacts under their parent — never another story alongside it. (Whether the *parent* level may be an Epic is an instance policy and belongs to the adapter.)
+- **Comment on a status change, but do not build a sync loop.** A short, English, diff-oriented comment when the status moves or the user asks for one. Automatic mirroring is a separate concern, not a side effect of every edit.
+
+## Anti-patterns
+
+- A size token in the title, or an effort token in a folder name.
+- Forcing an area token onto unclear work instead of omitting it.
+- A title or tracker description not in English.
+- Description sections as plain text lines instead of `##` headings.
+- The plan link as a bare URL instead of `[text](url)`.
+- Mirroring the full plan into the tracker description instead of linking it.
+- Lifecycle folders beyond `active/` and `archive/`.
+- Restating the story-point scale somewhere else instead of pointing here.

@@ -1,0 +1,70 @@
+---
+description: Pre-implementation gate — before writing any code for a task file, make sure the tracker item has an owner and is in the in-progress state, once per key per session. For a slice file the parent is checked first. Called explicitly by task-implement; the glob is the second net.
+alwaysApply: false
+globs: "docs/tasks/active/**/*.md"
+---
+
+# Pre-implementation checks
+
+Opening a task file under the active task folder means you are about to implement. Before the first line of code, run the checks below **once per key per session** — if this key was already checked in this session, go straight to implementation.
+
+**This gate is called, not just attached.** `task-implement` invokes it by name at its start; the glob above is a second net for the case where someone opens a task file outside that skill. A gate that only fires when an agent happens to open the right file is not a gate.
+
+**No tracker → no gate.** If the target repo's `AGENTS.md` → key `Tracker` is `none` or absent, there is nothing to check: say so once and implement.
+
+## Step 1 — Derive the key(s)
+
+From the file path. A key is the `<LETTERS>-<digits>` segment.
+
+**Slice file** (path contains `/subtasks/`) — two keys:
+
+- `…/active/ANW-6595-dynamic-tool-loading/subtasks/S1-ANW-6612-foo.md`
+  - parent key `ANW-6595` — from the folder **before** `/subtasks/`
+  - slice key `ANW-6612` — from the **filename**; the leading `S<n>-` prefix is ignored, and legacy files without that prefix parse identically
+
+Run the checks **for the parent first, then for the slice**: the parent must be in progress before its slice is touched.
+
+**Top-level file** (no `/subtasks/`) — one key, from the folder name.
+
+## Step 2 — Load the item
+
+Load the item through the adapter the `Tracker` value names (`tracker-selection`), reading at least its **owner/assignee** and its **status**. Never hardcode a field ID: resolve it through whatever the adapter offers for that (a field-name expansion, a typed response). A hardcoded ID is a silent breakage the first time the instance changes.
+
+## Step 3 — Two checks, in this order
+
+### 3a — Owner
+
+If the item has no owner, assign it to the current user (resolve their identity through the adapter) and record: *owner set to `<name>`*. If it already has one, leave it untouched — never reassign someone else's item.
+
+### 3b — Status → in progress
+
+If the item is not already in the tracker's in-progress state, move it there. **How** a status changes is the adapter's business — a transition ID in one tracker, a one-step walk in another.
+
+If it is already in progress **or further along** (in review, done), do **not** move it. Record: *status already `<name>`, no change needed*.
+
+**Two checks, not four.** Earlier versions also gated on a team field and on sprint membership. The team gate was a single-team instance policy, and not every tracker has an iteration concept at all (the target repo's `AGENTS.md` → key `Iteration concept`). Owner and status are the two that mean the same thing in any tracker: *someone is responsible* and *work has started*.
+
+## Step 4 — Report
+
+Print a compact block before implementing — for a slice file one block per key, parent first:
+
+```text
+Pre-flight for ANW-6595 (parent):
+✓ Owner: <name> (already set | set to <name>)
+✓ Status: <in-progress state> (already | moved)
+
+Pre-flight for ANW-6612:
+✓ Owner: <name> (already set | set to <name>)
+✓ Status: <in-progress state> (already | moved)
+```
+
+Always print both lines per block, so the result is verifiable rather than asserted.
+
+## Anti-patterns
+
+- **Skipping the checks** because the user said "just implement it" — they run whenever a task file is opened for implementation.
+- **Re-running them** for a key already checked in this session — deduplicate per key, including a parent already checked via another slice.
+- **Skipping the parent** for a slice file.
+- **Hardcoding a field ID, transition ID or instance identifier here** — those belong to the adapter, resolved by name.
+- **Reassigning an item that already has an owner.**
+- **Moving an item backwards** because it was further along than the in-progress state.

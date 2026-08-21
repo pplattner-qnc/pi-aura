@@ -1,0 +1,55 @@
+---
+description: Prevents invalid JSON in locale files caused by unescaped typographic quotes
+globs:
+  - "**/locales/**/*.json"
+  - "**/i18n/**/*.json"
+alwaysApply: false
+---
+
+> **Pi-mirror note.** Pi-adapted copy of the `engineering-foundation` wiki rule; the wiki is the source of truth, kept fresh by the `engineering-sync` skill. This rule carries no Cursor-specific edges, so the body is unchanged; pi surfaces it via the `engineering-rules` extension (frontmatter `globs`).
+
+# Locale JSON Safety
+
+## Problem
+
+Inserting typographic (curly) quotes inside a JSON string value breaks the file:
+
+```json
+// ❌ BAD — the closing " (U+201C) or any plain " (U+0022) terminates the string early
+"emptySearch": "No results for "{q}".",
+"emptySearch": "Keine Skills für „{q}" gefunden.",
+```
+
+The build fails at the point where the bundler parses the locale file — in this repo, Nitro:
+> `RollupError: [plugin json] locales/de.json: Could not parse JSON file`
+
+The failure surfaces at build time, not while editing, which is why the check below belongs into the edit step.
+
+## Rules
+
+1. **Never embed a raw `"` (U+0022) inside a JSON string value.** Escape it as `\"`.
+2. **Typographic openers are fine** (`„` U+201E, `"` U+201C) — they are multi-byte and not JSON-special.
+3. **Typographic closers that look like `"` (U+201C / U+2019) are also safe** — but visually indistinguishable from `"` (U+0022). When in doubt, use `\"`.
+
+## Correct patterns
+
+```json
+// ✅ Escaped ASCII quote
+"emptySearch": "No results for \"{q}\".",
+
+// ✅ Typographic opener + escaped ASCII closer
+"emptySearch": "Keine Skills für „{q}\".",
+
+// ✅ Pure typographic pair (both non-ASCII) — safe but hard to read
+"emptySearch": "No results for \u201C{q}\u201D.",
+```
+
+## After editing locale files
+
+Always validate every locale file you touched before saving — parse it, do not eyeball it:
+
+```bash
+python3 -c "import json, sys; json.load(open(sys.argv[1])); print('OK')" <locale-file>
+```
+
+In this repo the locale files live under `src/locales/` (`de.json`, `en.json`).

@@ -1,0 +1,27 @@
+---
+description: Code comments must always be written in English (subset of general-language-policy, which covers all other control artifacts).
+alwaysApply: true
+---
+
+> **Pi-mirror note.** Pi-adapted copy of the `engineering-foundation` wiki rule; the wiki is the source of truth, kept fresh by the `engineering-sync` skill. This rule carries no Cursor-specific edges, so the body is unchanged; pi surfaces it via the `engineering-rules` extension (frontmatter `alwaysApply: true`).
+
+# English-Only Code Comments
+
+All comments in source code must be written in English — inline comments, block comments, and JSDoc/TSDoc alike.
+
+```typescript
+// ❌ BAD
+// Benutzer aus der Datenbank laden
+const user = await db.findUser(id);
+
+// ✅ GOOD
+// Load user from database
+const user = await db.findUser(id);
+```
+
+This rule does **not** apply to:
+- User-facing UI strings
+- Documentation files (`.md`, `.mdc`)
+- Git commit messages
+
+The language of every other control artifact (rules, skills, entry files, Jira) is governed by `general-language-policy`; this rule is its code-comment subset.

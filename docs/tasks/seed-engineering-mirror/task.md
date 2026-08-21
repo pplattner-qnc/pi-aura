@@ -4,8 +4,9 @@ type: manual
 slug: seed-engineering-mirror
 title: Seed the engineering-foundation mirror via the sync skill's first fetch (run in a separate session)
 map: engineering-foundation-sync
-status: ready
-blocked_by: [engineering-sync-skill]
+status: done
+blocked_by:
+- engineering-sync-skill
 slices: []
 ---
 

@@ -1,0 +1,80 @@
+---
+description: Task files under the active task folder are living artifacts — keep their workflow phase (Draft/Grilling/Refined/Sliced/In Development/Review/Done) and their stand block current whenever an agent works on the task. Finer-grained than, and separate from, the tracker-mirroring Status line. Includes which heading spellings must be recognised when reading.
+alwaysApply: false
+globs: "docs/tasks/active/**/*.md"
+---
+
+# Task File Phase Tracking
+
+A task file (`task-*.md` and slice files under `subtasks/`) is a **living artifact**, not a write-once record. Anyone — human or agent — who opens it must be able to see at a glance **where the task stands** and **what comes next**, without reconstructing it from chat history or the tracker. Two pieces carry that state: the `> **Phase:**` header line and the stand block.
+
+This is **finer-grained than the tracker's workflow** and lives purely in the repo file. The `> **Status:**` header line mirrors the tracker status; the `> **Phase:**` line tracks the internal workflow stage. They are separate and may legitimately diverge — this rule does **not** require syncing the phase to the tracker.
+
+## Phase vocabulary
+
+The phase moves forward through the development workflow (the target repo's `AGENTS.md` → key `Workflow doc URL`, if the repo documents one):
+
+| Phase | Meaning | Typical next step |
+|---|---|---|
+| `Draft` | AI Draft written by `/task-draft` (standalone, or chained from `/task-create`'s `draft` mode), not yet refined | refine via `/task-refine` |
+| `Grilling` | `/task-refine` refinement in progress | finish refining |
+| `Refined` | plan worked out / (for a slice) slice defined, ready to implement | implement, or `/task-slice` if large |
+| `Sliced` | parent has been cut into Sub-Tasks | implement the first wave |
+| `In Development` | implementation underway | open PR / review |
+| `Review` | PR open / in code review | merge + finish |
+| `Done` | finished | `/task-finish`, move to `archive/` |
+
+The correspondence to the tracker's own status series is **rough and non-enforced** — `Refined` is roughly "ready for development", `Review` roughly "in review". The exact mapping belongs to the tracker adapter, not here.
+
+## Update obligation
+
+**Whenever you do work that advances or changes the task** — refining the plan, recording a slicing decision, making implementation progress, opening a review — update **both** the `> **Phase:**` line and the stand block **before ending your turn**.
+
+- **Passive reads do not churn.** If you only read the file for context and take no action on the task, do not rewrite the phase or stand block.
+- The stand block holds two short lines: what was last done, and the concrete next step(s). Keep it terse — it is a pointer, not a changelog.
+- The block, its heading and its two field names are written in the task file's language (the target repo's `AGENTS.md` → key `Doc language`); the phase **values** stay in the controlled English vocabulary above. German documents therefore use `## Stand & nächste Schritte` with `**Stand:**` / `**Nächste Schritte:**`, English ones `## Status & next steps` with `**Status:**` / `**Next steps:**`.
+
+This rule covers the **repo file's** living state. The tracker-side preflight (owner, status) lives in `task-preflight-checks`; do not duplicate it here.
+
+## Reading: find the block before you write one
+
+The heading is language-dependent, and **the existing stock is never migrated** — so both forms exist permanently, side by side. Before updating or creating the block, search the file for **all** of these spellings and write into whatever you find:
+
+- `## Stand & nächste Schritte` (German)
+- `## Status & next steps` (English)
+
+Which of the two dominates depends on the repo's `Doc language`; both must be recognised regardless, because a repo can change that value while its files keep the older heading.
+
+A missed heading fails **silently**: "block not found" looks exactly like "block not present", so the agent creates a second one and the file ends up with two competing states. Never add a block to a file that already has one under a different spelling — write into the existing one and, if it disagrees with the document's language, rename that heading rather than duplicating it. Renaming the heading is not rewriting history: it touches one line so the next run finds the block.
+
+## Examples
+
+```markdown
+<!-- ✅ GOOD: header + stand block reflect reality after a task-refine session -->
+> **Status:** Selected (…).
+> **Phase:** Refined (Plan ausgearbeitet und gegrillt).
+
+## Stand & nächste Schritte
+
+**Stand:** Plan via /task-refine geschärft; Design-Entscheidungen festgehalten.
+**Nächste Schritte:** Umsetzung starten (≈3 SP, kein Slicing nötig).
+```
+
+```markdown
+<!-- ❌ BAD: agent grilled and refined the plan but left the phase at Draft -->
+> **Phase:** Draft (AI-Draft erstellt, noch nicht gegrillt).
+
+## Stand & nächste Schritte
+
+**Stand:** AI-Draft via /task-draft erstellt.
+**Nächste Schritte:** Plan via /task-refine schärfen.
+```
+
+## Verification checklist
+
+- [ ] The file has a `> **Phase:**` header line with a value from the controlled vocabulary.
+- [ ] A stand block with its two field lines is present, in the document's language.
+- [ ] The block was **searched for under both spellings** before writing — no second block was created next to an existing one.
+- [ ] After doing work on the task, both were updated to the current state before ending the turn.
+- [ ] A passive read with no action did **not** rewrite them.
+- [ ] The tracker-mirroring `> **Status:**` line was left to its own convention (not conflated with the phase).

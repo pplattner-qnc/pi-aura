@@ -1,0 +1,254 @@
+entries:
+- path: blueprint/rules/general-ai-docs-structure.mdc
+  install: .cursor/rules/anwaltde/universal/general-ai-docs-structure.mdc
+  version: 1
+  checksum: sha256:eeea75eaf97695cdbc9865636bd7880559397117760b1a7f31101f18f8bca90e
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/rules/general-code-quality.mdc
+  install: .cursor/rules/anwaltde/universal/general-code-quality.mdc
+  version: 1
+  checksum: sha256:010fc2b966ab79c3f6224c18286efe4eb07fb067f18e3c84448052110bd8ea8d
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/rules/general-db-destructive-ops.mdc
+  install: .cursor/rules/anwaltde/universal/general-db-destructive-ops.mdc
+  version: 1
+  checksum: sha256:21d5880f537276cd4fe4c3b9e01d5cb2fe8d30f01a495ee8a3e8b565c50f79d7
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/rules/general-english-comments.mdc
+  install: .cursor/rules/anwaltde/universal/general-english-comments.mdc
+  version: 1
+  checksum: sha256:dcdf72c1a860856539c0f6e11d417f65d771d26aee53cef79981e4bab1c230df
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/rules/general-language-policy.mdc
+  install: .cursor/rules/anwaltde/universal/general-language-policy.mdc
+  version: 1
+  checksum: sha256:9fa47701a7558f39891bbac429f19b708c1dc4d6697f3712a79e9d74f4fe4a04
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/rules/general-markdown-format.mdc
+  install: .cursor/rules/anwaltde/universal/general-markdown-format.mdc
+  version: 1
+  checksum: sha256:25dd2e89274f2dfb9a0803f0be42b5ad69751ce7b9b3377a386cb3e18da6b4c2
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/rules/general-shared-state-and-handoff.mdc
+  install: .cursor/rules/anwaltde/universal/general-shared-state-and-handoff.mdc
+  version: 1
+  checksum: sha256:71b8686f6e79278bcddf4b22cbdb27405e1d74ce2f54a2f6ccdd5dcd4d12940f
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/rules/locale-json-safety.mdc
+  install: .cursor/rules/anwaltde/universal/locale-json-safety.mdc
+  version: 1
+  checksum: sha256:65456d9883e53e914753d059aa0c9144efa2c85c5e23ed238c729aac35584595
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/rules/task-artifact-conventions.mdc
+  install: .cursor/rules/anwaltde/universal/task-artifact-conventions.mdc
+  version: 1
+  checksum: sha256:67be3857a8de79cc4ac71cf3df80419523f6f54daef045db354bad51046c45ea
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/rules/task-phase-tracking.mdc
+  install: .cursor/rules/anwaltde/universal/task-phase-tracking.mdc
+  version: 1
+  checksum: sha256:54ea2914f6e0de2c0c504500a7778085b018dc2bec44261c03c5ad98ab31e9ef
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/rules/task-preflight-checks.mdc
+  install: .cursor/rules/anwaltde/universal/task-preflight-checks.mdc
+  version: 1
+  checksum: sha256:eea3ea0e5e40a212397b0cb7430d92bdbfe0aeca37c7d85de0f4667496d9875b
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/rules/tracker-aura.mdc
+  install: .cursor/rules/anwaltde/universal/tracker-aura.mdc
+  version: 1
+  checksum: sha256:f563cff8f03df949e839768b990de73aa4bbf4b30b1b42c69983c1c6b2eaf02c
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/rules/tracker-jira.mdc
+  install: .cursor/rules/anwaltde/universal/tracker-jira.mdc
+  version: 1
+  checksum: sha256:8ccad20a5dcabca5907e652dcadfe5d16eaed99b431daacab978228e70a6a18f
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  condition:
+    key: Tracker
+    equals: jira
+- path: blueprint/rules/tracker-mirror.mdc
+  install: .cursor/rules/anwaltde/universal/tracker-mirror.mdc
+  version: 1
+  checksum: sha256:45a34714a32f7856b7ac9d1e094ec25426524f59886caccf37073bcdba274f8c
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  condition:
+    key: Tracker
+    equals: aura, jira
+- path: blueprint/rules/tracker-selection.mdc
+  install: .cursor/rules/anwaltde/universal/tracker-selection.mdc
+  version: 1
+  checksum: sha256:f6be2ef8a7bc6b6a7e3fc52fe9811826e8bb3db3f0136b784e2d76fb8262f421
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/rules/worklog-personal-tracking.mdc
+  install: .cursor/rules/anwaltde/universal/worklog-personal-tracking.mdc
+  version: 1
+  checksum: sha256:f70a794c3409362904d5f815940a443fbb887eca20f206f6f3a4d73edbcae481
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+- path: blueprint/skills/ai-setup/
+  install: .agents/skills/anwaltde/universal/ai-setup
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/ai-setup/skill.md
+    checksum: sha256:48a79cd9912d6257e21346f5927f3255b1fe8a2fc905b245fb2c3648b1828479
+- path: blueprint/skills/ai-sync/
+  install: .agents/skills/anwaltde/universal/ai-sync
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/ai-sync/skill.md
+    checksum: sha256:a478f67cf72812005a876c16b77d73a3f0e67a0fc049a33a88ba03cb9b366f98
+- path: blueprint/skills/pr-review/
+  install: .agents/skills/anwaltde/universal/pr-review
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/pr-review/skill.md
+    checksum: sha256:52bfd46183b6710f6055441a99c7934b14c5e877618401c8913ef4169a4bd853
+- path: blueprint/skills/retro-harvest/
+  install: .agents/skills/anwaltde/universal/task/retro-harvest
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/retro-harvest/skill.md
+    checksum: sha256:9480bb326e57f20ec7c7dce7a4c3af86157602ad50912f0905620feb76e2347b
+- path: blueprint/skills/task-create/
+  install: .agents/skills/anwaltde/universal/task/task-create
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/task-create/skill.md
+    checksum: sha256:68aff530fa2fb69d4da3d5f1ed40e9bba35c359f896a3a6a497ef215acc3a14d
+- path: blueprint/skills/task-draft/
+  install: .agents/skills/anwaltde/universal/task/task-draft
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/task-draft/skill.md
+    checksum: sha256:228d055ad3a8a67ee52ba9c471ce4f939dfba5123c4bb87ae06f584cd40b512c
+- path: blueprint/skills/task-finish/
+  install: .agents/skills/anwaltde/universal/task/task-finish
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/task-finish/skill.md
+    checksum: sha256:6d794779e8bf43adbe7c9549d9d5a2c3a0f00e5f7c6d95f94f84bfaa2c3f0d3c
+- path: blueprint/skills/task-implement/
+  install: .agents/skills/anwaltde/universal/task/task-implement
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/task-implement/skill.md
+    checksum: sha256:b9da92f39524eb7e33706c4aa8e6429d3dc3fb1cb81a54213ef3a15c9dcf5bf4
+- path: blueprint/skills/task-quiz/
+  install: .agents/skills/anwaltde/universal/task/task-quiz
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/task-quiz/skill.md
+    checksum: sha256:2e67014210e6e367b2133be520deed39140db1524fac34f778678143205c6493
+- path: blueprint/skills/task-refine/
+  install: .agents/skills/anwaltde/universal/task/task-refine
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/task-refine/skill.md
+    checksum: sha256:156704dedbf2f913f1e06bd214e12ec8655da493cb31b10ccf3885c87cd0c2a9
+- path: blueprint/skills/task-refine-review/
+  install: .agents/skills/anwaltde/universal/task/task-refine-review
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/task-refine-review/skill.md
+    checksum: sha256:1981c4f0156fb109c09515fe7f23c29089959cf2bd91b3462a18c2b01dd1f1d4
+- path: blueprint/skills/task-retro/
+  install: .agents/skills/anwaltde/universal/task/task-retro
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/task-retro/skill.md
+    checksum: sha256:3988f56694a6959bf72917056871cf77f52eb89f624fb54818cdc7793d712651
+- path: blueprint/skills/task-slice/
+  install: .agents/skills/anwaltde/universal/task/task-slice
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/task-slice/skill.md
+    checksum: sha256:c21465acf5f0a8f2ac721bd00831986d8a7a52f4dce1a11f9e580fafa52eb30c
+- path: blueprint/skills/task-untangle/
+  install: .agents/skills/anwaltde/universal/task/task-untangle
+  version: 1
+  published: '2026-08-21T09:00:00Z'
+  origin:
+    commit: c5592fe07d1aee55043f4bb29653b1b5d30acd71
+  files:
+  - path: blueprint/skills/task-untangle/skill.md
+    checksum: sha256:a681446a113fbbf50d441458159e244ae6da303f213350e6fbac9c9c6a9d0657
+  - path: blueprint/skills/task-untangle/bundle.ts
+    checksum: sha256:88eecde16ce8fea455eb2f4de190d4301cd9c67c3f4514044d61733707863e6f
+  - path: blueprint/skills/task-untangle/check-bundle.ts
+    checksum: sha256:93c0396faabb30974f7db699c3ff24941ef05263cb49b59f9dd0d07de589f819
+  - path: blueprint/skills/task-untangle/serve-plans.ts
+    checksum: sha256:f9869e472a694000c0d6722f364d4158eeca29fe8ee60be2dd3d92cd00dedddc
+  - path: blueprint/skills/task-untangle/views.ts
+    checksum: sha256:4c403b2bbdc0714e703e5d53e2f8cc714aad71f5f736d56f178b870d35c9dab7
+nodesWithoutSource: []

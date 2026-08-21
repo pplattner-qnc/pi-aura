@@ -1,0 +1,108 @@
+---
+description: Keep a personal, gitignored per-day worklog current — every agent updates it whenever a piece of work starts, changes status, or finishes. Section headings and status labels are values; the emoji is the language-independent state marker, and reading must recognise the existing stock's headings.
+alwaysApply: true
+---
+
+# Personal worklog (auto-maintained, never committed)
+
+Keep a private, always-current record of what *you* are working on, so anyone — you, or the next agent — sees the live state at a glance without digging through chat history or the tracker. This log is **personal and local**: a companion to the tracker and the task lifecycle, never a replacement for either.
+
+## Where it lives
+
+- One file per day, named `YYYY-MM-DD.md`, under the target repo's `AGENTS.md` → key `Worklog path` (create the folder if the repo lacks it).
+- That folder is **gitignored** — it must never be committed or show up in `git status`.
+
+## When to update — three moments, ticket-independent
+
+For any piece of work, with or without a ticket, update the day's file when:
+
+1. **Work starts** → add an entry to the **active** section.
+2. **Status changes** → update that entry's status and/or its `→` next action.
+3. **Work finishes** → move the entry out of the active section into the **done** section.
+
+The user may also edit the file by hand at any time; never discard their manual entries.
+
+## Marking work done
+
+- **Ticket-bound work:** on merge / close-out, move it to the done section with `✅`.
+- **Ad-hoc work (no ticket):** move it to the done section but mark it `❓` until the user confirms — only then switch to `✅`. Never mark ad-hoc work finally done on your own.
+
+## Day rollover
+
+On the first write of a new day, create that day's file and **carry over the still-open entries** from the most recent previous file. Do not carry over done items.
+
+## Section headings and status labels
+
+Both are **values**, because both are prose in the document's language (the target repo's `AGENTS.md` → key `Doc language`):
+
+- the two headings — the target repo's `AGENTS.md` → key `Worklog section headings`
+- the status labels — the target repo's `AGENTS.md` → key `Worklog status labels`
+
+What is **not** configurable is the state set and its emoji. The emoji is the state's machine-readable identity and is the same in every language; the label next to it is only how a human reads it:
+
+| Emoji | State | Meaning |
+|---|---|---|
+| 🔄 | in progress | actively being worked on |
+| ⛔ | blocked | stopped by an obstacle |
+| ⏳ | waiting | waiting on something or someone (test, review, approval) |
+| 👀 | in review | in review / PR review |
+| 🧪 | implemented | code done, not yet closed out (e.g. awaiting a test) |
+| ⏸️ | parked | deliberately paused |
+
+`implemented` uses `🧪`, not `✅`, on purpose: `✅` marks a **done** entry, and the two must never be confusable.
+
+### Reading: recognise the stock
+
+The headings are language-dependent and **the existing files are never migrated**, so both forms exist permanently. When reading a worklog — especially on day rollover, where missing the previous day's open entries loses them silently — recognise **all** of these:
+
+- `## Aktiv` / `## Erledigt` (German)
+- `## Active` / `## Done` (English)
+
+Match the emoji, not the label, when you need to identify a state programmatically.
+
+## Entry format
+
+Keep the log **scannable at a glance** — especially the active section. Every entry is one short line, never a multi-clause note.
+
+**Active entry** — three mandatory parts, in this order:
+
+1. **Short title** — enough to recall what it is about.
+2. **Status** — exactly one emoji plus its label.
+3. **Next action / wait** — short free text prefixed with `→`: what to do next, or what you are waiting for.
+
+Optionally between status and next action: a **ticket reference** `· <key(s)>` — just the key(s), e.g. `· ANW-7660` or `· ANW-7660 / AURA-664`, never prose.
+
+Nothing else belongs in an active entry: no worktree, container or branch names, no test counts, no detailed tracker status. Those live in the ticket.
+
+**Done entry** — title + `✅` + optional key(s). The close-out detail (test result, merge info, final status) belongs in the ticket's close-out comment, not here.
+
+```markdown
+# Worklog YYYY-MM-DD
+
+## <active heading>
+- <short title> — <emoji> <label> [· <key(s)>] → <next action / wait>
+
+## <done heading>
+- <short title> — ✅ [· <key(s)>]
+```
+
+## ✅ / ❌
+
+- ✅ Start a piece of work → add it to the active section; on finish move it to the done section with `✅`.
+- ✅ One scannable line: `- Worklog kürzen — 🔄 in-arbeit · ANW-7660 → offene Skill-Stellen anpassen`.
+- ✅ Exactly one state, as emoji + label: `🧪 implementiert → wartet auf Test`.
+- ❌ Free-form multi-clause status: `🔄 Welle 2 fertig, wartet auf Test · Worktree anw7593 · volle Suite grün`.
+- ❌ Worktree, container, branch or test detail in the line instead of in the ticket.
+- ❌ Committing the worklog folder, or leaving it out of `.gitignore`.
+- ❌ Marking ad-hoc work `✅` before the user confirms (use `❓` first).
+- ❌ The same item listed in both sections.
+- ❌ Creating a second active section because the existing one used the other language's heading.
+
+## Verification checklist
+
+- [ ] The current day's file exists under the configured worklog path and reflects reality.
+- [ ] Each active entry is one scannable line: title + one state (emoji + label) + a `→` next action; ticket reference optional; nothing else.
+- [ ] Done entries are title + `✅` + optional key; close-out detail lives in the ticket comment.
+- [ ] The previous file was read under **both** heading spellings, so no open entry was lost on rollover.
+- [ ] `git status` never shows the worklog folder.
+- [ ] Ad-hoc "done" waits for user confirmation.

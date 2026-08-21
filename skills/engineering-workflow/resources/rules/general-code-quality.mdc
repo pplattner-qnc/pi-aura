@@ -1,0 +1,66 @@
+---
+description: Always-on, language- and product-agnostic code-quality guardrails for writing and changing code — scope discipline, simplicity & control flow, abstraction boundaries, modularity & file size, types & state, when not to apply, plus a final pre-summary checklist.
+alwaysApply: true
+---
+
+> **Pi-mirror note.** Pi-adapted copy of the `engineering-foundation` wiki rule; the wiki is the source of truth, kept fresh by the `engineering-sync` skill. This rule carries no Cursor-specific edges, so the body is unchanged; pi surfaces it via the `engineering-rules` extension (frontmatter `alwaysApply: true`).
+
+# Code Quality — Always-On Rules
+
+Optimise for the next reader. "It works" is not the quality bar: if the same behaviour is reachable with a clearer structure, choose the clearer one — direct and boring beats clever. These rules are language- and product-agnostic.
+
+## Scope discipline
+
+- Match refactor ambition to the task. Bugfix and small-feature tasks get minimal diffs; structural reframes ("this branch/layer could disappear") are *proposed* in one short paragraph, not implemented — unless the task is explicitly a refactor.
+- Never restructure code unrelated to the current change.
+
+## Simplicity & control flow
+
+- Do not bolt one-off special cases onto unrelated paths. A repeated conditional on the same discriminator signals a missing model or helper.
+- Introduce a typed model / dispatcher only when cases are open-ended or already ≥3. A 2–3 case if-chain stays an if-chain.
+
+```js
+// ❌ BAD: special case smuggled into an unrelated path
+function render(item) {
+  if (item.kind === "legacy" && item.flagX && !item.hidden) { /* one-off */ }
+  // ...
+}
+
+// ✅ GOOD: dispatch on a typed model (cases are open-ended)
+const renderers = { legacy: renderLegacy, modern: renderModern };
+renderers[item.kind](item);
+```
+
+## Abstraction & boundaries
+
+Two kinds of abstraction, two different bars:
+
+- **Boundary abstractions** (interfaces in front of external services, I/O, or swappable strategies — LLM providers, OCR engines, storage): justified with even a single implementation. The point is isolating a volatile dependency, not deduplication. Callers depend on the interface, never on a concrete implementation or vendor SDK.
+- **Internal indirection** (helpers, wrappers, pass-through layers inside a module): justified only at ≥2 real call sites or when it makes an invariant type-safe. Otherwise inline it.
+- Keep logic in its canonical layer: feature logic stays out of shared paths, implementation details stay behind the interface.
+- Before writing a helper, check whether a canonical one already exists.
+
+## Modularity & file size
+
+- Split proactively, not when the linter complains: separate orchestration from business logic; one focused responsibility per file/module.
+- Growing an existing file substantially is a smell — extract helpers, sub-components, or modules *first*, then add the feature.
+- Hard limits (`max-lines`, complexity) live in the lint config. Never bypass them with disable comments — restructure instead.
+
+## Types & state
+
+- Question needless optionality and silent fallbacks; make invariants explicit in the types (`any` is lint-enforced, not negotiable).
+- Do not introduce concurrency/parallelism without naming the race and ordering implications in the change description. Keep related state updates atomic — no half-applied intermediate states.
+
+## When NOT to apply
+
+Hotfixes under time pressure, vendored/generated code, and tasks with an explicit minimal-diff requirement: fix only what was asked, note observed smells in the summary instead.
+
+## Final check (before the final diff summary)
+
+Answer these explicitly before presenting the result:
+
+- [ ] No special-case branch added to an unrelated flow.
+- [ ] No new *internal* abstraction without ≥2 call sites or a type-safety win; boundary interfaces wrap volatile/external dependencies only.
+- [ ] Logic lives in its canonical layer; existing helpers reused.
+- [ ] No lint limit bypassed via disable comment.
+- [ ] Any structural reframe was proposed, not silently implemented.

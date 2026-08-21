@@ -1,0 +1,165 @@
+---
+description: TEMPLATE, INERT IN THIS REPO. Tracker adapter for Jira — issue types, the required fields and their traps, the mandatory Selected end state, the transition tables including the 101/111 sub-task trap, sub-task creation, story-point field mechanics, the target status per lifecycle skill, the close-out carriers (assignee, sprint field, release label), the repo-header reference format, parent resolution, the error policy, and the instance values an adopting repo must replace. Only meaningful when AGENTS.md names jira as a tracker.
+alwaysApply: false
+---
+
+# Tracker adapter: Jira (template)
+
+> **This file is inert here.** It sits in the universal rule tree like any other rule, but `alwaysApply: false` and no `globs` keep it from ever attaching: this repo's the target repo's `AGENTS.md` → key `Tracker` names `aura` only. Central home is `blueprint/rules/tracker-jira.mdc` in the wiki (AURA-1647), published there with `condition: { key: Tracker, equals: jira }` — this local copy is what that condition, once true, installs. See `general-ai-docs-structure` → "Rule templates".
+>
+> **A repo adopting it needs three things:** `Tracker` naming `jira`, the **Atlassian MCP server** declared in the versioned `.mcp.json` (a local `.cursor/mcp.json` is gitignored and does not travel), and its own instance values filled in below. Copying this file without the MCP server produces a rule describing calls the agent cannot make. Note that the reverse also happens and is fine: a repo on another tracker may keep the Atlassian server purely for **read** access to a legacy Jira — that alone does not make this template active.
+>
+> **What is *not* here:** how a task artifact is shaped — its title format, description structure, depth limit and story-point scale are tracker-neutral and live in `universal/task-artifact-conventions`. This file holds only what is true because the tracker is Jira. Running Jira *and* another tracker additionally needs `tracker-mirror.mdc`.
+
+## Instance values — replace all of these
+
+Every value below is specific to **anwalt.de's** Jira instance. They are kept concrete so the shape is unmistakable, **not** so they can be reused: a `cloudId`, a project key and a team UUID are per-instance by definition. An adopting repo replaces them and records its own in `AGENTS.md` under `### <Tracker> instance`.
+
+| What | anwalt.de's value | Field |
+|---|---|---|
+| `cloudId` | `0551a77f-e8c4-4636-8695-5922a3137365` | — |
+| Project key | `ANW` | `projectKey` |
+| Team | `ec9fd424-7b62-4c94-8f40-d00310467070` | `customfield_10001` |
+| Story point estimate (detail view; top-level **and** sub-tasks) | — | `customfield_10016` |
+| Story Points (board / sprint planning; top-level **only**) | — | `customfield_10033` |
+
+## Issue types
+
+| Issue type | When to use |
+|---|---|
+| `Delivery Story` (id `10007`) | new function / visible end-user result (default) |
+| `Discovery Story` | research, spike, open architecture decision |
+| `Optimization Story` | refactor, performance, DevX — no new feature |
+| `Maintenance Story` | upgrades, patches, cleanup |
+| `Bug` | defect in existing behaviour |
+| `Sub-Task` | slice of an existing top-level ticket (always with `parent`) |
+
+**No new `Epic` issues** — every new piece of work is a single top-level ticket, and a split becomes `Sub-Task`s. This is an **instance policy**, not a universal truth: other trackers use their Epic level actively. The universal residue ("a slice is never a second top-level item") lives in `task-artifact-conventions`.
+
+## Required fields on create, and their traps
+
+Project, issue type, summary and description are always set; `parent` additionally on a `Sub-Task`. Two traps matter more than the list:
+
+**The team field must be a plain string**, not an object:
+
+```jsonc
+{ "customfield_10001": "<team-uuid>" }              // correct
+{ "customfield_10001": { "id": "<team-uuid>" } }    // rejected: "The team ID … is invalid."
+```
+
+In a combined edit an invalid format **discards the whole edit**, not just the offending field — so set the team field separately, or get the format right the first time.
+
+**Never set the team field on a `Sub-Task`.** It inherits from the parent, and setting it anyway makes the entire create call fail.
+
+**`parent` is a plain string** (`"ANW-6336"`), never an object.
+
+**Story points are not on the create screen.** Set them in a **separate** `editJiraIssue` right after create — both fields together on a top-level ticket, `customfield_10016` alone on a sub-task (the board field does not exist in the sub-task workflow). The scale itself is in `task-artifact-conventions`; only these field names are Jira's.
+
+**Descriptions go in as `contentFormat: "markdown"`** and section headings need a real `##` prefix — without it the Markdown→ADF conversion renders the heading as a plain paragraph and the ticket becomes one text blob.
+
+## Mandatory end state after create: `Selected`
+
+`Erstellt` is a triage intermediate of the API, not a valid backlog state — tickets left there fall out of sprint planning and filter views. A create is **only complete** once the ticket reached `Selected`; if the transition fails, report it rather than leaving the ticket behind. This holds for everything created fresh, including a bare backlog idea: "just an idea" versus "worked out" is expressed by whether a plan file and plan link exist, never by the status.
+
+**The `101`/`111` trap.** Top-level tickets and sub-tasks run **different workflows**, and these two IDs have swapped meaning between them:
+
+| | Top-level (Story / Bug) | `Sub-Task` |
+|---|---|---|
+| → `Selected` | **`111`**, as a separate `transitionJiraIssue` after create (the inline `transition` field is unreliable on this edge for top-level) | **`101`**, and here the inline `transition` in `createJiraIssue` does work — use it |
+| `Discarded` | `131` | **`111`** |
+
+Sending `111` for a sub-task therefore moves it to `Discarded`, not `Selected`. If that happened: call `getTransitionsForJiraIssue`, find "Put to Selected" and move it back.
+
+## Transition IDs
+
+**Top-level:** `101` Categorized · `111` Selected · `121` Ready for Development · `21` In Arbeit · `71` Needs a Code Review · `91` Ready for Deployment to Production · `31` Fertig · `131` Discarded.
+
+**Sub-Task:** `101` Selected · `111` Discarded · `21` In Arbeit · `71` Needs a Code Review · `31` Fertig.
+
+When in doubt, call `getTransitionsForJiraIssue` and pick by **name**, never by guessing a number.
+
+## Target status per skill
+
+The lifecycle skills ask for a **stage**, not a status name; this table is where the name comes from. Match by `to.name` from `getTransitionsForJiraIssue` — the numbers in the section above are documentation, not an API contract.
+
+| Skill / stage | Top-level | `Sub-Task` |
+|---|---|---|
+| after create (`task-create`) | `Selected` | `Selected` |
+| `task-draft`, `task-refine`, `task-slice` | no status change beyond `Selected` — the plan's phase, not the ticket, tracks drafting | — |
+| `task-implement`, work started | `In Arbeit` | `In Arbeit` |
+| `task-finish`, outcome "needs testing" | `Needs a Code Review` | `Needs a Code Review` |
+| `task-finish`, outcome "ready for deployment" | `Ready for Deployment to Production` | — (no such state; use `Fertig`) |
+| `task-finish`, outcome "done" | `Fertig` | `Fertig` |
+| discarded | `Discarded` | `Discarded` (`111`, not `131`) |
+| `release`, final flip after the deployment | `Fertig` | `Fertig` |
+
+Jira reaches each of these in **one** transition — unlike a tracker with a stepwise series, there is nothing to walk here.
+
+**Reading a release cohort back** (what `release` needs to collect a scope) — search by the release label, always with the team filter, and paginate while `isLast` is `false`:
+
+```text
+project = <PROJECT> AND <team-field> = <team-uuid> AND labels = "<PREFIX>-<version>" ORDER BY key ASC
+```
+
+Both shipped stages count as in-scope for the notes: at release time most finished tickets sit at `Ready for Deployment to Production`, not yet at `Fertig`. A `Fertig`-only filter produces empty notes.
+
+## Close-out carriers
+
+What `task-finish`'s pre-flight asks for, and which Jira field answers it:
+
+| Pre-flight step | Jira carrier |
+|---|---|
+| Owner | `assignee`; resolve the current user via `atlassianUserInfo` → `accountId` |
+| Iteration membership | the Sprint field. **Resolve its ID via the `names` expansion on `getJiraIssue`** (typically `customfield_10020`) — never hardcode it. The active sprint comes from a `sprint in openSprints()` JQL search |
+| Release tag | a **label** `<PREFIX>-<version>`. This instance has no usable `fixVersion` (its versions belong to an unrelated monorepo), which is why the release rides on a label |
+
+**`labels` is a set operation:** a write replaces the whole array. Read the current labels first and write the union, or every other label is silently dropped.
+
+**The team field is a close-out gate too:** only inspect and edit tickets whose `customfield_10001` matches the team UUID above. A ticket outside it is not yours to close — abort and say so.
+
+## Comments
+
+`addCommentToJiraIssue` takes `commentBody`, not `comment`. Content in English. The convention for *when* to comment is in `task-artifact-conventions`.
+
+Jira has **no progress-event concept.** Where a skill emits one, it is a no-op here — not an error and not something to emulate with an extra comment.
+
+## Repo-header reference format
+
+```markdown
+> **Jira:** [<KEY>](https://<instance>.atlassian.net/browse/<KEY>)
+```
+
+One line, the key as the link text. Jira has no separate plan artifact, so the plan link goes the other way: into the ticket's description (`task-artifact-conventions` → "Description structure").
+
+## Parent resolution
+
+Resolve in this order, stopping at the first hit:
+
+1. **The key in the repo header** — `getJiraIssue`. Exact, and the normal case: a Jira key *is* the identifier, so there is no UUID-versus-key split to repair.
+2. **Search by summary** — a JQL search scoped to the project and team. A fuzzy match is a **suggestion, not a resolution**: present the candidate and let the user confirm before anything is parented to it.
+3. **Create it** — following the call sequence above, then attach the child.
+
+**No default parent Epic:** this instance creates no new Epics (see "Issue types"), so a new top-level ticket is genuinely parentless. Only a `Sub-Task` has a `parent`.
+
+## Error policy
+
+Same classification as any single-tracker setup: **identity** failures (creating the ticket, resolving the parent a sub-task must hang under) stop the run and are reported — never invent a placeholder key. **Bookkeeping** failures (transition, comment, label, sprint) continue, and the debt is recorded in the plan file's phase block (`task-phase-tracking`), not just in the chat.
+
+One Jira-specific wrinkle: a combined `editJiraIssue` fails **as a whole** if one field's format is wrong, so a partially applied edit is not a state you have to reason about — but a rejected edit that looks like "only the team field was wrong" has in fact written nothing.
+
+Running Jira alongside a second tracker changes which failure blocks what: that ordering is `tracker-mirror`'s, not this file's.
+
+## Anti-patterns (Jira-specific)
+
+- Creating new work as an `Epic`.
+- Leaving a ticket in `Erstellt` after create.
+- Moving a sub-task "to Selected" with `111` — that is `Discarded` there.
+- Setting `customfield_10001` on a sub-task, or writing it as an object.
+- Writing `customfield_10033` on a sub-task — unsupported in that workflow.
+- Leaving a top-level ticket without story points, or setting only `customfield_10016` so the board shows no estimate.
+- `parent` as an object instead of a string.
+- Description sections as plain text instead of `##` headings.
+- Hardcoding the Sprint field ID instead of reading it from the `names` expansion.
+- Writing `labels` without merging the existing ones in — the write replaces the whole set.
+- Closing a ticket that belongs to another team, or one without an assignee or sprint.
+- Hardcoding a transition ID for a close-out instead of matching `to.name`.
