@@ -130,3 +130,11 @@ The downstream `aura-review-subcommands` task depends on these — all present
 in the new spec: `getArtifactReview`, `getArtifactApprovals`,
 `requestArtifactReview`, `startArtifactReview`, `submitArtifactDecision`,
 `reopenArtifactReview`.
+
+### Landing
+
+- Slice `replace-spec-and-regen` merged into `task/aura-mcp-doc-salvage`
+  via `--no-ff` (merge commit `f917b00`); slice branch deleted.
+- Slice doc archived to
+  `docs/tasks/openapi-spec-bump/slices/archive/1-replace-spec-and-regen.md`.
+- This was the only slice for the task; task `status` remains `done`.
