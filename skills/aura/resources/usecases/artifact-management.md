@@ -8,8 +8,8 @@ approval gates and fine-grained access control.
 
 | Goal | Tool |
 |---|---|
-| Search by content | `mcpUnifiedSearch` with `source_types: ["ARTIFACT"]` |
-| Get by ID | `mcpGetArtifact` or `getArtifact` |
+| Search by content | `unifiedSearch` with `source_types: ["ARTIFACT"]` |
+| Get by ID | `getArtifact` |
 | List all | `listArtifacts` (filter by scope, pending_review) |
 | Get specific version | `getArtifactVersion` |
 | List versions | `listArtifactVersions` |
@@ -130,8 +130,8 @@ workflow instead.
 | `mcpCreateArtifact` | Create with small body (≤ ~500 chars) |
 | `mcpUpdateArtifact` mode `section` | Small targeted edit to one section |
 | `mcpUpdateArtifact` mode `whole` | Small full replacement (≤ ~500 chars) |
-| `mcpGetArtifact` | Read artifact detail (body included) |
-| `mcpLinkArtifactToTask` | Link artifact to task |
+| `getArtifact` | Read artifact detail (body included) |
+| `linkArtifactToTask` | Link artifact to task |
 
 Server limits: body max 200,000 chars (whole), 50,000 (section). The
 practical limit is much lower — the agent's output token budget.
@@ -139,27 +139,54 @@ practical limit is much lower — the agent's output token budget.
 ## Linking artifacts to tasks
 
 ```
-mcpLinkArtifactToTask({ id: "<task-uuid>", artifact_id: "<artifact-uuid>" })
+linkArtifactToTask({ id: "<task-uuid>", artifact_id: "<artifact-uuid>" })
 ```
 
 ## Review workflow
 
-1. **Request review**: `requestArtifactReview({ id: "<uuid>" })`
-2. **Check review status**: `getArtifactReview({ id: "<uuid>" })`
-3. **Submit decision**: `submitArtifactDecision({ id, version, decision })`
-   — `APPROVED` or `REJECTED`, version-bound, idempotent
-4. **Start formal review**: `startArtifactReview({ id: "<uuid>" })`
-5. **Reopen approved review**: `reopenArtifactReview({ id: "<uuid>" })`
+The review-flow MCP tools (request, start, submit decision, reopen, read
+review state, read approvals) are **no longer available via MCP** — they are
+gone from the live `aura-mcp-dev` server. Instead, use the `aura.mjs`
+`artifact review-*` subcommands, which call the REST endpoints directly via
+the shared `restClient`.
+
+```bash
+# 1. Request a review
+node skills/aura/dist/aura.mjs artifact review-request <artifact-uuid>
+
+# 2. Check review status (compact: version, per-reviewer status, deadline, initiator)
+node skills/aura/dist/aura.mjs artifact review-get <artifact-uuid>
+
+# 3. Submit a decision (APPROVED or REJECTED, version-bound, idempotent)
+node skills/aura/dist/aura.mjs artifact review-decide <artifact-uuid> \
+  --version <version> --decision APPROVED
+
+# 4. Start a formal review (assign roles + reviewers + optional deadline)
+node skills/aura/dist/aura.mjs artifact review-start <artifact-uuid> \
+  --version <version> --roles <role1,role2> --user-ids <user1,user2> \
+  --deadline <iso-deadline>
+
+# 5. Reopen an approved review
+node skills/aura/dist/aura.mjs artifact review-reopen <artifact-uuid> --version <version>
+
+# 6. Check approval status (decisions + decided/total counts)
+node skills/aura/dist/aura.mjs artifact review-approvals <artifact-uuid>
+```
 
 ## Access control
 
 | Action | Tool |
 |---|---|
-| Grant/update access | `grantArtifactAccess` |
-| View access overview | `getArtifactAccessOverview` |
+| Grant/update access | `grantArtifactAccess` — not available via MCP; use Aura UI / REST |
+| View access overview | `getArtifactAccessOverview` — not available via MCP; use Aura UI / REST |
 | Accept into memory | `acceptArtifactMemory` |
 
 ## Comments
 
 Use `createComment` with `entity_type: "ARTIFACT"` and `listComments` with
-the same entity type.
+the same entity type. To @-mention people in a comment, resolve mention
+candidates with `listMentionCandidates` (pass `entity_type: "ARTIFACT"` and
+the artifact `entity_id`; each candidate carries a `has_access` flag) and
+include the handles in the comment body. To edit a comment's body or
+mentions, use `updateComment` (author-only; keep `is_ai_generated: true` on
+edits — the `mentioned_user_ids` array re-resolves @mentions).

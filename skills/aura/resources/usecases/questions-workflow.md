@@ -36,7 +36,10 @@ unifiedSearch({ query: "...", source_types: ["QUESTION"] })
 ```
 
 Questions also appear in the memory graph as entity type `question` and can
-be explored via `getMemoryGraph` and `listMemoryEntities`.
+be explored via `listMemoryEntities`.
+
+> **Note:** Graph expansion (`getMemoryGraph`) is not available via MCP —
+> use REST `/memory/graph` or the Aura UI; see `openapi-new.yaml`.
 
 ## Important considerations
 

@@ -1,13 +1,7 @@
 # Signals
 
-> **⚠️ Not yet fully understood — use with caution.**
-> The signals system has not been explored with real data yet. The
-> information below is inferred from tool descriptions only and may be
-> incomplete or inaccurate. Update this file once we have hands-on
-> experience with actual signals.
-
 Signals are inbound planning items that arrive in an inbox for triage. They
-appear to be observations or alerts from external sources (customer feedback,
+are observations or alerts from external sources (customer feedback,
 monitoring, automated findings) that someone needs to review and decide
 whether they warrant action.
 

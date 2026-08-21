@@ -35,6 +35,8 @@ import type {
   PriorityQueue,
   PriorityQueueItem,
   SaveKnowledgeNodeBodyInput,
+  StartArtifactReviewInput,
+  SubmitArtifactDecisionInput,
   Task,
   TaskList,
   UpdateArtifactInput,
@@ -68,6 +70,10 @@ import {
   getArtifactApprovals as genGetArtifactApprovals,
   getTaskByHumanKey as genGetTaskByHumanKey,
   getArtifactReview as genGetArtifactReview,
+  requestArtifactReview as genRequestArtifactReview,
+  startArtifactReview as genStartArtifactReview,
+  submitArtifactDecision as genSubmitArtifactDecision,
+  reopenArtifactReview as genReopenArtifactReview,
 } from "./generated/sdk.gen.js";
 
 // Generated types — used ONLY inside private helpers / cast boundaries.
@@ -79,6 +85,8 @@ import type {
   ArtifactReviewOverview as GArtifactReviewOverview,
   ArtifactReviewPersonStatus as GReviewerStatus,
   ArtifactOpenReview as GOpenReview,
+  ArtifactDecisionRequest as GArtifactDecisionRequest,
+  ArtifactReviewStartRequest as GArtifactReviewStartRequest,
   ArtifactDecisionRecord as GApprovalDecision,
   BoardSummary as GBoardSummary,
   BoardBriefing as GBoardBriefing,
@@ -142,6 +150,26 @@ async function unwrap<TDomain>(
     throw new AuraApiError(res.response?.status ?? 0, "empty response");
   }
   return mapper(res.data);
+}
+
+/** Extract a status + message from an SDK error response. */
+function sdkErrorMessage(error: unknown): string {
+  if (error && typeof error === "object" && "detail" in error) {
+    return String((error as { detail: unknown }).detail);
+  }
+  if (typeof error === "string") return error;
+  return JSON.stringify(error);
+}
+
+/** Variant of {@link unwrap} for endpoints that return no body (HTTP 204 / 201 unknown).
+ *  Checks for error then returns void; treats a null/undefined data as success. */
+async function unwrapVoid(
+  res: { data: unknown; error: unknown; response: Response },
+): Promise<void> {
+  if (res.error !== undefined) {
+    const status = res.response?.status ?? 0;
+    throw new AuraApiError(status, sdkErrorMessage(res.error));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -430,6 +458,46 @@ export class HeyApiAuraClient implements AuraClient {
   async getArtifactReview(id: string): Promise<ArtifactReview> {
     const res = await genGetArtifactReview({ client: this.client, path: { id } });
     return unwrap(res, mapArtifactReview);
+  }
+
+  async requestArtifactReview(id: string): Promise<void> {
+    const res = await genRequestArtifactReview({ client: this.client, path: { id } });
+    return unwrapVoid(res);
+  }
+
+  async startArtifactReview(input: StartArtifactReviewInput): Promise<void> {
+    const res = await genStartArtifactReview({
+      client: this.client,
+      path: { id: input.id },
+      body: {
+        version: input.version,
+        roles: input.roles as GArtifactReviewStartRequest["roles"],
+        userIds: input.user_ids,
+        deadline: input.deadline,
+      },
+    });
+    return unwrapVoid(res);
+  }
+
+  async submitArtifactDecision(input: SubmitArtifactDecisionInput): Promise<void> {
+    const res = await genSubmitArtifactDecision({
+      client: this.client,
+      path: { id: input.id },
+      body: {
+        version: input.version,
+        decision: input.decision as GArtifactDecisionRequest["decision"],
+      },
+    });
+    return unwrapVoid(res);
+  }
+
+  async reopenArtifactReview(id: string, version: number): Promise<void> {
+    const res = await genReopenArtifactReview({
+      client: this.client,
+      path: { id },
+      body: { version },
+    });
+    return unwrapVoid(res);
   }
 }
 

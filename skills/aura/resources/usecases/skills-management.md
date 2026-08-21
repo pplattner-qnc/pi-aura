@@ -15,11 +15,9 @@ and an import/export pipeline. These are distinct from local agent skills.
 
 | Goal | Tool |
 |---|---|
-| Search skills | `mcpUnifiedSearch` with `source_types: ["SKILL"]` |
+| Search skills | `unifiedSearch` with `source_types: ["SKILL"]` |
 | List skills | `listSkills` (paginated) |
-| Get skill detail | `mcpGetSkill` or `getSkill` |
-| List skill assets | `listSkillAssets` |
-| List skill plugins | `listSkillPlugins` |
+| Get skill detail | `getSkill` |
 
 ## Creating and editing skills
 
@@ -37,14 +35,17 @@ setSkillVisibility({ uuid: "<skill-uuid>", ... })
 
 Publish or retract a skill (owner only).
 
-## Assets
+## Assets, plugins, and import pipeline (REST-ONLY)
 
-```
-uploadSkillAsset({ uuid: "<skill-uuid>", ... })
-```
+The following skill-administration capabilities are not available via MCP —
+use REST or the Aura UI:
 
-## Import pipeline
+- **Skill assets** — `listSkillAssets` (REST-ONLY): `GET /skills/{uuid}/assets`
+- **Skill assets** — `uploadSkillAsset` (REST-ONLY): `POST /skills/{uuid}/assets`
+- **Skill plugins** — `listSkillPlugins` (REST-ONLY): `GET /skills/plugins`
+- **Import pipeline** — `validateSkillImport` (REST-ONLY): `POST /skills/import/validate`
+- **Import pipeline** — `confirmSkillImport` (REST-ONLY): `POST /skills/import/confirm`
+- **Import pipeline** — `getSkillImportRun` (REST-ONLY): `GET /skills/import/runs/{uuid}`
+- **Import pipeline** — `getActiveSkillImportRun` (REST-ONLY): `GET /skills/import/runs/active`
 
-1. `validateSkillImport` — upload a plugin ZIP, get validation results
-2. `confirmSkillImport` — confirm import of selected skills
-3. `getActiveSkillImportRun` / `getSkillImportRun` — poll import status
+See `openapi-new.yaml` for the full REST endpoint details.

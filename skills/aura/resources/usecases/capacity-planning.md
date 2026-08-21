@@ -1,44 +1,60 @@
 # Capacity Planning
 
-How to check and adjust capacity commitments in Aura via MCP tools. For the
-process rules (how capacity works, base percentages, commitment etiquette),
-see [resources/process/capacity.md](../process/capacity.md).
+How to check and adjust capacity commitments in Aura. **All capacity
+capabilities are REST-ONLY after the MCP overhaul** — none of the capacity
+MCP tools are available via the live aura-mcp-dev server. Use the REST
+endpoints in `openapi-new.yaml` or the Aura UI. For the process rules (how
+capacity works, base percentages, commitment etiquette), see
+[resources/process/capacity.md](../process/capacity.md).
 
 > **⚠️ Only adjust your own capacity.** Modifying another person's capacity
 > commitment requires **explicit consent from the user** and is generally
 > discouraged from an agent context — capacity is a personal commitment
 > between the contributor and the task owner.
 
+> **Not available via MCP.** After the aura-mcp-dev overhaul (195 → 90
+> tools), every capacity tool is gone from the MCP surface. The REST
+> endpoints still exist in `openapi-new.yaml`. Use `REST /…` (via a REST
+> client or `aura.mjs`) or the Aura UI instead.
+
 ## Checking capacity
 
 ### Your own capacity
 
+`getMyCapacity` is not available via MCP — use REST:
+
 ```
-getMyCapacity()
+GET /capacity/me
 ```
 
 Returns base capacity, committed, free, utilization, and per-task commitments.
 
 ### A specific task's member capacity
 
+`getTaskMemberCapacity` is not available via MCP — use REST:
+
 ```
-getTaskMemberCapacity({ uuid: "<task-uuid>" })
+GET /tasks/{uuid}/members/{userIdOrUuid}/capacity
 ```
 
 Cross-task view of all members' capacity on a given task.
 
 ### Leadership overview (admin/leadership only)
 
+`listLeadershipCapacity` is not available via MCP — use REST:
+
 ```
-listLeadershipCapacity({ limit: 20, page: 1 })
+GET /capacity/leadership
 ```
 
 Paginated overview of all team members' capacity.
 
 ### Company base capacity
 
+`getCapacitySettings` is not available via MCP — use REST:
+
 ```
-getCapacitySettings()
+GET /capacity/settings
 ```
 
 Returns the company-wide base capacity percentage (e.g. 80%).
@@ -47,11 +63,11 @@ Returns the company-wide base capacity percentage (e.g. 80%).
 
 ### Your commitment on a task
 
+`updateTaskMemberCapacity` is not available via MCP — use REST:
+
 ```
-updateTaskMemberCapacity({
-  uuid: "<task-uuid>",
-  capacity_percent: 30
-})
+PATCH /tasks/{uuid}/members/{userIdOrUuid}/capacity
+  { "capacity_percent": 30 }
 ```
 
 Sets your capacity commitment for a specific task. Remember: this is a real
@@ -60,19 +76,22 @@ the rules on base capacity, structural reserve, and shifting between tasks.
 
 ### Participation status
 
+`updateTaskMemberParticipation` is not available via MCP — use REST:
+
 ```
-updateTaskMemberParticipation({
-  uuid: "<task-uuid>",
-  status: "ACTIVE"     // ACTIVE | WAITING | OBSERVING
-})
+PATCH /tasks/{uuid}/members/{userIdOrUuid}/participation
+  { "status": "ACTIVE" }   // ACTIVE | WAITING | OBSERVING
 ```
 
 Updates your participation status on a task.
 
 ### Company base capacity (admin only)
 
+`updateCapacitySettings` is not available via MCP — use REST:
+
 ```
-updateCapacitySettings({ base_percent: 80 })
+PATCH /capacity/settings
+  { "base_percent": 80 }
 ```
 
 Changes the company-wide default. **Requires admin role and explicit user
@@ -80,10 +99,15 @@ consent.**
 
 ## Typical workflow
 
-1. Check current state: `getMyCapacity()`
+> The steps below previously called `getMyCapacity` (not available via MCP)
+> and `updateTaskMemberCapacity` (not available via MCP) as MCP tools.
+> These are now REST/UI, not MCP — use the REST endpoints above or the
+> Aura UI.
+
+1. Check current state: `GET /capacity/me` (REST) — not available via MCP
 2. Identify what needs to change (over-committed? new task? finishing one?)
-3. Adjust: `updateTaskMemberCapacity({ uuid, capacity_percent })`
-4. Verify: `getMyCapacity()` again to confirm
+3. Adjust: `PATCH /tasks/{uuid}/members/{userIdOrUuid}/capacity` (REST) — not available via MCP
+4. Verify: `GET /capacity/me` again to confirm
 
 ## Key rules (summary)
 

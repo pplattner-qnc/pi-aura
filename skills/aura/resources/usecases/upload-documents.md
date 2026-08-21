@@ -50,7 +50,7 @@ mcpLinkUploadToTask({ id: "<task-uuid>", upload_id: "<upload-uuid>" })
 ## Searching uploads
 
 ```
-mcpUnifiedSearch({ query: "...", source_types: ["UPLOAD_DOCUMENT"] })
+unifiedSearch({ query: "...", source_types: ["UPLOAD_DOCUMENT"] })
 ```
 
 ## Forbidden MCP tools
