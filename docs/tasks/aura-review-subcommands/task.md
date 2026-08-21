@@ -128,3 +128,34 @@ references become truthful.
   would silently swallow a 4xx/5xx whose error shape `@hey-api/client-fetch`
   does not populate into `res.error`. Low risk (the SDK populates `error` on
   non-2xx), but noted.
+
+### slice: wire-aura-mjs-review-subcommands (landed)
+
+- Wired all 6 `artifact review-*` subcommands into `scripts/src/aura.ts`
+  under the existing `artifact` group, each calling its `AuraClient` verb via
+  the client constructed once at the top of `main()` (`createDefaultAuraClient()`,
+  line ~406) and passed to each handler — exactly the existing pattern used by
+  `artifact get`/`wiki`.
+- New helpers: `parseCsv` (comma→trimmed array) for `--roles`/`--user-ids`,
+  plus dedicated async functions `reviewGet`/`reviewApprovals`/`reviewRequest`/
+  `reviewStart`/`reviewDecide`/`reviewReopen` for the summaries.
+- Arg parsing matches the slice spec: `--version` validated with
+  `Number.isFinite`; `--roles`/`--user-ids` via `parseCsv`; `--deadline`
+  optional string; `--decision` validated APPROVED|REJECTED case-insensitively
+  (`.toUpperCase()`). Missing required flags / `<id>` → `fail(..., true)` →
+  exit 2 (usage). Verb errors propagate to the top-level catch → exit 1.
+- `USAGE` lists all 6 subcommands (lines 48–53).
+- Diff purely additive: `git diff HEAD~1 HEAD` on `scripts/src/aura.ts` shows
+  0 deleted lines (527 insertions across the 3 files: `aura.ts` + the two
+  rebuilt `dist/*.mjs` bundles).
+- `cd scripts && npm run typecheck && npm run build` green; the built
+  `skills/aura/dist/aura.mjs` bundle contains all 6 `case "review-*"` branches
+  (grep verified). `packages/shared` `npm test` still green (23/23).
+
+**Divergence — `review-reopen` requires `--version`:** as documented in slice
+  1's notes (the REST contract requires `version` in the reopen request body),
+  the `review-reopen` subcommand requires `--version V`; the USAGE string
+  reflects `artifact review-reopen <id> --version V`. The salvaged doc example
+  `artifact review-reopen <artifact-uuid>` should be updated to
+  `artifact review-reopen <artifact-uuid> --version <version>` — deferred to
+  the dependent task per the slice's doc-edit constraints.
