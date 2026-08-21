@@ -1,3 +1,3 @@
 task: aura-review-subcommands
-slice: add-review-verbs-to-aura-client
+slice: verify-and-build
 task_status: open
