@@ -27,7 +27,7 @@ All paths are relative to this skill directory.
 | **AI foundation file map** — plain-language map of every steering file/folder | `resources/guides/ai-foundation-file-map.md` |
 | **Blueprint manifest** — every building block with install target, checksum, version | `resources/blueprint/manifest.yaml` |
 | **House rules** (Cursor `.mdc`) — the 15 included rules (tracker-aura ignored) | `resources/rules/*.mdc` |
-| **Blueprint skills** (verbatim) — the 14 task-lifecycle + ai-setup/sync skills | `resources/blueprint/skills/<name>/SKILL.md` |
+| **Blueprint skills** (pi-adapted) — the 14 task-lifecycle + ai-setup/sync skills | `resources/blueprint/skills/<name>/SKILL.md` |
 
 ## How to use it
 
@@ -49,10 +49,11 @@ pattern as the `aura` skill.
 
 ## Rules are reference, not enforced here
 
-The `.mdc` rule files under `resources/rules/` are carried verbatim from the
-wiki. They are Cursor rule files (frontmatter: `alwaysApply` / `globs`); in a pi
-context they are **reference material this skill surfaces on demand**, not
-auto-attached guardrails. The `engineering-rules` extension (see
+The `.mdc` rule files under `resources/rules/` are the pi-adapted versions of
+the wiki's Cursor rules (frontmatter/disposition adapted to what pi's
+`engineering-rules` extension expects, Cursor-specific body edges stripped).
+In a pi context they are **reference material this skill surfaces on demand**,
+not auto-attached guardrails. The `engineering-rules` extension (see
 `extensions/engineering-rules.ts`) is what makes the always-on / glob / manual
 dispositions active in pi; this skill's job is to let the agent read the rule
 body when relevant.
@@ -61,15 +62,17 @@ The `tracker-aura` rule is **ignored** (this repo talks to Aura via the `aura`
 skill / REST client, not via task-lifecycle skills reading an AGENTS.md → Tracker
 adapter) — do not load or surface it.
 
-## Blueprint skills are Cursor-flavoured reference
+## Blueprint skills are pi-adapted
 
-The 14 `SKILL.md` files under `resources/blueprint/skills/<name>/` are carried
-verbatim. They are written for the anwalt.de Cursor/IDE workflow — they reference
-`AskQuestion`, `SwitchMode`, `CreatePlan`, `AGENTS.md` keys, Jira project `ANW`,
-Bitbucket, `task verify`, worktrees, `fork-db`. Treat them as the canonical
-source the adapted pi skills (under `skills/engineering-workflow/<name>/SKILL.md`,
-produced by the `adapt-blueprint-skills` task) are derived from — **not** as
-invokable pi skills themselves.
+The 14 `SKILL.md` files under `resources/blueprint/skills/<name>/` are the
+pi-adapted versions of the anwalt.de house skills. The sync skill authored
+the adaptation from the wiki's Cursor/IDE-flavoured source — rewriting the
+Cursor-specific edges (`AskQuestion` → `ask_user_question`, `SwitchMode` →
+dropped, `CreatePlan` → dropped, `AGENTS.md` key lookups → read the target
+repo's `AGENTS.md`) while keeping the substantive body verbatim and the
+anwalt.de Jira/Bitbucket/`task`/worktree/`fork-db` assumptions (those MCPs are
+or will be installed). The manifest tracks both the wiki's `sourceSha256`
+and the local `adaptedSha256`.
 
 ## Freshness
 

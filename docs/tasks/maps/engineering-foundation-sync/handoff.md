@@ -44,11 +44,17 @@ in full — it is the source of truth. Summary of the run shape:
      `skills/engineering-workflow/resources/` (15+1 rules, 4 guides, 2
      workflow, INDEX, Log, blueprint manifest, 14 blueprint skills, 4
      task-untangle `.ts` companions). ~43 items total.
-3. **Reconcile** each `*.NEW_REMOTE.*` cluster (you are the mergetool):
-   - **Verbatim copies** (guides, workflow, INDEX, Log, blueprint manifest,
-     14 blueprint skill SKILL.mds, the 15 included rules): create the plain
-     local file (`c.md` / `c.mdc`) from the `NEW_REMOTE` content, **but do
-     NOT delete the diff files** — keep `*.NEW_REMOTE.*` (and any
+3. **Reconcile** each `*.NEW_REMOTE.*` cluster (you are the mergetool —
+   **you adapt every file, including on the first seed**; no verbatim copies
+   are kept, a verbatim Cursor file is useless here):
+   - **Adapt each file** (guides, workflow, INDEX, Log, blueprint manifest,
+     14 blueprint skill SKILL.mds, the 15 included rules): write the plain
+     local file (`c.md` / `c.mdc`) at the same path as the `NEW_REMOTE`,
+     starting from the `NEW_REMOTE` body and applying the pi adaptations the
+     skill describes (`AskQuestion`→`ask_user_question`, `SwitchMode`→drop,
+     `CreatePlan`→drop, `AGENTS.md` lookups→read the target repo's `AGENTS.md`;
+     keep the anwalt.de Jira/Bitbucket/`task`/worktree/`fork-db` assumptions).
+     **Do NOT delete the diff files** — keep `*.NEW_REMOTE.*` (and any
      `*.OLD_REMOTE.*` / `*.CURRENT.*`) in place for the user to review.
    - **`tracker-aura`** (doesn't belong in this repo): do not create the
      local `.mdc`. Write a tombstone

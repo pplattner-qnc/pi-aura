@@ -123,7 +123,7 @@ three-way files and don't trigger the refusal.
 5. **Save** `.pi/engineering-foundation.json`; **delete** the fetch report.
 
 The division of labor: **you** delete the `NEW_REMOTE`/`OLD_REMOTE`/`CURRENT`
-diff files for the verbatim/edited items after approval; **`finish`** deletes
+diff files for the reconciled items after approval; **`finish`** deletes
 the `.IGNORE` tombstone + its paired `NEW_REMOTE`. Run `finish` only after your
 deletion pass, so the gate sees a tree with only the plain names + the
 `.IGNORE` pair.
@@ -139,9 +139,11 @@ You do **not** choose where a reconciled file lives — `fetch` already decided
 it. Every diff file is written **at the plain file's eventual path, with the
 suffix marker in its name**: `c.NEW_REMOTE.md` sits in the directory `c.md`
 should occupy, `c.OLD_REMOTE.md` and `c.CURRENT.md` likewise. So reconciling
-an add is literally: copy `c.NEW_REMOTE.<ext>` to `c.<ext>` **in the same
-directory** (strip the `.NEW_REMOTE` marker); reconciling an edit is: write the
-new `c.md` at the same path `c.CURRENT.md` already sits.
+an add means: write the adapted `c.<ext>` at the same path as
+`c.NEW_REMOTE.<ext>` (same directory, plain name), starting from the
+`NEW_REMOTE` body and applying the pi adaptations; reconciling an edit means:
+write the new adapted `c.md` at the same path `c.CURRENT.md` already sits,
+porting the prior adaptations onto the new `NEW_REMOTE` body.
 
 The target path is the `localPath` `fetch` recorded in
 `.pi/engineering-sync-fetch-report.json` (read it — it's the authoritative map
@@ -174,25 +176,51 @@ making the content work with the pi agent (stripping/rewriting
 Cursor-specific edges like AskQuestion/SwitchMode/CreatePlan, `AGENTS.md`
 key lookups); it is **not** a content change.
 
-### First seed vs steady-state sync — they are different
+### First seed vs steady-state sync — same adaptation, different inputs
 
-The reconcile step splits by run type. **Read which one you are in before you
-start reconciling** — the skill's generic "apply pi adaptations" clause is
-right for a steady-state sync and wrong for a first seed.
+**You adapt on every run, including a first seed.** A verbatim Cursor file
+is useless in this repo — the whole point of mirroring is to make the content
+work with the pi agent. There are no verbatim copies kept on disk; every
+reconciled file is the pi-adapted version. The manifest still records the
+wiki's `sourceSha256` (from the fetch report) so the drift gate can detect
+wiki changes, but no verbatim file sits next to the adapted one.
 
 **Initial seeding (empty manifest, all items are adds — no `CURRENT` exists):**
-copy each `NEW_REMOTE` verbatim to the plain name (`c.md`/`c.mdc`). **Do not
-adapt.** Adaptation is a whole separate task (`adapt-blueprint-skills`, which
-produces pi skills elsewhere under `skills/engineering-workflow/<name>/SKILL.md`);
-the verbatim source files under `resources/blueprint/` are what that task adapts
-*from*. Seeding them verbatim is the point. This is also what the
-`engineering-workflow` router SKILL.md says it consumes ("carried verbatim").
+start from `NEW_REMOTE` (the wiki's current body) and author the pi
+adaptations onto it. There is no `CURRENT` to carry forward from, so you are
+authoring the adaptations fresh. See "What adaptation means" below for the
+concrete edits.
 
 **Steady-state sync (manifest exists, a changed item has `OLD_REMOTE` +
 `NEW_REMOTE` + `CURRENT`):** produce `c.md` = `NEW_REMOTE` body + the
 pi-adaptations carried in `CURRENT` (port them forward onto the new wiki body).
-This is the only time you adapt — you are preserving prior adaptations against
-a new wiki version, not authoring new ones.
+You are preserving prior adaptations against a new wiki version.
+
+### What adaptation means (concrete, every run)
+
+Adaptation is **only** for making the content work with the pi agent; it is
+**not** a content change to the substantive body (workflow steps, quality bars,
+anti-patterns, checklists stay verbatim). The Cursor-specific edges to rewrite:
+
+- `AskQuestion` → pi's `ask_user_question` tool (note the 2–4 options
+  constraint, the 16-char `header` limit, the reserved "Type something." row).
+- `SwitchMode` (Cursor plan/normal mode) → drop or replace with the pi
+  equivalent if one exists (the agent works in normal mode; no plan-mode shim
+  needed unless the skill relies on it — record the decision per skill).
+- `CreatePlan` → drop (pi has no plan-creation tool; the skill's plan output
+  becomes a chat block).
+- `AGENTS.md` key lookups (`Merge target branch`, `Worktree root`,
+  `Stack-token derivation`, `Test commands`, etc.) → keep the *concept* but
+  instruct the agent to read the target repo's `AGENTS.md` (which the anwalt.de
+  repos have) rather than assume a pi-side register.
+- Keep the anwalt.de Jira/Bitbucket/`task`/worktree/`fork-db` assumptions
+  (those MCPs are or will be installed); only the *tool-call shape* is adapted.
+- Each adapted blueprint skill's `description` must make clear it targets the
+  anwalt.de engineering workflow (so it's not invoked outside that context).
+- For `.mdc` rules: adapt the frontmatter/disposition to what pi's
+  `engineering-rules` extension expects (see the extension), and strip any
+  Cursor-specific body edges. The rules have no separate verbatim role —
+  the adapted `.mdc` under `resources/rules/` is the only copy.
 
 ### Reconcile + verify, then gate on the user
 
@@ -238,6 +266,13 @@ inventory:
 - **Diff files retained** — the `*.NEW_REMOTE.*` (and `*.OLD_REMOTE.*` /
   `*.CURRENT.*` if any) are all still on disk; none were deleted ahead of the
   gate.
+- **Adaptation applied (not byte-identical)** — every reconciled file is the
+  pi-adapted version, **not** a verbatim copy of `NEW_REMOTE`. For each file,
+  `diff` against its `NEW_REMOTE` source should show the Cursor-specific edges
+  rewritten per "What adaptation means" and the substantive body unchanged.
+  Flag any file that is byte-identical to its `NEW_REMOTE` (un-adapted) — that
+  is a miss, not a success. (The `finish` manifest will record these with
+  `adaptedSha256` set, since the local sha differs from `sourceSha256`.)
 
 ## Ignoring an item (the `.IGNORE` tombstone)
 
@@ -268,11 +303,11 @@ remove it) and re-run `fetch`.
 
 The first `fetch` with an empty/absent manifest treats every file as "new"
 (`NEW_REMOTE_*` for all items — nothing is skipped, since there are no
-`ignored` flags yet); you copy each `c.md` **verbatim** from its `NEW_REMOTE`
-(see "First seed vs steady-state sync" above — do not adapt on a first seed),
-and for items you want to ignore (e.g. `tracker-aura`) you write a `.IGNORE`
-tombstone instead. Then `finish` seeds the manifest. There is no `init`
-subcommand. This is noisy on first run by design.
+`ignored` flags yet); you adapt each `c.md` from its `NEW_REMOTE` (see "First
+seed vs steady-state sync" — adaptation happens on the first seed too, there
+are no verbatim copies), and for items you want to ignore (e.g. `tracker-aura`)
+you write a `.IGNORE` tombstone instead. Then `finish` seeds the manifest.
+There is no `init` subcommand. This is noisy on first run by design.
 
 **Authored-router gotcha:** on the first seed, no `SKILL.NEW_REMOTE.md` is
 staged for the `engineering-workflow` router. `surfaceAuthoredDiff` only stages
