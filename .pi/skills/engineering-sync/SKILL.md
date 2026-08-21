@@ -222,6 +222,18 @@ anti-patterns, checklists stay verbatim). The Cursor-specific edges to rewrite:
   Cursor-specific body edges. The rules have no separate verbatim role —
   the adapted `.mdc` under `resources/rules/` is the only copy.
 
+**Pattern registry (mandatory, append-only).** The catalog of
+ Cursor/Cline-runtime patterns already encountered and how to adapt them to
+ pi lives at `.pi/skills/engineering-sync/resources/cursor-to-pi-patterns.md`.
+ Read it before you start reconciling — it is the accumulated memory of what
+ the edges look like and how they were handled, so the run adapts consistently
+ instead of re-deciding from scratch. When you find a Cursor/Cline-runtime tool
+ or primitive in a fetched file, check the registry first: if the pattern is
+ there, apply the recorded adaptation; if it isn't, adapt it per the rules
+ above **and append a new entry to the registry** (source shape, pi-adapted
+ shape, rationale, where it was found). The registry is append-only and ships
+ with the skill — it grows over runs.
+
 ### Reconcile + verify, then gate on the user
 
 1. Write the reconciled result back to `c.md` (the plain name, no suffix),
