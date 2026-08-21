@@ -87,3 +87,44 @@ references become truthful.
   review-* dispatch.
 - Manual smoke test (user, needs live PAT): `node skills/aura/dist/aura.mjs
   artifact review-get <real-id>` prints review state.
+
+## Implementation notes
+
+### slice: add-review-verbs-to-aura-client (landed)
+
+- Added 4 new review/approval verbs to the `AuraClient` interface and
+  `HeyApiAuraClient` implementation (`requestArtifactReview`,
+  `startArtifactReview`, `submitArtifactDecision`, `reopenArtifactReview`).
+  `getArtifactReview` and `getArtifactApprovals` were already implemented on
+  main from the `openapi-spec-bump` slice; only 4 verbs were new. Tests cover
+  all 6 for completeness.
+- New expressive domain input types added to `aura-client.ts`:
+  `ReviewerRole`, `StartArtifactReviewInput`,
+  `SubmitArtifactDecisionInput` — no generated types leak into the public
+  interface (generated types are aliased `G*` and used only at cast
+  boundaries inside `hey-api-aura-client.ts`).
+- `hey-api-aura-client.ts` extracts `sdkErrorMessage` + `unwrapVoid` helpers
+  to handle the 204/void endpoints without duplicating the error-check logic.
+- Unit tests in `packages/shared/test/review-verbs.test.ts` (+529, new) mock
+  the generated SDK via `mock.method` on the injected `@hey-api/client-fetch`
+  Client instance (intercepts `.get`/`.post`). 23 tests pass.
+
+**Divergence — `reopenArtifactReview` signature:** the slice doc's verb↔REST
+  table listed `reopenArtifactReview(id): Promise<void>` (only `id`). The
+  generated SDK method `reopenArtifactReview` requires
+  `body: ArtifactReviewVersionRequest` (`{ version: number }`), and
+  `openapi.yaml` confirms `POST /artifacts/{id}/review-reopen` has a
+  **required** requestBody of type `ArtifactReviewVersionRequest` with
+  `version` required (the server needs the version to know which review run
+  to reopen). The interface was widened to
+  `reopenArtifactReview(id: string, version: number): Promise<void>` to
+  match the actual REST contract. **Slice 2 (wire the `aura.mjs` subcommand)
+  must add a `--version` flag to `review-reopen` and pass it through**, and the
+  salvaged doc example `artifact review-reopen <artifact-uuid>` should be
+  updated to `artifact review-reopen <artifact-uuid> --version <version>`.
+
+**Residual risk:** `unwrapVoid` treats `res.error === undefined` as success
+  and does not inspect `res.data`; correct for 201-with-body/204 endpoints, but
+  would silently swallow a 4xx/5xx whose error shape `@hey-api/client-fetch`
+  does not populate into `res.error`. Low risk (the SDK populates `error` on
+  non-2xx), but noted.

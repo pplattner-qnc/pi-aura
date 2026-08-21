@@ -4,7 +4,7 @@ slug: add-review-verbs-to-aura-client
 title: Add the 6 review/approval verbs to AuraClient + HeyApiAuraClient impl + tests
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: l
 blocked_by: []
 ---
