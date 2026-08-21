@@ -133,6 +133,38 @@ finishing.
 
 ## How to reconcile (the agent is the mergetool)
 
+### Where files go (the path is decided by `fetch`, not by you)
+
+You do **not** choose where a reconciled file lives — `fetch` already decided
+it. Every diff file is written **at the plain file's eventual path, with the
+suffix marker in its name**: `c.NEW_REMOTE.md` sits in the directory `c.md`
+should occupy, `c.OLD_REMOTE.md` and `c.CURRENT.md` likewise. So reconciling
+an add is literally: copy `c.NEW_REMOTE.<ext>` to `c.<ext>` **in the same
+directory** (strip the `.NEW_REMOTE` marker); reconciling an edit is: write the
+new `c.md` at the same path `c.CURRENT.md` already sits.
+
+The target path is the `localPath` `fetch` recorded in
+`.pi/engineering-sync-fetch-report.json` (read it — it's the authoritative map
+of wiki item → repo path). The path rule `fetch` uses, so you know what to
+expect:
+
+- **Blueprint files** (fetched via `getBlueprintFiles`, keyed by blueprint
+  path) → `skills/engineering-workflow/resources/blueprint/<path>` preserving
+  the wiki's tree, **except rules**, which go to
+  `skills/engineering-workflow/resources/rules/<name>.mdc` (flat, one dir).
+- **Wiki documents** (fetched via the knowledge tree, keyed by node uuid) →
+  mapped from the node's full slug path: top-level `index`/`log` →
+  `resources/INDEX.md`/`resources/Log.md`; `guides/<x>` →
+  `resources/guides/<x>.md`; `workflow/<x>` → `resources/workflow/<x>.md`.
+- **Authored router** (`skills/engineering-workflow/SKILL.md`) — no diff on a
+  first seed (see the gotcha below); on a steady-state sync a structural change
+  stages `SKILL.NEW_REMOTE.md` + `SKILL.CURRENT.md` next to the router.
+
+If a diff file lands somewhere the `engineering-workflow` router's routing
+table doesn't expect, **do not move it** — that's a `fetch` path-mapping bug;
+surface it in the inventory and stop, rather than papering over it with a
+hand-move (the manifest's `localPath` would then disagree with the file).
+
 For each three-way cluster, the goal is: given `OLD_REMOTE` (old wiki) +
 `NEW_REMOTE` (new wiki) + `CURRENT` (our pi-adapted version), produce the new
 `c.md` = "new wiki + our pi adaptations". The adaptation is **only** for
