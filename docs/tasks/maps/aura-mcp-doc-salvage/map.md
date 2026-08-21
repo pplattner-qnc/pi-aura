@@ -2,10 +2,10 @@
 kind: map
 slug: aura-mcp-doc-salvage
 title: Salvage the aura-mcp-overhaul docs onto current main + re-implement the review CLI on AuraClient
-status: active
+status: complete
 tasks:
-  - openapi-spec-bump
-  - aura-review-subcommands
+- openapi-spec-bump
+- aura-review-subcommands
 ---
 
 ## Destination
