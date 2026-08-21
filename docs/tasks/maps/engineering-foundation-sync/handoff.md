@@ -1,138 +1,142 @@
-# Handoff — engineering-foundation-sync map (run the seeding)
+# Handoff — engineering-foundation-sync map (run the seeding, v2)
 
 > **Read this first.** You are picking up the `engineering-foundation-sync`
-> map in the `pi-aura` repo. The two Level-0 build tasks are **done**; what
-> remains is the **manual seeding run** (done by the user, in this session),
-> then the adaptation task (blocked on the seeding). This file gives you the
-> context to continue cleanly. **Do not re-derive the design** — it's all in
-> the task docs; read those, don't re-grill the user.
->
-> **Start by reading the map**: `docs/tasks/maps/engineering-foundation-sync/map.md`
-> (destination, constraints, decisions-so-far, fog). Then this handoff. Then
-> the seed task doc.
+> map in the `pi-aura` repo to run the **`seed-engineering-mirror`** manual
+> task. A previous session (call it v1) built the sync skill, attempted the
+> seeding, found and fixed bugs in the sync utility + shared client, then —
+> at the user's direction — discarded the seeding **results** and kept only
+> the **fixes** (commit `a325425`). You are re-doing the seeding on top of
+> those fixes, now with a stricter, user-review-gated flow. **Do not
+> re-derive the design** — it's all in the task docs; read those, don't
+> re-grill the user.
 
 ## TL;DR — where things stand
 
 **Goal of the map:** mirror the `engineering-foundation` Aura wiki space into
 `pi-aura` as a first-class engineering canon, surfaced by a pi skill
 (`engineering-workflow`), kept fresh by a package-author-only sync skill
-(`engineering-sync`) with a three-way reconciliation flow + drift gate.
+(`engineering-sync`).
 
-**Task status (read with `task_list`):**
+**What's done and committed:**
+- All Level-0 build tasks (design, skills move, `engineering-workflow` skill,
+  `engineering-sync` skill + CLI, `engineering-rules` extension) — commit
+  `d83a5a5`.
+- The sync-utility/client fixes from the v1 seeding attempt — commit
+  `a325425` (HEAD). See "Fixes already on `main`" below.
 
-| Task | Status | Notes |
-|---|---|---|
-| `blueprint-skills-and-sync-design` (grilling) | ✅ done | Design in its task doc |
-| `cursor-rules-incorporation` (grilling) | ✅ done | Design in its task doc |
-| `move-skills-to-core` (feature) | ✅ done | `skills/aura*` → `skills/core/aura*`, path refs updated |
-| `engineering-workflow-skill` (feature) | ✅ done | Router SKILL.md + empty `.gitkeep`'d `resources/` skeleton |
-| `engineering-sync-skill` (feature) | ✅ done | Sync skill + CLI utility built; `.IGNORE` tombstone flow added |
-| `engineering-rules-extension` (feature) | ✅ done | Extension; manifest-driven ignore (no hardcoding) |
-| `seed-engineering-mirror` (manual) | ⏳ **NEXT** | **Run by the user in this session** — see below |
-| `adapt-blueprint-skills` (feature) | ⏳ ready (Level 1) | Blocked on the seeding |
+**What's NOT done (your job):** the seeding run itself. v1 produced a
+fully-seeded mirror (43 resources + `.pi/engineering-foundation.json`) but
+the user chose to discard it and re-do it under the new flow. The working
+tree is clean except for a stray, unrelated `stacked-branch-pattern.md`.
 
-**Dependency graph** (`task_dependency_levels engineering-foundation-sync`):
+## The flow you MUST follow (this changed after v1)
 
-```
-Level 0 (ready):   seed-engineering-mirror   (manual — USER, this session)
-                          │
-                          ▼
-Level 1:           adapt-blueprint-skills
-```
+The `engineering-sync` skill now mandates a **live change-inventory file**
+and a **user-review gate before `finish`**. Read `.pi/skills/engineering-sync/SKILL.md`
+in full — it is the source of truth. Summary of the run shape:
 
-**Remaining count:** 2 tasks (1 manual by the user, 1 feature blocked on it).
+1. **Start the inventory immediately.** Create `.pi/engineering-sync-inventory.md`
+   and append to it **as you work** — every file you open, read, run, or
+   change (source fixes, generated bundles, files read but untouched, files
+   created by the run). Do NOT reconstruct it from memory at the end.
+2. **`fetch`** — `node .pi/skills/engineering-sync/dist/engineering-sync.mjs fetch`
+   - With an empty manifest, every item is staged as `*.NEW_REMOTE.*` under
+     `skills/engineering-workflow/resources/` (15+1 rules, 4 guides, 2
+     workflow, INDEX, Log, blueprint manifest, 14 blueprint skills, 4
+     task-untangle `.ts` companions). ~43 items total.
+3. **Reconcile** each `*.NEW_REMOTE.*` cluster (you are the mergetool):
+   - **Verbatim copies** (guides, workflow, INDEX, Log, blueprint manifest,
+     14 blueprint skill SKILL.mds, the 15 included rules): create the plain
+     local file (`c.md` / `c.mdc`) from the `NEW_REMOTE` content, **but do
+     NOT delete the diff files** — keep `*.NEW_REMOTE.*` (and any
+     `*.OLD_REMOTE.*` / `*.CURRENT.*`) in place for the user to review.
+   - **`tracker-aura`** (doesn't belong in this repo): do not create the
+     local `.mdc`. Write a tombstone
+     `skills/engineering-workflow/resources/rules/tracker-aura.IGNORE` whose
+     content is the ignore reason. Leave its `NEW_REMOTE` in place.
+   - **`engineering-workflow` SKILL.md router** (authored file): reconcile
+     its routing table against the fetched `INDEX.md` structure if a
+     `SKILL.NEW_REMOTE.md` was staged (on the first run it may not be — see
+     "The authored-router gotcha" below).
+4. **Ask the user to review.** Do NOT run `finish`, and do NOT delete any
+   diff files, until the user explicitly approves the inventory + the
+   reconciled mirror. Use `ask_user_question` or just stop and present it.
+5. **After the user approves**, delete all diff files for every cluster
+   (`*.OLD_REMOTE.*`, `*.NEW_REMOTE.*`, `*.CURRENT.*`), then run `finish`.
+   - `finish` refuses (exit 1) if any diff files remain. `.IGNORE`
+     tombstones are consumed (not refused). On success it writes
+     `.pi/engineering-foundation.json` (the drift manifest, with
+     `tracker-aura` recorded as `ignored: true`).
+6. **Verify** — `find skills/engineering-workflow/resources -type f` lists
+   the expected files (15 rules with tracker-aura absent; 4 guides; 2
+   workflow; INDEX; Log; blueprint/manifest.yaml; 14 blueprint skills + 4
+   task-untangle companions). Spot-check 2–3 sha256s vs `manifest.yaml`.
+   Confirm `find ... -name '*.OLD_REMOTE.*' -o -name '*.NEW_REMOTE.*' -o
+   -name '*.CURRENT.*' -o -name '*.IGNORE'` returns nothing.
 
-## ⚠️ Before starting — commit the build work
+### The authored-router gotcha (v1 found this)
 
-The two done feature tasks are **not yet committed**. The next session must
-start from a clean tree. First:
+`surfaceAuthoredDiff` only stages a `SKILL.NEW_REMOTE.md` for the router when
+an authored manifest entry **already exists**. On the first run there is no
+entry, so nothing is staged for the router and `finish` bootstraps the
+authored entry itself (with the current wiki structure signature). This is
+expected — the router is committed as-is (it was already reconciled against
+the INDEX during the build). You likely won't touch the router on the first
+seeding; just let `finish` bootstrap it.
 
-```bash
-cd /home/pplattner/.pi/agent/git/github.com/pplattner-qnc/pi-aura
-git add -A
-git commit -m "engineering-sync skill + engineering-rules extension (Level-0 build)"
-```
+## Fixes already on `main` (v1 found these — you should NOT need to re-fix)
 
-This commits:
-- `packages/shared/src/aura-client.ts` + `hey-api-aura-client.ts` — two new
-  client verbs (`getBlueprintFiles`, `getKnowledgeNodeVersion`) + enriched
-  `mapKnowledgeNode` (surfaces `updated_at`/`body_hash`).
-- `packages/shared/test/blueprint-version-verbs.test.ts` — 7 new tests.
-- `scripts/src/engineering-sync.ts` — the sync CLI (fetch/finish/status +
-  `.IGNORE` tombstone flow). Bundled to
-  `.pi/skills/engineering-sync/dist/engineering-sync.mjs`.
-- `scripts/esbuild.config.mjs`, `scripts/package.json` (js-yaml dep),
-  `scripts/tsconfig.json` (exclude `*.test.ts`), `Makefile` (new dist target).
-- `.pi/skills/engineering-sync/SKILL.md` — package-author-only skill doc.
-- `extensions/engineering-rules.ts` + `.test.ts` — frontmatter dispatch +
-  universal `@mention` + manifest-driven ignore. Registered in
-  `package.json` `pi.extensions`.
+Commit `a325425` fixed the sync utility + shared client so `fetch` enumerates
+the full wiki. If `fetch` now stages ~43 items on the first run, the fixes are
+working. If it stages only a handful or 403s, something regressed — check
+these (all in `a325425`):
 
-## The next task: `seed-engineering-mirror` (manual)
+- `packages/shared/src/hey-api-aura-client.ts` — `mapKnowledgeNode` maps
+  nested `children` recursively (the REST wiki tree is nested; without this
+  `guides/*` and `workflow/*` are invisible).
+- `scripts/src/engineering-sync.ts`:
+  - `getBlueprintFiles` called with full `blueprint/manifest.yaml` (bare
+    `manifest.yaml` → 403).
+  - `parseBlueprintManifest` reads `entries:` + nested `files:` per dir.
+  - `fetchWikiItems` recurses nested `children`.
+  - `wikiNodeToLocalPath` uses full slug-path chain; `index`/`log` →
+    `INDEX.md`/`Log.md`.
+  - `blueprintPathToLocal` routes rules → `resources/rules/`.
+  - `finish` gate excludes a `NEW_REMOTE` paired with an `.IGNORE` tombstone;
+    stem extraction strips `.NEW_REMOTE`.
+  - `fetchBlueprintItems` respects `ignored` (so tracker-aura isn't
+    re-staged after the first run); authored router entry bootstrapped on
+    first seeding.
+  - Authored-router structure signature uses nested slug paths.
 
-Read `docs/tasks/seed-engineering-mirror/task.md` in full — it has the exact
-steps + evidence checklist. Summary:
+**Do not re-fix these unless a regression test fails.** If `fetch` works,
+skip straight to reconcile + the user-review gate.
 
-### Prereqs to verify first
+## ⚠️ Prerequisites to verify first
 
 - `node .pi/skills/engineering-sync/dist/engineering-sync.mjs status` runs
   (prints "manifest is empty or absent (initial seeding not yet run)").
-- The Aura REST client + keyring PAT is configured (same path as the `aura`
-  skill): `~/.pi/agent/settings.json` has `aura.baseUrl`, and the OS keyring
-  has an Aura PAT (`/aura secrets discover` if not).
+- The Aura REST client + keyring PAT is configured: `~/.pi/agent/settings.json`
+  has `aura.baseUrl`, and the OS keyring has an Aura PAT (`/aura secrets
+  discover` if not). v1 verified both.
+- `cd scripts && npm run build` produces
+  `.pi/skills/engineering-sync/dist/engineering-sync.mjs` (already built at
+  HEAD `a325425`).
 
-### The manual step (the agent is the mergetool)
+## How to run things
 
-1. **`fetch`** — `node .pi/skills/engineering-sync/dist/engineering-sync.mjs fetch`
-   - With an empty manifest, **every** wiki item is staged as `*.NEW_REMOTE.*`
-     under `skills/engineering-workflow/resources/` (15+1 rules, guides,
-     workflow, INDEX, Log, blueprint manifest, 14 blueprint skills). Nothing
-     is skipped on the first fetch — there are no `ignored` flags yet.
-2. **Reconcile** each `*.NEW_REMOTE.*` cluster (you, the agent, are the
-   mergetool):
-   - **Verbatim copies** (guides, workflow, INDEX, Log, blueprint manifest,
-     14 blueprint skill SKILL.mds, the 15 included rules): create the plain
-     local file (`c.md` / `c.mdc`) from the `NEW_REMOTE` content, then delete
-     the `NEW_REMOTE` file.
-   - **`tracker-aura`** (doesn't belong in this repo): do **not** create the
-     local `.mdc`. Instead write a tombstone
-     `skills/engineering-workflow/resources/rules/tracker-aura.IGNORE` whose
-     content is the ignore reason (e.g. "this repo talks to Aura via the aura
-     skill / REST client"). Leave its `NEW_REMOTE` in place — `finish`
-     consumes both.
-   - **`engineering-workflow` SKILL.md router** (authored file): reconcile its
-     routing table against the fetched `INDEX.md` structure (the sync surfaces
-     a structure digest for this).
-3. **`finish`** — `node .pi/skills/engineering-sync/dist/engineering-sync.mjs finish`
-   - Refuses (exit 1, prints list) if any `*.OLD_REMOTE.*` / `*.NEW_REMOTE.*`
-     / `*.CURRENT.*` remain. `.IGNORE` tombstones are consumed (not refused).
-   - On success: writes `.pi/engineering-foundation.json` (the drift
-     manifest, with `tracker-aura` recorded as `ignored: true`).
-4. **Verify** — `find skills/engineering-workflow/resources -type f` lists
-   the expected files (15 rules, tracker-aura absent; 4 guides; 2 workflow;
-   INDEX; Log; blueprint/manifest.yaml; 14 blueprint skills). Spot-check 2–3
-   sha256s vs `manifest.yaml`. Confirm
-   `find ... -name '*.OLD_REMOTE.*' -o -name '*.NEW_REMOTE.*' -o -name '*.CURRENT.*' -o -name '*.IGNORE'`
-   returns nothing.
+- The sync CLI: `node .pi/skills/engineering-sync/dist/engineering-sync.mjs {fetch|finish|status}`.
+- Build (if needed): `cd scripts && npm run build`. Typecheck: `cd scripts && npm run typecheck`.
+- Tests: `cd packages/shared && npm test` (30 tests);
+  `node_modules/.bin/tsx scripts/src/engineering-sync.test.ts` (from repo root).
 
-### Mark it done
+## Mark it done (after the user approves + finish succeeds)
 
-- Set `seed-engineering-mirror` status to `done` in its task doc frontmatter.
-- Commit the seeded mirror + the new `.pi/engineering-foundation.json`.
+- Set `seed-engineering-mirror` status to `done` in its task doc frontmatter
+  (`docs/tasks/seed-engineering-mirror/task.md`).
+- Commit the seeded mirror + `.pi/engineering-foundation.json` (keep the
+  `.pi/engineering-sync-inventory.md` too — it's the run's audit trail).
 - `adapt-blueprint-skills` then unblocks (Level 1).
-
-## How the `.IGNORE` + manifest-driven ignore works (no hardcoding)
-
-- The sync utility has **no hardcoded rule names**. `tracker-aura` gets
-  ignored solely because the agent writes a `tracker-aura.IGNORE` tombstone
-  during seeding, which `finish` records as `ignored: true` in the manifest.
-- The `engineering-rules` extension derives its ignored set **only** from
-  `.pi/engineering-foundation.json`'s `ignored: true` flags — no hardcoded
-  skip. If the manifest is absent/empty (before seeding), the extension
-  loads all rules (it no-ops if the rules dir is empty).
-- Both sides read the same manifest, so ignore decisions live in one place.
-- On later `fetch` runs, items already marked `ignored: true` are skipped
-  (not re-staged).
 
 ## What you do NOT do
 
@@ -140,35 +144,26 @@ steps + evidence checklist. Summary:
   docs + the map's Decisions/Fog. If something seems undecided, read those.
 - **Do not hand-transcribe wiki content** into `resources/`. The sync
   utility's `fetch` is the only sha256-verified path.
+- **Do not delete diff files or run `finish` before the user approves.**
+  This is the new hard rule.
 - **Do not touch `skills/core/aura/resources/process/`** — unrelated canon.
 - **Do not change `package.json` `pi.skills`** — single recursive entry.
-
-## How to run things
-
-- Build (if needed): `cd scripts && npm run build` (or `make build` if make
-  is installed — not on NixOS). Typecheck: `cd scripts && npm run typecheck`.
-- Tests: `cd packages/shared && npm test` (30 tests); `node --experimental-strip-types extensions/engineering-rules.test.ts`; `node_modules/.bin/tsx scripts/src/engineering-sync.test.ts` (from repo root).
-- The sync CLI: `node .pi/skills/engineering-sync/dist/engineering-sync.mjs {fetch|finish|status}`.
 
 ## Quick orientation commands
 
 ```bash
-# task statuses
-task_list (kind: task)
-
 # the map + graph
 cat docs/tasks/maps/engineering-foundation-sync/map.md
 task_dependency_levels engineering-foundation-sync
-task_frontier engineering-foundation-sync
 
 # the task doc to run
 cat docs/tasks/seed-engineering-mirror/task.md
 
-# the two grilling docs (full design context) if needed
-cat docs/tasks/blueprint-skills-and-sync-design/task.md
-cat docs/tasks/cursor-rules-incorporation/task.md
-
-# the built sync skill + its docs
+# the skill (source of truth for the flow)
 cat .pi/skills/engineering-sync/SKILL.md
+
+# verify clean start
+git log --oneline -2          # expect d83a5a5 (build) + a325425 (fixes)
+git status --short            # expect only ?? stacked-branch-pattern.md
 node .pi/skills/engineering-sync/dist/engineering-sync.mjs status
 ```
