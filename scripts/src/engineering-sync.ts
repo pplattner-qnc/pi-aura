@@ -1013,13 +1013,106 @@ function renameSyncSafe(from: string, to: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// mv subcommand — relocate a reconciled file + its diff files, record the move
+// ---------------------------------------------------------------------------
+
+/** The fetch report's enriched `items[]` entry shape (what `finish` reads). */
+interface ReportItem {
+  key: string;
+  source: "blueprint" | "wiki-doc";
+  localPath: string;
+  remoteSha256?: string;
+  auraChecksumOrVersion?: string;
+  auraUpdatedAt?: string;
+  kind?: string;
+  slug?: string;
+}
+
+/** All on-disk files that belong to one reconciled item: the plain name plus
+ *  its three diff variants plus an optional `.IGNORE` tombstone. Returns the
+ *  ones that exist. */
+function itemFiles(localAbs: string): string[] {
+  const candidates = [
+    localAbs,
+    suffixed(localAbs, OLD_REMOTE_SUFFIX),
+    suffixed(localAbs, NEW_REMOTE_SUFFIX),
+    suffixed(localAbs, CURRENT_SUFFIX),
+    // The .IGNORE tombstone has no extension: <stem>.IGNORE
+    join(dirname(localAbs), basename(localAbs).replace(/\.[^.]+$/, "") + IGNORE_SUFFIX),
+  ];
+  return candidates.filter((p) => existsSync(p));
+}
+
+/** `mv <from> <to>` — move a reconciled file (plain name + any diff variants
+ *  + a paired .IGNORE tombstone) to a new repo-relative path, and record the
+ *  new path in the fetch report so `finish` maps the item there. Use this when
+ *  the path `fetch` chose is wrong (e.g. a layout decision changed after the
+ *  fetch). Both paths are repo-relative.
+ *
+ *  What it moves: c.md, c.OLD_REMOTE.md, c.NEW_REMOTE.md, c.CURRENT.md, and
+ *  c.IGNORE (whichever exist). What it updates: the fetch report's
+ *  `items[].localPath` for the item whose localPath matched <from> (matched by
+ *  path; if no match, refuses — run `mv` only against a staged item). It does
+ *  NOT touch the committed manifest (that's `finish`'s job).
+ *
+ *  After `mv`, the diff files are at the new path; reconcile/verify/finish as
+ *  usual — `finish` reads the updated localPath from the report. */
+async function mvCmd(fromRel: string, toRel: string): Promise<void> {
+  if (!fromRel || !toRel) fail("mv needs two repo-relative paths: <from> <to>", 2);
+  const fromAbs = resolve(REPO_ROOT, fromRel);
+  const toAbs = resolve(REPO_ROOT, toRel);
+  if (!existsSync(fromAbs)) fail(`source not found: ${fromRel}`, 1);
+  if (hasSuffix(fromAbs)) fail(`source must be the plain name (no .OLD_REMOTE/.NEW_REMOTE/.CURRENT/.IGNORE suffix); got ${fromRel}`, 2);
+  if (resolve(dirname(toAbs)) === resolve(dirname(fromAbs)) && basename(toAbs) === basename(fromAbs)) {
+    fail("source and destination are the same path", 2);
+  }
+
+  // 1. Move every existing file belonging to this item (plain + diff + tombstone).
+  const moved = itemFiles(fromAbs);
+  if (moved.length === 0) fail(`no files found to move for ${fromRel}`, 1);
+  for (const f of moved) {
+    const isTombstone = f.endsWith(IGNORE_SUFFIX);
+    const target = isTombstone
+      ? join(dirname(toAbs), basename(toAbs).replace(/\.[^.]+$/, "") + IGNORE_SUFFIX)
+      : suffixed(toAbs, hasSuffix(f) ?? "");
+    renameSyncSafe(f, target);
+    info(`mv ${relative(REPO_ROOT, f)} -> ${relative(REPO_ROOT, target)}`);
+  }
+
+  // 2. Record the new path in the fetch report so finish maps the item there.
+  const reportPath = join(REPO_ROOT, ".pi", "engineering-sync-fetch-report.json");
+  if (!existsSync(reportPath)) {
+    info("warning: no fetch report found; move done on disk but not recorded for finish");
+    info("         (run `fetch` first, or finish will not know the new path)");
+    return;
+  }
+  const report = JSON.parse(readFileSync(reportPath, "utf8")) as FetchReport & { items?: ReportItem[] };
+  const items = report.items ?? [];
+  // Match the item whose localPath is the source. (If several, the first — a
+  // path collision across two wiki items is itself a bug worth surfacing.)
+  let matched: ReportItem | undefined;
+  for (const it of items) {
+    if (it.localPath === fromRel) { matched = it; break; }
+  }
+  if (!matched) {
+    info(`warning: no fetch-report item has localPath ${fromRel}; move done on disk but not recorded`);
+    info("         (was the path already moved, or not staged by this fetch?)");
+    return;
+  }
+  matched.localPath = toRel;
+  writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+  info(`recorded move in ${relative(REPO_ROOT, reportPath)}: ${matched.key} -> ${toRel}`);
+}
+
+// ---------------------------------------------------------------------------
 // arg parsing + dispatch
 // ---------------------------------------------------------------------------
 
 const USAGE = `Usage:
   node engineering-sync.mjs fetch     stage three-way files + new-hashes report
   node engineering-sync.mjs finish     gate (refuse on unresolved), then update manifest
-  node engineering-sync.mjs status     read-only drift summary`;
+  node engineering-sync.mjs status     read-only drift summary
+  node engineering-sync.mjs mv <from> <to>   move a reconciled file + its diff files + .IGNORE tombstone to a new repo-relative path; records the move in the fetch report for finish`;
 
 async function main(): Promise<void> {
   const sub = process.argv[2];
@@ -1028,6 +1121,7 @@ async function main(): Promise<void> {
       case "fetch": await fetchCmd(); return;
       case "finish": await finishCmd(); return;
       case "status": await statusCmd(); return;
+      case "mv": await mvCmd(process.argv[3], process.argv[4]); return;
       default:
       console.error(USAGE);
       fail(sub ? `unknown subcommand "${sub}"` : "missing subcommand", 2);

@@ -5565,10 +5565,63 @@ function renameSyncSafe(from, to) {
   rmSync(to, { force: true });
   renameSync(from, to);
 }
+function itemFiles(localAbs) {
+  const candidates = [
+    localAbs,
+    suffixed(localAbs, OLD_REMOTE_SUFFIX),
+    suffixed(localAbs, NEW_REMOTE_SUFFIX),
+    suffixed(localAbs, CURRENT_SUFFIX),
+    // The .IGNORE tombstone has no extension: <stem>.IGNORE
+    join3(dirname2(localAbs), basename(localAbs).replace(/\.[^.]+$/, "") + IGNORE_SUFFIX)
+  ];
+  return candidates.filter((p) => existsSync3(p));
+}
+async function mvCmd(fromRel, toRel) {
+  if (!fromRel || !toRel) fail("mv needs two repo-relative paths: <from> <to>", 2);
+  const fromAbs = resolve(REPO_ROOT, fromRel);
+  const toAbs = resolve(REPO_ROOT, toRel);
+  if (!existsSync3(fromAbs)) fail(`source not found: ${fromRel}`, 1);
+  if (hasSuffix(fromAbs)) fail(`source must be the plain name (no .OLD_REMOTE/.NEW_REMOTE/.CURRENT/.IGNORE suffix); got ${fromRel}`, 2);
+  if (resolve(dirname2(toAbs)) === resolve(dirname2(fromAbs)) && basename(toAbs) === basename(fromAbs)) {
+    fail("source and destination are the same path", 2);
+  }
+  const moved = itemFiles(fromAbs);
+  if (moved.length === 0) fail(`no files found to move for ${fromRel}`, 1);
+  for (const f of moved) {
+    const isTombstone = f.endsWith(IGNORE_SUFFIX);
+    const target = isTombstone ? join3(dirname2(toAbs), basename(toAbs).replace(/\.[^.]+$/, "") + IGNORE_SUFFIX) : suffixed(toAbs, hasSuffix(f) ?? "");
+    renameSyncSafe(f, target);
+    info(`mv ${relative(REPO_ROOT, f)} -> ${relative(REPO_ROOT, target)}`);
+  }
+  const reportPath = join3(REPO_ROOT, ".pi", "engineering-sync-fetch-report.json");
+  if (!existsSync3(reportPath)) {
+    info("warning: no fetch report found; move done on disk but not recorded for finish");
+    info("         (run `fetch` first, or finish will not know the new path)");
+    return;
+  }
+  const report = JSON.parse(readFileSync2(reportPath, "utf8"));
+  const items = report.items ?? [];
+  let matched;
+  for (const it of items) {
+    if (it.localPath === fromRel) {
+      matched = it;
+      break;
+    }
+  }
+  if (!matched) {
+    info(`warning: no fetch-report item has localPath ${fromRel}; move done on disk but not recorded`);
+    info("         (was the path already moved, or not staged by this fetch?)");
+    return;
+  }
+  matched.localPath = toRel;
+  writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+  info(`recorded move in ${relative(REPO_ROOT, reportPath)}: ${matched.key} -> ${toRel}`);
+}
 var USAGE = `Usage:
   node engineering-sync.mjs fetch     stage three-way files + new-hashes report
   node engineering-sync.mjs finish     gate (refuse on unresolved), then update manifest
-  node engineering-sync.mjs status     read-only drift summary`;
+  node engineering-sync.mjs status     read-only drift summary
+  node engineering-sync.mjs mv <from> <to>   move a reconciled file + its diff files + .IGNORE tombstone to a new repo-relative path; records the move in the fetch report for finish`;
 async function main() {
   const sub = process.argv[2];
   try {
@@ -5581,6 +5634,9 @@ async function main() {
         return;
       case "status":
         await statusCmd();
+        return;
+      case "mv":
+        await mvCmd(process.argv[3], process.argv[4]);
         return;
       default:
         console.error(USAGE);

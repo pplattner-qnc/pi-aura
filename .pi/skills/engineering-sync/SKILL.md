@@ -145,25 +145,27 @@ new `c.md` at the same path `c.CURRENT.md` already sits.
 
 The target path is the `localPath` `fetch` recorded in
 `.pi/engineering-sync-fetch-report.json` (read it — it's the authoritative map
-of wiki item → repo path). The path rule `fetch` uses, so you know what to
-expect:
+of wiki item → repo path). The wiki-dir → repo-dir mapping `fetch` uses:
 
-- **Blueprint files** (fetched via `getBlueprintFiles`, keyed by blueprint
-  path) → `skills/engineering-workflow/resources/blueprint/<path>` preserving
-  the wiki's tree, **except rules**, which go to
-  `skills/engineering-workflow/resources/rules/<name>.mdc` (flat, one dir).
-- **Wiki documents** (fetched via the knowledge tree, keyed by node uuid) →
-  mapped from the node's full slug path: top-level `index`/`log` →
-  `resources/INDEX.md`/`resources/Log.md`; `guides/<x>` →
-  `resources/guides/<x>.md`; `workflow/<x>` → `resources/workflow/<x>.md`.
-- **Authored router** (`skills/engineering-workflow/SKILL.md`) — no diff on a
-  first seed (see the gotcha below); on a steady-state sync a structural change
-  stages `SKILL.NEW_REMOTE.md` + `SKILL.CURRENT.md` next to the router.
+| Wiki source | Repo destination |
+|---|---|
+| `blueprint/manifest.yaml` | `skills/engineering-workflow/resources/blueprint/manifest.yaml` |
+| `blueprint/skills/<name>/SKILL.md` (+ companion `.ts`) | `skills/engineering-workflow/resources/blueprint/skills/<name>/SKILL.md` (+ the `.ts`) |
+| `blueprint/rules/<name>.mdc` | `skills/engineering-workflow/resources/rules/<name>.mdc` (flat, one dir) |
+| `index` (top-level doc) | `skills/engineering-workflow/resources/INDEX.md` |
+| `log` (top-level doc) | `skills/engineering-workflow/resources/Log.md` |
+| `guides/<slug>` | `skills/engineering-workflow/resources/guides/<slug>.md` |
+| `workflow/<slug>` | `skills/engineering-workflow/resources/workflow/<slug>.md` |
+| `skills/engineering-workflow/SKILL.md` (authored router) | untouched on first seed; diff staged next to it on a structural sync |
 
-If a diff file lands somewhere the `engineering-workflow` router's routing
-table doesn't expect, **do not move it** — that's a `fetch` path-mapping bug;
-surface it in the inventory and stop, rather than papering over it with a
-hand-move (the manifest's `localPath` would then disagree with the file).
+Blueprint files are keyed by their blueprint path; wiki documents are keyed
+by node uuid but placed by their full slug path. Anything else `fetch` staged
+that isn't in this table is unexpected — surface it in the inventory and stop.
+
+If a diff file lands somewhere this table (or the router's routing table)
+doesn't expect, **do not hand-move it with `cp`/`mv`** — use the `mv`
+subcommand below so the manifest's `localPath` stays consistent, or surface
+it as a `fetch` path-mapping bug and stop.
 
 For each three-way cluster, the goal is: given `OLD_REMOTE` (old wiki) +
 `NEW_REMOTE` (new wiki) + `CURRENT` (our pi-adapted version), produce the new
@@ -340,6 +342,44 @@ node .pi/skills/engineering-sync/dist/engineering-sync.mjs status
 Prints whether the manifest is seeded, whether any three-way files are
 unresolved, and entry counts by disposition (verbatim / adapted / authored
 / ignored). No network calls.
+
+## `mv` — relocate a reconciled file (fix a wrong path)
+
+```bash
+node .pi/skills/engineering-sync/dist/engineering-sync.mjs mv <from-rel> <to-rel>
+```
+
+Moves a reconciled file **and all its diff variants** (the plain name +
+`*.OLD_REMOTE.*` + `*.NEW_REMOTE.*` + `*.CURRENT.*` + a paired `.IGNORE`
+tombstone, whichever exist) from one repo-relative path to another, and
+records the new path in the fetch report so `finish` maps the item there.
+
+Use it when `fetch` placed an item at a path you want to change (e.g. a layout
+decision changed after the fetch, or the wiki-dir → repo-dir table above shows
+it landed wrong). **Do not hand-move with `cp`/`mv` + `rm`** — the manifest's
+`localPath` would then disagree with the file, and `finish` would record the
+old path. `mv` keeps them consistent.
+
+- `<from-rel>` must be the **plain name** (no `.OLD_REMOTE`/`.NEW_REMOTE`/
+  `.CURRENT`/`.IGNORE` suffix) and must exist. Both paths are repo-relative.
+- It moves every existing file belonging to that item (plain + the 3 diff
+  variants + the `.IGNORE` tombstone) to the new path's directory, preserving
+  each suffix.
+- It updates the fetch report's `items[].localPath` for the matching item.
+  If no fetch report exists or no item matches `<from-rel>`, the on-disk move
+  still happens but a warning is printed (run `fetch` first so there's a report).
+- It does **not** touch the committed manifest — that's `finish`'s job. After
+  `mv`, reconcile/verify/`finish` as usual; `finish` reads the updated
+  `localPath` from the report.
+
+Example: `fetch` put a rule under `resources/blueprint/rules/foo.mdc` but the
+table says rules go to `resources/rules/`. Fix it:
+
+```bash
+node .pi/skills/engineering-sync/dist/engineering-sync.mjs mv \
+  skills/engineering-workflow/resources/blueprint/rules/foo.mdc \
+  skills/engineering-workflow/resources/rules/foo.mdc
+```
 
 ## Auth
 
