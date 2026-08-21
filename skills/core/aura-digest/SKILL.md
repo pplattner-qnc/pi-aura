@@ -44,7 +44,7 @@ between `fetch` and `render`.
 ## Prerequisites
 
 The script source lives in `scripts/src/` (shared with future scripts) and is
-bundled by esbuild into `skills/aura-digest/dist/aura-digest.mjs`. The compiled `.mjs`
+bundled by esbuild into `skills/core/aura-digest/dist/aura-digest.mjs`. The compiled `.mjs`
 file is committed, so end users of the pi package don't need to build — but in
 development, rebuild after editing `scripts/src/`:
 
@@ -240,11 +240,11 @@ The versioned shape passed from fetch → orchestrator → render. See
 Run from the repo root via `make`:
 
 - `make typecheck` — TypeScript type-check (no emit)
-- `make build` — esbuild bundle to `skills/aura-digest/dist/aura-digest.mjs`
+- `make build` — esbuild bundle to `skills/core/aura-digest/dist/aura-digest.mjs`
 - `make watch` — rebuild on change
 - `make clean` — remove `scripts/node_modules` + built `dist/`
 - Test the renderer with a saved fixture:
-  `node skills/aura-digest/dist/aura-digest.mjs render <dir-with-digest.json>`
+  `node skills/core/aura-digest/dist/aura-digest.mjs render <dir-with-digest.json>`
 
 The script is plain ESM. `fetch` uses the `@modelcontextprotocol/sdk`
 `StreamableHTTPClientTransport` with the bearer token from `mcp.json` passed

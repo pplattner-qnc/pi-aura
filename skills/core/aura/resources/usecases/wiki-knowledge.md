@@ -18,8 +18,8 @@ searchKnowledge({ query: "deployment pipeline", space_slug: "engineering", limit
 Via `aura.mjs` (inline results — search returns small summaries, safe on stdout):
 
 ```bash
-node skills/aura/dist/aura.mjs wiki search "capacity management" --limit 5
-node skills/aura/dist/aura.mjs wiki search "deployment pipeline" --space engineering --limit 5
+node skills/core/aura/dist/aura.mjs wiki search "capacity management" --limit 5
+node skills/core/aura/dist/aura.mjs wiki search "deployment pipeline" --space engineering --limit 5
 ```
 
 Hybrid search combining literal (German full-text + trigram fallback) and
@@ -31,7 +31,7 @@ readable spaces.
 Via `aura.mjs` (workdir model — keeps the body out of LLM context):
 
 ```bash
-WD=$(node skills/aura/dist/aura.mjs wiki get --slug "knowledge-hub/prozesse/how-we-work-in-aura-a-practical-guide" | sed -n 's/^workdir: //p' | sed 's|/$||')
+WD=$(node skills/core/aura/dist/aura.mjs wiki get --slug "knowledge-hub/prozesse/how-we-work-in-aura-a-practical-guide" | sed -n 's/^workdir: //p' | sed 's|/$||')
 # body is at $WD/body.md; id/version at $WD/meta.json
 ```
 
@@ -56,7 +56,7 @@ getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "prozesse/how-we-work-in-a
 Via `aura.mjs`:
 
 ```bash
-node skills/aura/dist/aura.mjs wiki tree --slug "knowledge-hub"
+node skills/core/aura/dist/aura.mjs wiki tree --slug "knowledge-hub"
 ```
 
 ### Cross-entity search
@@ -88,14 +88,14 @@ knowledge spaces.
 
 ```bash
 # Step 1: Create the node (prints the new node uuid)
-node skills/aura/dist/aura.mjs wiki create \
+node skills/core/aura/dist/aura.mjs wiki create \
   --space engineering --title "Authentication Overview" --slug auth-overview
 
 # Step 2: Write the body to a local file, then fetch-into-workdir + edit + save
 # (use the returned uuid to fetch a workdir, write body.md, then save)
-WD=$(node skills/aura/dist/aura.mjs wiki get --uuid "<node-uuid>" | sed -n 's/^workdir: //p' | sed 's|/$||')
+WD=$(node skills/core/aura/dist/aura.mjs wiki get --uuid "<node-uuid>" | sed -n 's/^workdir: //p' | sed 's|/$||')
 write({ path: "$WD/body.md", content: "# Authentication Overview\n\n..." })
-node skills/aura/dist/aura.mjs wiki save "$WD" --summary "Initial version"
+node skills/core/aura/dist/aura.mjs wiki save "$WD" --summary "Initial version"
 ```
 
 **Via MCP (only for small bodies):**
@@ -134,14 +134,14 @@ createKnowledgeNode({
 
 ```bash
 # Step 1: Download current version into a fresh workdir
-WD=$(node skills/aura/dist/aura.mjs wiki get --uuid "<node-uuid>" | sed -n 's/^workdir: //p' | sed 's|/$||')
+WD=$(node skills/core/aura/dist/aura.mjs wiki get --uuid "<node-uuid>" | sed -n 's/^workdir: //p' | sed 's|/$||')
 
 # Step 2: Edit the body locally (only diffs flow through context)
 read({ path: "$WD/body.md" })
 edit({ path: "$WD/body.md", edits: [...] })
 
 # Step 3: Upload; the script reads id+body from the workdir and removes it
-node skills/aura/dist/aura.mjs wiki save "$WD" --summary "Description of changes"
+node skills/core/aura/dist/aura.mjs wiki save "$WD" --summary "Description of changes"
 ```
 
 The workdir is gone after upload — no stale local file can linger. To edit

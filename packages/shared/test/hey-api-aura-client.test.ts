@@ -41,11 +41,13 @@ describe("HeyApiAuraClient", () => {
   it("implements AuraClient (structural check)", () => {
     const keyring = new FakeKeyring("test-pat-123");
     const client = new HeyApiAuraClient({ keyring, baseUrl: "https://example.com/api" });
-    // Structural check: all 25 methods exist (21 original + 4 new review verbs).
+    // Structural check: all 27 methods exist (21 original + 4 review verbs + 2
+    // blueprint/version verbs added by engineering-sync-skill).
     const methods = [
       "getArtifact", "mcpCreateArtifact", "mcpUpdateArtifact", "listArtifacts",
       "getKnowledgeNode", "getKnowledgeNodeByPath", "saveKnowledgeNodeBody",
       "mcpWikiSearch", "getKnowledgeTree", "createKnowledgeNode",
+      "getBlueprintFiles", "getKnowledgeNodeVersion",
       "mcpCreateUploadDocument", "mcpGetUploadDocument",
       "getBoardBriefing", "getBoardSummary",
       "listNotifications", "getMyPriorityQueue", "getMyCapacity",

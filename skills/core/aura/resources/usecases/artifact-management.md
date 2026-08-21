@@ -67,7 +67,7 @@ write({ path: "/tmp/artifact-body.md", content: "# Full document..." })
 removes the body file on success.
 
 ```bash
-node skills/aura/dist/aura.mjs artifact create \
+node skills/core/aura/dist/aura.mjs artifact create \
   --title "Authentication Redesign Plan" \
   --kind PLAN \
   --body-file /tmp/artifact-body.md \
@@ -96,7 +96,7 @@ mcpUpdateArtifact({
 prints the workdir path (holding `body.md` + `meta.json` with the id + version).
 
 ```bash
-WD=$(node skills/aura/dist/aura.mjs artifact get <artifact-uuid> | sed -n 's/^workdir: //p' | sed 's|/$||')
+WD=$(node skills/core/aura/dist/aura.mjs artifact get <artifact-uuid> | sed -n 's/^workdir: //p' | sed 's|/$||')
 ```
 
 **Step 2:** Edit the body file locally with `read` and `edit` (only diffs
@@ -111,7 +111,7 @@ edit({ path: "$WD/body.md", edits: [...] })
 from `meta.json` + the body from `body.md`, uploads, and removes the workdir.
 
 ```bash
-node skills/aura/dist/aura.mjs artifact update "$WD" --summary "Description of changes"
+node skills/core/aura/dist/aura.mjs artifact update "$WD" --summary "Description of changes"
 ```
 
 The workdir is gone after upload — no stale local file can linger. To edit
@@ -152,25 +152,25 @@ the shared `restClient`.
 
 ```bash
 # 1. Request a review
-node skills/aura/dist/aura.mjs artifact review-request <artifact-uuid>
+node skills/core/aura/dist/aura.mjs artifact review-request <artifact-uuid>
 
 # 2. Check review status (compact: version, per-reviewer status, deadline, initiator)
-node skills/aura/dist/aura.mjs artifact review-get <artifact-uuid>
+node skills/core/aura/dist/aura.mjs artifact review-get <artifact-uuid>
 
 # 3. Submit a decision (APPROVED or REJECTED, version-bound, idempotent)
-node skills/aura/dist/aura.mjs artifact review-decide <artifact-uuid> \
+node skills/core/aura/dist/aura.mjs artifact review-decide <artifact-uuid> \
   --version <version> --decision APPROVED
 
 # 4. Start a formal review (assign roles + reviewers + optional deadline)
-node skills/aura/dist/aura.mjs artifact review-start <artifact-uuid> \
+node skills/core/aura/dist/aura.mjs artifact review-start <artifact-uuid> \
   --version <version> --roles <role1,role2> --user-ids <user1,user2> \
   --deadline <iso-deadline>
 
 # 5. Reopen an approved review
-node skills/aura/dist/aura.mjs artifact review-reopen <artifact-uuid> --version <version>
+node skills/core/aura/dist/aura.mjs artifact review-reopen <artifact-uuid> --version <version>
 
 # 6. Check approval status (decisions + decided/total counts)
-node skills/aura/dist/aura.mjs artifact review-approvals <artifact-uuid>
+node skills/core/aura/dist/aura.mjs artifact review-approvals <artifact-uuid>
 ```
 
 ## Access control

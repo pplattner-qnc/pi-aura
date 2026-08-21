@@ -15,11 +15,12 @@
 
 SCRIPTS_DIR := scripts
 SHARED_DIR   := packages/shared
-DIGEST_DIST := skills/aura-digest/dist
-AURA_DIST    := skills/aura/dist
+DIGEST_DIST := skills/core/aura-digest/dist
+AURA_DIST    := skills/core/aura/dist
+SYNC_DIST    := .pi/skills/engineering-sync/dist
 OPENAPI_DIR  := $(SHARED_DIR)/openapi
 GEN_DIR      := $(SHARED_DIR)/src/generated
-ENTRY_OUTS   := $(DIGEST_DIST)/aura-digest.mjs $(AURA_DIST)/aura.mjs
+ENTRY_OUTS   := $(DIGEST_DIST)/aura-digest.mjs $(AURA_DIST)/aura.mjs $(SYNC_DIST)/engineering-sync.mjs
 
 .PHONY: all install typecheck build clean watch codegen
 
@@ -52,4 +53,4 @@ watch:
 
 clean:
 	rm -rf $(SCRIPTS_DIR)/node_modules $(SCRIPTS_DIR)/package-lock.json
-	rm -rf $(GEN_DIR) $(DIGEST_DIST) $(AURA_DIST)
+	rm -rf $(GEN_DIR) $(DIGEST_DIST) $(AURA_DIST) $(SYNC_DIST)

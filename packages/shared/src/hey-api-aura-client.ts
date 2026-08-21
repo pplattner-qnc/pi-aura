@@ -21,6 +21,7 @@ import type {
   ArtifactList,
   ArtifactListItem,
   ArtifactReview,
+  BlueprintFile,
   BoardBriefing,
   BoardSummary,
   Capacity,
@@ -28,7 +29,10 @@ import type {
   CreateArtifactInput,
   CreateKnowledgeNodeInput,
   CreateUploadDocumentInput,
+  GetBlueprintFilesInput,
+  GetBlueprintFilesResult,
   KnowledgeNode,
+  KnowledgeNodeVersion,
   KnowledgeTree,
   Notification,
   NotificationList,
@@ -55,10 +59,12 @@ import {
   listArtifacts as genListArtifacts,
   getKnowledgeNode as genGetKnowledgeNode,
   getKnowledgeNodeByPath as genGetKnowledgeNodeByPath,
+  getKnowledgeNodeVersion as genGetKnowledgeNodeVersion,
   saveKnowledgeNodeBody as genSaveKnowledgeNodeBody,
   mcpWikiSearch as genMcpWikiSearch,
   getKnowledgeTree as genGetKnowledgeTree,
   createKnowledgeNode as genCreateKnowledgeNode,
+  getBlueprintFiles as genGetBlueprintFiles,
   mcpCreateUploadDocument as genMcpCreateUploadDocument,
   mcpGetUploadDocument as genMcpGetUploadDocument,
   getBoardBriefing as genGetBoardBriefing,
@@ -88,12 +94,14 @@ import type {
   ArtifactDecisionRequest as GArtifactDecisionRequest,
   ArtifactReviewStartRequest as GArtifactReviewStartRequest,
   ArtifactDecisionRecord as GApprovalDecision,
+  BlueprintFile as GBlueprintFile,
   BoardSummary as GBoardSummary,
   BoardBriefing as GBoardBriefing,
   CapacityPersonal as GCapacityPersonal,
   CapacityTaskCommitment as GCapacityTaskCommitment,
   KnowledgeNode as GKnowledgeNode,
   KnowledgeTree as GKnowledgeTree,
+  KnowledgeVersion as GKnowledgeVersion,
   McpUploadDocumentDetail as GUploadDocument,
   McpWikiSearchResponse as GWikiSearchResponse,
   MyPriorityItem as GMyPriorityItem,
@@ -361,6 +369,60 @@ export class HeyApiAuraClient implements AuraClient {
     return unwrap(res, mapKnowledgeNode);
   }
 
+  async getBlueprintFiles(input: GetBlueprintFilesInput): Promise<GetBlueprintFilesResult> {
+    const res = await genGetBlueprintFiles({
+      client: this.client,
+      query: { path: input.path, version: input.version },
+    });
+    if (res.error !== undefined) {
+      const status = res.response?.status ?? 0;
+      throw new AuraApiError(status, sdkErrorMessage(res.error));
+    }
+    const g = (res.data ?? {}) as { ok?: boolean; files?: GBlueprintFile[]; error?: { code: string; detail: string } };
+    // The endpoint returns ok:false with an error body on NOT_FOUND / FORBIDDEN;
+    // surface that as a thrown error so callers can distinguish from an empty
+    // file list (ok:true, files:[]).
+    if (g.ok === false && g.error) {
+      throw new AuraApiError(0, `${g.error.code}: ${g.error.detail}`);
+    }
+    const files = (g.files ?? []).map((f): BlueprintFile => ({
+      path: f.path,
+      filename: f.filename,
+      encoding: f.encoding,
+      content: f.content,
+      checksum: f.checksum,
+      version: f.version,
+      provenance: {
+        created_by_user_id: f.provenance.created_by_user_id,
+        source_commit_sha: f.provenance.source_commit_sha,
+      },
+    }));
+    return {
+      ok: g.ok ?? true,
+      files,
+      error: g.error,
+    };
+  }
+
+  async getKnowledgeNodeVersion(uuid: string, version: number): Promise<KnowledgeNodeVersion> {
+    const res = await genGetKnowledgeNodeVersion({
+      client: this.client,
+      path: { uuid, version },
+    });
+    return unwrap(res, (d) => {
+      const g = d as GKnowledgeVersion;
+      return {
+        id: g.id,
+        node_id: g.node_id,
+        version: g.version,
+        body: g.body,
+        summary: g.summary ?? null,
+        created_by_user_id: g.created_by_user_id,
+        created_at: g.created_at,
+      };
+    });
+  }
+
   // -------------------------------------------------------------------------
   // Upload documents
   // -------------------------------------------------------------------------
@@ -557,7 +619,12 @@ function mapKnowledgeNode(d: unknown): KnowledgeNode {
     slug: g.slug,
     latest_version: g.latest_version,
     body: g.body,
-  };
+    // Surface the provenance Aura carries on every node (used by the
+    // engineering-sync manifest); kept off the named interface via the index
+    // signature so callers opt in explicitly.
+    updated_at: g.updated_at,
+    body_hash: g.body_hash,
+  } as KnowledgeNode;
 }
 
 function mapUploadDocument(d: unknown): UploadDocument {

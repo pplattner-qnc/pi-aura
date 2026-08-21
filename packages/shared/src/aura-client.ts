@@ -383,6 +383,57 @@ export interface SubmitArtifactDecisionInput {
 }
 
 // ---------------------------------------------------------------------------
+// Blueprint files (house blueprint under engineering-foundation)
+// ---------------------------------------------------------------------------
+
+/** One file from the house blueprint (path under blueprint/ only).
+ * `content` is utf8 or base64 per `encoding`; `checksum` is `sha256:<hex>`
+ * over the raw bytes; `version` is the blueprint file version (integer). */
+export interface BlueprintFile {
+  /** Canonical slug path, lowercased (e.g. `blueprint/skills/ai-setup/skill.md`). */
+  path: string;
+  /** Verbatim upload name to write to disk (e.g. `SKILL.md`). */
+  filename: string;
+  encoding: "utf8" | "base64";
+  content: string;
+  /** SHA-256 over the raw bytes, prefixed `sha256:`. */
+  checksum: string;
+  version: number;
+  provenance: {
+    created_by_user_id: number | null;
+    source_commit_sha: string | null;
+  };
+}
+
+export interface GetBlueprintFilesInput {
+  /** Slash-separated path under blueprint/ (file or skill directory). */
+  path: string;
+  /** Optional version pointer — `sha256:<hex>` checksum or integer latest_version. */
+  version?: string;
+}
+
+export interface GetBlueprintFilesResult {
+  ok: boolean;
+  files: BlueprintFile[];
+  error?: { code: string; detail: string };
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge node versions (for OLD_REMOTE reconstruction)
+// ---------------------------------------------------------------------------
+
+/** A specific historical version of a DOCUMENT node's body. */
+export interface KnowledgeNodeVersion {
+  id: string;
+  node_id: string;
+  version: number;
+  body: string;
+  summary: string | null;
+  created_by_user_id: number | null;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // AuraClient interface — the ~21 exercised verbs
 // ---------------------------------------------------------------------------
 
@@ -406,6 +457,14 @@ export interface AuraClient {
   mcpWikiSearch(input: WikiSearchInput): Promise<WikiSearchResult>;
   getKnowledgeTree(spaceSlug: string): Promise<KnowledgeTree>;
   createKnowledgeNode(input: CreateKnowledgeNodeInput): Promise<KnowledgeNode>;
+  /** Fetch one file or every file in a skill directory from the house
+   *  blueprint (engineering-foundation, path under blueprint/ only). Pass an
+   *  optional `version` pin (sha256 checksum or integer version) to fetch a
+   *  specific revision; omit for current. */
+  getBlueprintFiles(input: GetBlueprintFilesInput): Promise<GetBlueprintFilesResult>;
+  /** Get a specific (historical or current) version of a DOCUMENT node's
+   *  body. `version` is the integer version number. */
+  getKnowledgeNodeVersion(uuid: string, version: number): Promise<KnowledgeNodeVersion>;
   // upload documents
   mcpCreateUploadDocument(input: CreateUploadDocumentInput): Promise<UploadDocument>;
   mcpGetUploadDocument(id: string): Promise<UploadDocument>;

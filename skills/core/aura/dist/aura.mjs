@@ -879,6 +879,18 @@ var client = G(w({
 }));
 
 // ../packages/shared/src/generated/sdk.gen.ts
+var getBlueprintFiles = (options) => {
+  return (options.client ?? client).get({
+    security: [
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
+    url: "/mcp/blueprint/files",
+    ...options
+  });
+};
 var mcpCreateArtifact = (options) => {
   return (options.client ?? client).post({
     security: [
@@ -1240,6 +1252,19 @@ var saveKnowledgeNodeBody = (options) => {
     }
   });
 };
+var getKnowledgeNodeVersion = (options) => {
+  return (options.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      }
+    ],
+    url: "/knowledge/nodes/{uuid}/versions/{version}",
+    ...options
+  });
+};
 var getBoardSummary = (options) => {
   return (options?.client ?? client).get({
     security: [
@@ -1480,6 +1505,55 @@ var HeyApiAuraClient = class {
     });
     return unwrap(res, mapKnowledgeNode);
   }
+  async getBlueprintFiles(input) {
+    const res = await getBlueprintFiles({
+      client: this.client,
+      query: { path: input.path, version: input.version }
+    });
+    if (res.error !== void 0) {
+      const status = res.response?.status ?? 0;
+      throw new AuraApiError(status, sdkErrorMessage(res.error));
+    }
+    const g2 = res.data ?? {};
+    if (g2.ok === false && g2.error) {
+      throw new AuraApiError(0, `${g2.error.code}: ${g2.error.detail}`);
+    }
+    const files = (g2.files ?? []).map((f) => ({
+      path: f.path,
+      filename: f.filename,
+      encoding: f.encoding,
+      content: f.content,
+      checksum: f.checksum,
+      version: f.version,
+      provenance: {
+        created_by_user_id: f.provenance.created_by_user_id,
+        source_commit_sha: f.provenance.source_commit_sha
+      }
+    }));
+    return {
+      ok: g2.ok ?? true,
+      files,
+      error: g2.error
+    };
+  }
+  async getKnowledgeNodeVersion(uuid, version) {
+    const res = await getKnowledgeNodeVersion({
+      client: this.client,
+      path: { uuid, version }
+    });
+    return unwrap(res, (d) => {
+      const g2 = d;
+      return {
+        id: g2.id,
+        node_id: g2.node_id,
+        version: g2.version,
+        body: g2.body,
+        summary: g2.summary ?? null,
+        created_by_user_id: g2.created_by_user_id,
+        created_at: g2.created_at
+      };
+    });
+  }
   // -------------------------------------------------------------------------
   // Upload documents
   // -------------------------------------------------------------------------
@@ -1646,7 +1720,12 @@ function mapKnowledgeNode(d) {
     title: g2.title,
     slug: g2.slug,
     latest_version: g2.latest_version,
-    body: g2.body
+    body: g2.body,
+    // Surface the provenance Aura carries on every node (used by the
+    // engineering-sync manifest); kept off the named interface via the index
+    // signature so callers opt in explicitly.
+    updated_at: g2.updated_at,
+    body_hash: g2.body_hash
   };
 }
 function mapUploadDocument(d) {

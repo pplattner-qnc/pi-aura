@@ -15,7 +15,7 @@ original binary.
 ## Uploading a file
 
 ```bash
-node skills/aura/dist/aura.mjs upload create --file /path/to/report.txt --mime text/plain
+node skills/core/aura/dist/aura.mjs upload create --file /path/to/report.txt --mime text/plain
 ```
 
 The script base64-encodes the file on disk and uploads it; the binary never
@@ -29,10 +29,10 @@ enters the LLM context. Prints the new upload `id`.
 
 ```bash
 # Small parsed text -> printed to stdout
-node skills/aura/dist/aura.mjs upload get <upload-uuid>
+node skills/core/aura/dist/aura.mjs upload get <upload-uuid>
 
 # Large parsed text -> written to a file (or a workdir if --out omitted and large)
-node skills/aura/dist/aura.mjs upload get <upload-uuid> --out /tmp/upload-parsed.md
+node skills/core/aura/dist/aura.mjs upload get <upload-uuid> --out /tmp/upload-parsed.md
 ```
 
 Returns the parsed document: filename, mime type, byte size, page count,

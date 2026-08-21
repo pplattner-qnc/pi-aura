@@ -6,7 +6,8 @@
   "pi": {
     "extensions": [
       "./extensions/aura-skill-instruction.ts",
-      "./extensions/aura-secrets.ts"
+      "./extensions/aura-secrets.ts",
+      "./extensions/engineering-rules.ts"
     ],
     "skills": ["./skills"],
     "subagents": {
