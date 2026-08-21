@@ -3,7 +3,7 @@ kind: task
 slug: openapi-spec-bump
 title: Bump packages/shared/openapi/openapi.yaml to the user-provided openapi-new.yaml and reconcile codegen breakage
 type: feature
-status: ready
+status: done
 blocked_by: []
 map: aura-mcp-doc-salvage
 slices:
@@ -75,3 +75,58 @@ this.
 - `scripts` typecheck + build green.
 - Sample-verify the review/approval operationIds are present in the new spec
   (so the downstream task can use them).
+
+## Implementation notes
+
+### Spec replacement + codegen
+
+- `packages/shared/openapi/openapi.yaml` replaced with the repo-root
+  `openapi-new.yaml` (the 2026-08-21 spec, +368 lines vs old).
+- `make codegen` (`cd packages/shared && npm run codegen`) regenerated
+  `packages/shared/src/generated/{sdk.gen,types.gen,client.gen,index}.ts`
+  without error.
+- `packages/shared/src/generated/` is **gitignored** (via
+  `packages/shared/.gitignore:src/generated/`); it is NOT committed — rebuilt
+  locally via `make codegen`. The dist bundles (`skills/*/dist/*.mjs`) ARE
+  committed and were rebuilt against the new spec.
+- `openapi-new.yaml` was **removed** from the repo root (it's now the codegen
+  input at `packages/shared/openapi/openapi.yaml`; nothing in the build
+  references the root copy).
+
+### Spec shape changes reconciled
+
+The new spec is purely additive — no existing operationIds were removed or
+renamed, no existing schema fields changed. The only operation removed was
+`mcpGetTask`, which was not used anywhere in the codebase (not in the
+`AuraClient` interface, `HeyApiAuraClient`, or the scripts).
+
+Operations added in the new spec (not wired — out of scope for this slice):
+- `aiSetup`, `getBlueprintFiles`, `listKnowledgeFileVersions`, `systemHealth`
+
+New schemas added (not imported — out of scope):
+- `AiSetupResponse`, `BlueprintFile`, `BlueprintToolError`, `GetBlueprintFilesResponse`,
+  `KnowledgeFileVersion`, `KnowledgeFileVersionList`, `bearerAuth`, `cookieAuth`
+
+No changes were needed in:
+- `packages/shared/src/aura-client.ts` (domain types unchanged)
+- `packages/shared/src/hey-api-aura-client.ts` (mappers unchanged; the
+  implicit-any at line ~695 `g.review_artifacts.map((a) => ({ title: a.title }))`
+  resolved because the generated `ArtifactReviewOverview.review_artifacts`
+  is now typed as `Array<ArtifactReviewArtifactRef>` with `title: string`)
+- `scripts/src/aura-digest.ts` (call sites unchanged)
+- `scripts/src/aura.ts` (call sites unchanged)
+
+### Gate results
+
+- `cd packages/shared && npm run codegen` — green
+- `cd packages/shared && npm test` — 4/4 smoke tests pass
+- `cd scripts && npm run typecheck` — zero errors (implicit-any + TS2307 gone)
+- `cd scripts && npm run build` — `skills/aura-digest/dist/aura-digest.mjs` +
+  `skills/aura/dist/aura.mjs` produced and committed
+
+### Review/approval operationIds confirmed present
+
+The downstream `aura-review-subcommands` task depends on these — all present
+in the new spec: `getArtifactReview`, `getArtifactApprovals`,
+`requestArtifactReview`, `startArtifactReview`, `submitArtifactDecision`,
+`reopenArtifactReview`.

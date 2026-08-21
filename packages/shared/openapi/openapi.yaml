@@ -2,10 +2,16 @@ openapi: 3.1.0
 info:
   title: AURA API
   version: 1.0.0
+  description: |
+    Das Personal Access Token aus den Einstellungen (`/settings/mcp-access`) gilt für MCP **und** für diese REST-API — es ist derselbe Token. Für REST-Aufrufe im Header `Authorization: Bearer <dein-token>` mitgeben.
 
 servers:
   - url: http://localhost:3000/api
     description: Local development server
+
+security:
+  - cookieAuth: []
+  - bearerAuth: []
 
 tags:
   - name: Chats
@@ -76,6 +82,71 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /mcp/blueprint/setup:
+    get:
+      operationId: aiSetup
+      summary: Bootstrap an empty house repository from the wiki blueprint
+      description: |
+        Call this when the current repository has no Aura control layer yet (no AGENTS.md, no .agents/skills, no .cursor/rules/anwaltde) and you need to set it up. Returns the current ai-setup skill text, the current blueprint manifest, and a short instruction to fetch missing blocks via getBlueprintFiles. Does not write any files. Do not call this to check whether an already-set-up repo is up to date — that is ai-sync.
+      tags:
+        - MCP
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current ai-setup skill, inline manifest, and fetch instruction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiSetupResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /mcp/blueprint/files:
+    get:
+      operationId: getBlueprintFiles
+      summary: Fetch house-blueprint files by path
+      description: |
+        Fetch one file or every file in a skill directory from the house blueprint (engineering-foundation, path under blueprint/ only). File vs directory is decided by the node, not by a flag. Pass an optional version stamp (sha256 checksum or integer version) to pin a specific revision; omit it for current. Use when ai-setup or ai-sync needs the bytes of a named building block. Do not use this for Aura product skills (mcpGetSkill) or for wiki pages outside blueprint/.
+      tags:
+        - MCP
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+          description: Slash-separated path under blueprint/ (file or skill directory).
+        - name: version
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+          description: Optional version pointer — sha256:<hex> checksum or integer latest_version.
+      responses:
+        "200":
+          description: JSON-safe file payloads with checksum and provenance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetBlueprintFilesResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /mcp/search:
     post:
       operationId: mcpUnifiedSearch
@@ -83,7 +154,8 @@ paths:
       description: Same as POST /search but authenticated via MCP Personal Access Token (Bearer). Used by the native /mcp route and external MCP clients.
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -117,7 +189,8 @@ paths:
       description: Creates a planning task for the PAT owner without linking an Aura chat. Call search first to avoid duplicates.
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -138,42 +211,14 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-  /mcp/tasks/{id}:
-    get:
-      operationId: mcpGetTask
-      summary: "MCP: Get task planning hub"
-      description: Returns task details with linked artifacts, uploads, and open questions. Authenticated via MCP PAT (Bearer).
-      tags:
-        - MCP
-      security: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/McpTaskDetail"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "500":
-          $ref: "#/components/responses/InternalError"
-
   /mcp/tasks/{id}/artifacts:
     post:
       operationId: mcpLinkArtifactToTask
       summary: "MCP: Link artifact to task"
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -209,7 +254,8 @@ paths:
       summary: "MCP: Link upload to task"
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -252,7 +298,8 @@ paths:
         PATCH /api/mcp/artifacts/{id} with an MCP PAT.
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -279,7 +326,8 @@ paths:
       summary: "MCP: Get artifact"
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -310,7 +358,8 @@ paths:
         PATCH /api/mcp/artifacts/{id} with an MCP PAT (same JSON body).
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -345,7 +394,8 @@ paths:
       description: Ingests a file from base64 content. Maximum 10 MB per request.
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -382,7 +432,8 @@ paths:
       summary: "MCP: Get upload document"
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -408,7 +459,8 @@ paths:
       summary: "MCP: Get question"
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -435,7 +487,8 @@ paths:
       description: Saves an answer and marks the question ANSWERED. Requires EDIT access; no chatbot guard.
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -471,7 +524,8 @@ paths:
       summary: "MCP: Get skill"
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -497,7 +551,8 @@ paths:
       summary: "MCP: Get knowledge document"
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -524,7 +579,8 @@ paths:
       description: Searches Wiki, Repository and Skill knowledge spaces for pages matching the query, combining a literal (German full-text plus a trigram fallback for compound words) and a semantic search and merging both into one ranked list. Restricted to the caller's readable spaces.
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: query
           in: query
@@ -564,7 +620,8 @@ paths:
       summary: "MCP: Get repository document"
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       parameters:
         - name: repo_slug
           in: query
@@ -597,7 +654,8 @@ paths:
       description: Returns repositories with codeSearchEnabled=true for intersection with repo-mcp allowlist.
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       responses:
         "200":
           description: OK
@@ -614,7 +672,8 @@ paths:
       summary: "MCP: Expand knowledge graph"
       tags:
         - MCP
-      security: []
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -730,6 +789,47 @@ paths:
                   status:
                     type: string
                     enum: [ok]
+
+  /system/health:
+    get:
+      operationId: systemHealth
+      summary: "System: Health and build identity"
+      description: Authenticated health check with process uptime and the current build identity (hash, tag, timestamps). Distinct from the unauthenticated Docker `/health` probe.
+      tags:
+        - Health
+      responses:
+        "200":
+          description: Health status, uptime in seconds, and optional build block
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, uptime]
+                properties:
+                  status:
+                    type: string
+                    enum: [success]
+                  uptime:
+                    type: integer
+                    description: Process uptime in whole seconds
+                  build:
+                    type: object
+                    nullable: true
+                    properties:
+                      hash:
+                        type: string
+                      tag:
+                        type: string
+                      germanTime:
+                        type: string
+                      utcTime:
+                        type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /users:
     get:
@@ -2280,9 +2380,22 @@ paths:
         everything without a rank. The set is the caller's active core-role
         memberships on living tasks. Not paginated: the whole queue is computed
         once and shared by the dashboard panel (capped at ten client-side) and
-        the person slideover (which shows all of it).
+        the person slideover (which shows all of it). An optional `limit` bounds
+        `items`; omitted, the whole queue comes back.
       tags:
         - Tasks
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: >-
+            Maximum number of queue entries. Omitted returns the whole queue;
+            `total` and `unordered_count` always describe the whole queue, so a
+            bounded answer says how much it left out.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
       responses:
         "200":
           description: The caller's derived priority order
@@ -2443,7 +2556,8 @@ paths:
         TaskRelation edges). Returns an empty graph if the task has neither a parent
         nor children, so callers can hide the map. Mirrored as the MCP tool of the
         same name — agents should treat this as the neighbourhood of one task, not
-        the full-tenant hierarchy graph.
+        the full-tenant hierarchy graph. An optional `depth` bounds the ancestor
+        chain; omitted, it reaches the root.
       tags:
         - Tasks
       parameters:
@@ -2454,6 +2568,14 @@ paths:
             type: string
             format: uuid
           description: Task UUID
+        - name: depth
+          in: query
+          required: false
+          description: Ancestor hops to include. Omitted returns the chain to the root.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 2
       responses:
         "200":
           description: OK
@@ -4731,10 +4853,11 @@ paths:
       operationId: getTaskJiraIssueDraft
       summary: "Tasks: Preview the Jira issue a task would create"
       description: >-
-        Derives the issue type, project, team, summary and description a
-        Jira issue for this task would get, plus the allowed target statuses
-        — so the "Create in Jira" dialog can render before the user commits
+        Derives the issue type, project, summary and description a Jira issue
+        for this task would get, plus the allowed target statuses — so the
+        "Create in Jira" dialog can render before the user commits
         (AURA-1239). Same derivation the chat's `jira_propose_issue` tool uses.
+        The team is not derived: the user picks it in the dialog (AURA-1429).
       tags:
         - Tasks
       parameters:
@@ -6904,9 +7027,29 @@ paths:
       operationId: getKnowledgeTree
       tags: [knowledge]
       summary: Get the full node tree for a space
-      description: Returns the complete tree of folders and documents (body omitted — load via GET /knowledge/nodes/{uuid}).
+      description: >-
+        Returns the complete tree of folders and documents (body omitted — load
+        via GET /knowledge/nodes/{uuid}). The optional `depth` and `max_nodes`
+        bound the answer; omitted, the whole tree comes back.
       security:
         - cookieAuth: []
+      parameters:
+        - name: depth
+          in: query
+          required: false
+          description: Maximum tree depth below the roots. Omitted returns every level.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 2
+        - name: max_nodes
+          in: query
+          required: false
+          description: Maximum number of nodes in the answer. Omitted returns all of them.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
       responses:
         "200":
           description: Node tree
@@ -7078,6 +7221,12 @@ paths:
             type: boolean
             default: false
           description: Serve with Content-Disposition inline (for previews) instead of attachment.
+        - name: version
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Fetch a specific past version by its number instead of the current one (AURA-1644).
       responses:
         "200":
           description: File bytes
@@ -7086,6 +7235,38 @@ paths:
               schema:
                 type: string
                 format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /knowledge/nodes/{uuid}/file/versions:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: listKnowledgeFileVersions
+      tags: [knowledge]
+      summary: List all versions of a FILE node's asset
+      description: >-
+        Newest first. Each entry carries its own checksum and provenance
+        (AURA-1644) — download a specific one via
+        GET /knowledge/nodes/{uuid}/file?version=N.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Version list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeFileVersionList"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -9050,6 +9231,16 @@ paths:
           $ref: "#/components/responses/InternalError"
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Personal Access Token aus den Einstellungen (`/settings/mcp-access`), Präfix `aura_pat_`. Gilt für MCP und REST gleichermaßen.
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: aura-session
+
   parameters:
     PageParam:
       name: page
@@ -9911,8 +10102,8 @@ components:
 
     TaskJiraIssueDraft:
       type: object
-      description: Derived Jira issue fields for a task, plus the statuses the "Create in Jira" dialog can offer (AURA-1239).
-      required: [issue_type, project_key, team, summary, allowed_statuses]
+      description: Derived Jira issue fields for a task, plus the statuses the "Create in Jira" dialog can offer (AURA-1239). Carries no team — that is the user's explicit choice in the dialog (AURA-1429).
+      required: [issue_type, project_key, summary, allowed_statuses]
       properties:
         issue_type:
           type: string
@@ -9920,9 +10111,6 @@ components:
         project_key:
           type: string
           description: Jira project key the issue would be created in.
-        team:
-          type: string
-          description: Jira team the issue would be assigned to.
         summary:
           type: string
           description: Issue title, taken from the task title.
@@ -9954,6 +10142,13 @@ components:
         status:
           type: string
           description: Target Jira status to transition the new issue to, e.g. "Selected". Chosen by the user in the dialog.
+        team:
+          type: string
+          description: >-
+            Jira team name the user picked in the dialog (AURA-1429). Required
+            for every issue type except Sub-Task, which inherits its parent's
+            team; there is no default, and omitting it for a top-level issue
+            fails with 422.
 
     TaskJiraIssueCreateResult:
       type: object
@@ -10406,6 +10601,15 @@ components:
           format: int64
           nullable: true
           description: Checkout size in bytes
+        indexed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When repo-mcp last finished building a search index for this checkout (AURA-1642). Distinct from last_synced_at, which only means the clone itself is up to date, not that it is searchable. Null until the first index build completes.
+        indexed_sha:
+          type: string
+          nullable: true
+          description: Commit SHA the currently persisted search index was built from (AURA-1642). Compare against commit_sha to tell "indexed" from "cloned but still indexing" — they can briefly differ right after a new commit lands.
         created_at:
           type: string
           format: date-time
@@ -14407,7 +14611,9 @@ components:
       required: [items, total, unordered_count]
       description: >
         A person's complete derived priority order (AURA-930 / AURA-1146).
-        Deliberately unpaginated — the four-block sequence is one answer.
+        Deliberately unpaginated — the four-block sequence is one answer. An
+        opt-in `limit` bounds `items` only (AURA-1390 / D8); the counts below
+        keep describing the whole queue.
       properties:
         items:
           type: array
@@ -14415,7 +14621,7 @@ components:
             $ref: "#/components/schemas/MyPriorityItem"
         total:
           type: integer
-          description: Number of entries in the queue.
+          description: Number of entries in the whole queue, whether or not `items` was bounded.
         unordered_count:
           type: integer
           description: >
@@ -15842,13 +16048,15 @@ components:
 
     McpTaskArtifactRef:
       type: object
-      required: [id, title, latest_version, source_chatbot_code]
+      required: [id, title, kind, latest_version, source_chatbot_code]
       properties:
         id:
           type: string
           format: uuid
         title:
           type: string
+        kind:
+          $ref: "#/components/schemas/ArtifactKind"
         latest_version:
           type: integer
         source_chatbot_code:
@@ -16231,6 +16439,77 @@ components:
           type: string
           enum: [literal]
           description: How this hit was found. Only `literal` exists so far; a later slice of AURA-1346 adds `semantic` and `both`.
+
+    BlueprintFile:
+      type: object
+      required: [path, filename, encoding, content, checksum, version, provenance]
+      properties:
+        path:
+          type: string
+          description: >-
+            Canonical slug path, lowercased (`blueprint/skills/ai-setup/skill.md`).
+            The verbatim name to write to disk is `filename`.
+        filename:
+          type: string
+          description: Verbatim upload name, e.g. `SKILL.md`.
+        encoding:
+          type: string
+          enum: [utf8, base64]
+        content:
+          type: string
+        checksum:
+          type: string
+          description: SHA-256 over the raw bytes, prefixed `sha256:`.
+        version:
+          type: integer
+        provenance:
+          type: object
+          required: [created_by_user_id, source_commit_sha]
+          properties:
+            created_by_user_id:
+              type: integer
+              nullable: true
+            source_commit_sha:
+              type: string
+              nullable: true
+
+    AiSetupResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        skill:
+          $ref: "#/components/schemas/BlueprintFile"
+        manifest:
+          $ref: "#/components/schemas/BlueprintFile"
+        fetch_instruction:
+          type: string
+        error:
+          $ref: "#/components/schemas/BlueprintToolError"
+
+    GetBlueprintFilesResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/BlueprintFile"
+        error:
+          $ref: "#/components/schemas/BlueprintToolError"
+
+    BlueprintToolError:
+      type: object
+      required: [code, detail]
+      properties:
+        code:
+          type: string
+          enum: [CAPABILITY_DENIED, FORBIDDEN, NOT_FOUND, STORAGE_FAILED]
+        detail:
+          type: string
 
     McpWikiSearchResponse:
       type: object
@@ -16686,7 +16965,7 @@ components:
 
     KnowledgeNodeFile:
       type: object
-      required: [filename, mime_type, byte_size, download_url]
+      required: [filename, mime_type, byte_size, download_url, version, checksum, created_by_user_id, source_repository_id, source_commit_sha]
       properties:
         filename:
           type: string
@@ -16697,10 +16976,31 @@ components:
           type: integer
         download_url:
           type: string
+        version:
+          type: integer
+          description: Version number of the currently stored bytes; mirrors the owning node's latest_version.
+        checksum:
+          type: string
+          nullable: true
+          description: >-
+            SHA-256 over the raw bytes, "sha256:<hex>", no normalisation.
+            Null only for a not-yet-backfilled AURA-1151 row (AURA-1644).
+        created_by_user_id:
+          type: integer
+          nullable: true
+          description: Person who uploaded this version by hand. Null when the version came from a transfer run instead.
+        source_repository_id:
+          type: integer
+          nullable: true
+          description: Source Repository (internal id) when this version came from a transfer run. Null for a hand upload.
+        source_commit_sha:
+          type: string
+          nullable: true
+          description: Commit SHA in the source repository this version was read from. Null for a hand upload.
 
     KnowledgeFile:
       type: object
-      required: [id, space_id, parent_id, title, slug, path, filename, mime_type, byte_size, download_url, created_at, updated_at]
+      required: [id, space_id, parent_id, title, slug, path, filename, mime_type, byte_size, download_url, version, checksum, created_by_user_id, source_repository_id, source_commit_sha, created_at, updated_at]
       properties:
         id:
           type: string
@@ -16728,6 +17028,27 @@ components:
           type: integer
         download_url:
           type: string
+        version:
+          type: integer
+          description: Version number of the currently stored bytes; mirrors latest_version on the node.
+        checksum:
+          type: string
+          nullable: true
+          description: >-
+            SHA-256 over the raw bytes, "sha256:<hex>", no normalisation.
+            Null only for a not-yet-backfilled AURA-1151 row (AURA-1644).
+        created_by_user_id:
+          type: integer
+          nullable: true
+          description: Person who uploaded this version by hand. Null when the version came from a transfer run instead.
+        source_repository_id:
+          type: integer
+          nullable: true
+          description: Source Repository (internal id) when this version came from a transfer run. Null for a hand upload.
+        source_commit_sha:
+          type: string
+          nullable: true
+          description: Commit SHA in the source repository this version was read from. Null for a hand upload.
         created_at:
           type: string
           format: date-time
@@ -16842,6 +17163,53 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/KnowledgeVersion"
+
+    KnowledgeFileVersion:
+      type: object
+      required: [id, node_id, version, filename, mime_type, byte_size, checksum, download_url, created_by_user_id, source_repository_id, source_commit_sha, created_at]
+      description: One byte-distinct version of a FILE node's asset (AURA-1644).
+      properties:
+        id:
+          type: string
+          format: uuid
+        node_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        filename:
+          type: string
+        mime_type:
+          type: string
+        byte_size:
+          type: integer
+        checksum:
+          type: string
+          nullable: true
+        download_url:
+          type: string
+          description: Download URL for this specific version (carries ?version=N).
+        created_by_user_id:
+          type: integer
+          nullable: true
+        source_repository_id:
+          type: integer
+          nullable: true
+        source_commit_sha:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    KnowledgeFileVersionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/KnowledgeFileVersion"
 
     KnowledgeNodeImage:
       type: object
