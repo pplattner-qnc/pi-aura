@@ -363,6 +363,25 @@ export interface ArtifactReview {
   is_initiator: boolean;
 }
 
+/** Task role whose members should be included as reviewers. */
+export type ReviewerRole = "OWNER" | "CONTRIBUTOR" | "STAKEHOLDER";
+
+/** Input for {@link AuraClient.startArtifactReview}. */
+export interface StartArtifactReviewInput {
+  id: string;
+  version: number;
+  roles: ReviewerRole[];
+  user_ids: string[];
+  deadline?: string;
+}
+
+/** Input for {@link AuraClient.submitArtifactDecision}. */
+export interface SubmitArtifactDecisionInput {
+  id: string;
+  version: number;
+  decision: "APPROVED" | "REJECTED";
+}
+
 // ---------------------------------------------------------------------------
 // AuraClient interface — the ~21 exercised verbs
 // ---------------------------------------------------------------------------
@@ -407,6 +426,10 @@ export interface AuraClient {
   ): Promise<ArtifactApprovals>;
   getTaskByHumanKey(key: string): Promise<Task>;
   getArtifactReview(id: string): Promise<ArtifactReview>;
+  requestArtifactReview(id: string): Promise<void>;
+  startArtifactReview(input: StartArtifactReviewInput): Promise<void>;
+  submitArtifactDecision(input: SubmitArtifactDecisionInput): Promise<void>;
+  reopenArtifactReview(id: string, version: number): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
