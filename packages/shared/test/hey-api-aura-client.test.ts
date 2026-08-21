@@ -41,7 +41,7 @@ describe("HeyApiAuraClient", () => {
   it("implements AuraClient (structural check)", () => {
     const keyring = new FakeKeyring("test-pat-123");
     const client = new HeyApiAuraClient({ keyring, baseUrl: "https://example.com/api" });
-    // Structural check: all 21 methods exist.
+    // Structural check: all 25 methods exist (21 original + 4 new review verbs).
     const methods = [
       "getArtifact", "mcpCreateArtifact", "mcpUpdateArtifact", "listArtifacts",
       "getKnowledgeNode", "getKnowledgeNodeByPath", "saveKnowledgeNodeBody",
@@ -50,6 +50,7 @@ describe("HeyApiAuraClient", () => {
       "getBoardBriefing", "getBoardSummary",
       "listNotifications", "getMyPriorityQueue", "getMyCapacity",
       "listTasks", "getArtifactApprovals", "getTaskByHumanKey", "getArtifactReview",
+      "requestArtifactReview", "startArtifactReview", "submitArtifactDecision", "reopenArtifactReview",
     ];
     for (const m of methods) {
       assert.equal(typeof (client as unknown as Record<string, unknown>)[m], "function",
