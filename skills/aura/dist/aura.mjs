@@ -881,6 +881,12 @@ var client = G(w({
 // ../packages/shared/src/generated/sdk.gen.ts
 var mcpCreateArtifact = (options) => {
   return (options.client ?? client).post({
+    security: [
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/mcp/artifacts",
     ...options,
     headers: {
@@ -891,6 +897,12 @@ var mcpCreateArtifact = (options) => {
 };
 var mcpUpdateArtifact = (options) => {
   return (options.client ?? client).patch({
+    security: [
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/mcp/artifacts/{id}",
     ...options,
     headers: {
@@ -901,6 +913,12 @@ var mcpUpdateArtifact = (options) => {
 };
 var mcpCreateUploadDocument = (options) => {
   return (options.client ?? client).post({
+    security: [
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/mcp/upload-documents",
     ...options,
     headers: {
@@ -911,72 +929,186 @@ var mcpCreateUploadDocument = (options) => {
 };
 var mcpGetUploadDocument = (options) => {
   return (options.client ?? client).get({
+    security: [
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/mcp/upload-documents/{id}",
     ...options
   });
 };
 var mcpWikiSearch = (options) => {
   return (options.client ?? client).get({
+    security: [
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/mcp/wiki-search",
     ...options
   });
 };
 var listTasks = (options) => {
   return (options?.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/tasks",
     ...options
   });
 };
 var getMyPriorityQueue = (options) => {
   return (options?.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/tasks/my-priority",
     ...options
   });
 };
 var getTaskByHumanKey = (options) => {
   return (options.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/tasks/by-key/{key}",
     ...options
   });
 };
 var getMyCapacity = (options) => {
   return (options?.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/capacity/me",
     ...options
   });
 };
 var listArtifacts = (options) => {
   return (options?.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/artifacts",
     ...options
   });
 };
 var getArtifact = (options) => {
   return (options.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/artifacts/{id}",
     ...options
   });
 };
 var getArtifactApprovals = (options) => {
   return (options.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/artifacts/{id}/approvals",
     ...options
   });
 };
 var getArtifactReview = (options) => {
   return (options.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/artifacts/{id}/review",
     ...options
   });
 };
 var getKnowledgeTree = (options) => {
   return (options.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      }
+    ],
     url: "/knowledge/spaces/{slug}/nodes",
     ...options
   });
 };
 var createKnowledgeNode = (options) => {
   return (options.client ?? client).post({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      }
+    ],
     url: "/knowledge/spaces/{slug}/nodes",
     ...options,
     headers: {
@@ -987,18 +1119,39 @@ var createKnowledgeNode = (options) => {
 };
 var getKnowledgeNodeByPath = (options) => {
   return (options.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      }
+    ],
     url: "/knowledge/spaces/{slug}/nodes/by-path",
     ...options
   });
 };
 var getKnowledgeNode = (options) => {
   return (options.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      }
+    ],
     url: "/knowledge/nodes/{uuid}",
     ...options
   });
 };
 var saveKnowledgeNodeBody = (options) => {
   return (options.client ?? client).put({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      }
+    ],
     url: "/knowledge/nodes/{uuid}/body",
     ...options,
     headers: {
@@ -1009,18 +1162,51 @@ var saveKnowledgeNodeBody = (options) => {
 };
 var getBoardSummary = (options) => {
   return (options?.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/boards",
     ...options
   });
 };
 var getBoardBriefing = (options) => {
   return (options?.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/boards/briefing",
     ...options
   });
 };
 var listNotifications = (options) => {
   return (options?.client ?? client).get({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
     url: "/notifications",
     ...options
   });
