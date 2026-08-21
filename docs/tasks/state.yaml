@@ -1,2 +1,3 @@
 task: openapi-spec-bump
 slice: None
+task_status: done
