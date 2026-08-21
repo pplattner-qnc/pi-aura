@@ -3,7 +3,7 @@ kind: task
 slug: aura-review-subcommands
 title: Re-implement the 6 `aura.mjs artifact review-*` subcommands on main's AuraClient
 type: feature
-status: open
+status: done
 blocked_by:
 - openapi-spec-bump
 map: aura-mcp-doc-salvage
@@ -159,3 +159,52 @@ references become truthful.
   `artifact review-reopen <artifact-uuid>` should be updated to
   `artifact review-reopen <artifact-uuid> --version <version>` — deferred to
   the dependent task per the slice's doc-edit constraints.
+
+### slice: verify-and-build (landed)
+
+Full gate verified on `slice/verify-and-build`:
+
+- `cd packages/shared && npm test` — green (23/23 tests pass: 3 HeyApiAuraClient
+  structural, 2 createDefaultAuraClient, 18 review-verb tests).
+- `cd scripts && npm run typecheck` — green (`tsc --noEmit`, no errors).
+- `cd scripts && npm run build` — green (esbuild bundles
+  `skills/aura-digest/dist/aura-digest.mjs` + `skills/aura/dist/aura.mjs`).
+
+**Bundle grep verification:** the built `skills/aura/dist/aura.mjs` contains
+  all 6 review-* dispatch branches:
+  `review-get`, `review-approvals`, `review-request`, `review-start`,
+  `review-decide`, `review-reopen` (grep confirmed, 6/6).
+
+**6 subcommands added** (in `scripts/src/aura.ts`):
+
+| Subcommand | AuraClient verb |
+|---|---|
+| `artifact review-get <id>` | `getArtifactReview(id)` |
+| `artifact review-approvals <id>` | `getArtifactApprovals(id)` |
+| `artifact review-request <id>` | `requestArtifactReview(id)` |
+| `artifact review-start <id> --version V --roles R[,R] --user-ids U[,U] [--deadline D]` | `startArtifactReview(input)` |
+| `artifact review-decide <id> --version V --decision APPROVED|REJECTED` | `submitArtifactDecision(input)` |
+| `artifact review-reopen <id> --version V` | `reopenArtifactReview(id, version)` |
+
+**6 AuraClient verbs** (in `packages/shared/src/aura-client.ts` interface +
+  `HeyApiAuraClient` impl):
+
+| Verb | REST path | Method |
+|---|---|---|
+| `getArtifactReview(id)` | `/artifacts/{id}/review` | GET |
+| `getArtifactApprovals(id, opts?)` | `/artifacts/{id}/approvals` | GET |
+| `requestArtifactReview(id)` | `/artifacts/{id}/review-request` | POST |
+| `startArtifactReview(input)` | `/artifacts/{id}/review-start` | POST |
+| `submitArtifactDecision(input)` | `/artifacts/{id}/decisions` | POST |
+| `reopenArtifactReview(id, version)` | `/artifacts/{id}/review-reopen` | POST |
+
+**Manual live-Aura smoke test** (delegated to the user; needs live PAT):
+
+> ```
+> node skills/aura/dist/aura.mjs artifact review-get <real-artifact-uuid>
+> ```
+> Should print review state (version, review_state, reviewers, initiator).
+> Requires the user's PAT in the keyring (`/aura secrets discover`,
+> service: `aura`, name: `pat`) and `aura.baseUrl` in
+> `~/.pi/agent/settings.json`. Not verified in this slice (mode afk for the
+> gate; no live Aura instance available in CI).
