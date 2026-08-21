@@ -200,15 +200,22 @@ function sha256(data: string | Buffer): string {
 // ---------------------------------------------------------------------------
 
 /** Shape of `blueprint/manifest.yaml` — a list of building blocks each with a
- *  `path` (under blueprint/) and a `checksum` (`sha256:<hex>`). We are
- *  intentionally loose: only read what we need to enumerate the file list. */
+ *  `path` (under blueprint/). File entries carry a `checksum`
+ *  (`sha256:<hex>`); directory entries (path ends with `/`) carry a nested
+ *  `files:` array with per-file paths + checksums. We are intentionally
+ *  loose: only read what we need to enumerate the file list. */
 interface BlueprintManifestEntry {
   path: string;
   checksum?: string;
   version?: number;
+  /** Nested file list for directory entries (e.g. a skill folder). */
+  files?: BlueprintManifestEntry[];
   [k: string]: unknown;
 }
 interface BlueprintManifest {
+  /** The real manifest uses `entries:`; accept `files:`/`blocks:` as legacy
+   *  aliases for defensiveness. */
+  entries?: BlueprintManifestEntry[];
   files?: BlueprintManifestEntry[];
   blocks?: BlueprintManifestEntry[];
   [k: string]: unknown;
@@ -216,9 +223,9 @@ interface BlueprintManifest {
 
 function parseBlueprintManifest(content: string): BlueprintManifestEntry[] {
   const parsed = load(content) as BlueprintManifest;
-  // The manifest uses either `files:` or `blocks:`; accept both and also a
-  // bare top-level list. Be defensive — the exact shape is wiki-defined.
-  const list = (parsed.files ?? parsed.blocks ?? []) as BlueprintManifestEntry[];
+  // The manifest uses `entries:` as the top-level key; accept `files:`/
+  // `blocks:` as legacy aliases. Be defensive — the exact shape is wiki-defined.
+  const list = (parsed.entries ?? parsed.files ?? parsed.blocks ?? []) as BlueprintManifestEntry[];
   if (!Array.isArray(list)) return [];
   return list.filter((e) => e && typeof e.path === "string");
 }
@@ -251,12 +258,14 @@ export interface MirroredItem {
 
 /** Fetch the blueprint manifest + every blueprint file it lists. Returns the
  *  unified items plus the raw BlueprintFile payloads (for content writes). */
-async function fetchBlueprintItems(client: AuraClient): Promise<{ items: MirroredItem[]; files: Map<string, BlueprintFile> }> {
+async function fetchBlueprintItems(client: AuraClient, manifest: Manifest): Promise<{ items: MirroredItem[]; files: Map<string, BlueprintFile> }> {
   const items: MirroredItem[] = [];
   const files = new Map<string, BlueprintFile>();
 
-  // 1. Fetch the manifest itself.
-  const manifestRes = await client.getBlueprintFiles({ path: "manifest.yaml" });
+  // 1. Fetch the manifest itself. The Aura API requires the full
+  //    `blueprint/`-prefixed path (passing a bare `manifest.yaml` returns 403
+  //    "Path must be under blueprint/ ...").
+  const manifestRes = await client.getBlueprintFiles({ path: "blueprint/manifest.yaml" });
   const manifestFile = manifestRes.files.find((f) => f.path === "blueprint/manifest.yaml" || f.filename === "manifest.yaml");
   if (manifestFile) {
     files.set(manifestFile.path, manifestFile);
@@ -277,8 +286,12 @@ async function fetchBlueprintItems(client: AuraClient): Promise<{ items: Mirrore
   }
   const manifestEntries = parseBlueprintManifest(manifestFile.content);
   for (const entry of manifestEntries) {
-    const bpPath = entry.path.startsWith("blueprint/") ? entry.path : `blueprint/${entry.path}`;
-    // Fetch the file (current version).
+    // Directory entries (path ends with `/`) are fetched as a directory —
+    // getBlueprintFiles returns every file in the folder. File entries are
+    // fetched directly. Strip a trailing `/` so the path is canonical.
+    const rawPath = entry.path.replace(/\/+$/, "");
+    const bpPath = rawPath.startsWith("blueprint/") ? rawPath : `blueprint/${rawPath}`;
+    // Fetch the file or directory (current version).
     let res: GetBlueprintFilesResult;
     try {
       res = await client.getBlueprintFiles({ path: bpPath });
@@ -288,6 +301,13 @@ async function fetchBlueprintItems(client: AuraClient): Promise<{ items: Mirrore
     }
     for (const f of res.files) {
       if (files.has(f.path)) continue;
+      // Skip items already marked ignored in the manifest (e.g. tracker-aura).
+      // The wiki-doc path checks `existing?.ignored` (see fetchWikiItems);
+      // mirror that here so ignored blueprint rules are not re-staged on
+      // subsequent fetches — mark the item `ignored` so pass 1's
+      // `if (item.ignored)` branch records it in report.ignored and skips it.
+      const existing = manifest.entries[f.path];
+      const ignored = existing?.ignored === true;
       files.set(f.path, f);
       items.push({
         key: f.path,
@@ -296,6 +316,7 @@ async function fetchBlueprintItems(client: AuraClient): Promise<{ items: Mirrore
         remoteSha256: f.checksum,
         auraChecksumOrVersion: f.checksum,
         auraUpdatedAt: f.provenance.source_commit_sha ?? "",
+        ignored,
       });
     }
   }
@@ -306,40 +327,61 @@ async function fetchBlueprintItems(client: AuraClient): Promise<{ items: Mirrore
 /** Map a blueprint canonical path + filename to a local repo path (relative
  *  to repo root). Blueprint paths are lowercased slugs like
  *  `blueprint/skills/ai-setup/skill.md`; the verbatim filename is `SKILL.md`.
- *  We write the verbatim filename in the local tree. */
+ *  We write the verbatim filename in the local tree.
+ *
+ *  Rules are an exception to the `resources/blueprint/` layout: per the map
+ *  decision, all 15 included rules live in one flat directory
+ *  `resources/rules/` (the `engineering-rules` extension reads from there),
+ *  not under `resources/blueprint/rules/`. Blueprint skills and other files
+ *  stay under `resources/blueprint/`. */
 function blueprintPathToLocal(bpPath: string, filename: string): string {
   // Strip the leading `blueprint/`; the local tree mirrors under
   // resources/blueprint/.
   const under = bpPath.replace(/^blueprint\//, "");
   const dir = dirname(under);
   const localName = filename || basename(under);
+  // Rules -> resources/rules/ (flat, one directory; see map decision Q-cursor).
+  if (under.startsWith("rules/")) {
+    return join("skills/engineering-workflow/resources/rules", localName);
+  }
   return join("skills/engineering-workflow/resources/blueprint", dir, localName);
 }
 
 /** Fetch the wiki tree and return a unified item per DOCUMENT/FILE node we
- *  mirror. The tree's body is omitted; we fetch bodies on demand in `fetch`. */
+ *  mirror. The REST tree is **nested**: folders carry a `children` array of
+ *  documents/other folders (now preserved by `mapKnowledgeNode`). We recurse
+ *  it so nested docs (guides/*, workflow/*) surface, not just the top-level
+ *  folders. Bodies are omitted by the tree; we fetch them on demand in `fetch`. */
 async function fetchWikiItems(client: AuraClient, manifest: Manifest): Promise<MirroredItem[]> {
   const tree: KnowledgeTree = await client.getKnowledgeTree(SPACE_SLUG);
   const items: MirroredItem[] = [];
-  for (const node of tree.nodes) {
-    // Skip folders — they carry no content.
-    if (node.kind === "FOLDER") continue;
-    // Map the node to a local path; skip nodes we don't mirror (e.g. nodes
-    // outside the canon we track). We include every DOCUMENT/FILE node and
-    // let the manifest's `ignored` flag exclude items (e.g. tracker-aura).
-    const localPath = wikiNodeToLocalPath(node);
-    if (!localPath) continue;
-    const existing = manifest.entries[node.id];
-    const ignored = existing?.ignored === true;
-    items.push({
-      key: node.id,
-      source: "wiki-doc",
-      localPath,
-      kind: node.kind,
-      slug: node.slug,
-      ignored,
-    });
-  }
+  // Walk the nested tree depth-first, accumulating the slug-path so we can
+  // derive a local path from the full path (the node's slug alone is just
+  // the leaf, e.g. "ai-readiness-standard" with no "guides/" prefix).
+  const walk = (nodes: KnowledgeNode[], parentSlugPath: string[]): void => {
+    for (const node of nodes) {
+      const slugPath = [...parentSlugPath, node.slug];
+      if (node.kind === "FOLDER") {
+        const children = (node as KnowledgeNode & { children?: KnowledgeNode[] }).children ?? [];
+        walk(children, slugPath);
+        continue;
+      }
+      // Document/file node: map to a local path via the full slug path.
+      const localPath = wikiNodeToLocalPath(slugPath, node);
+      if (!localPath) continue;
+      const existing = manifest.entries[node.id];
+      const ignored = existing?.ignored === true;
+      items.push({
+        key: node.id,
+        source: "wiki-doc",
+        localPath,
+        kind: node.kind,
+        slug: slugPath.join("/"),
+        ignored,
+      });
+    }
+  };
+  walk(tree.nodes, []);
   return items;
 }
 
@@ -349,39 +391,60 @@ async function fetchWikiItems(client: AuraClient, manifest: Manifest): Promise<M
  *    INDEX.md, Log.md, guides/*.md, workflow/*.md, rules/*.mdc
  *  Blueprint files come via getBlueprintFiles (not the wiki tree), so any
  *  node under a `blueprint/` path on the wiki is skipped here to avoid double
- *  counting. */
-function wikiNodeToLocalPath(node: KnowledgeNode): string | undefined {
-  // We key wiki docs by node uuid, but the local path is derived from the
-  // node's slug/path. The wiki tree doesn't expose a full path directly;
-  // the `source_path` field (bundle-relative, e.g. "daten/order.md") is the
-  // most reliable join key when present. Fall back to slug. Both are surfaced
-  // via the index signature on the mapped domain type.
-  const n = node as KnowledgeNode & { source_path?: string };
-  const base = n.source_path ?? node.slug;
-  if (!base) return undefined;
-  // Strip a leading space slug if present.
-  let p = base.replace(new RegExp(`^${SPACE_SLUG}/?`), "");
+ *  counting.
+ *
+ *  `slugPath` is the full chain of slugs from the space root
+ *  (e.g. ["guides", "ai-readiness-standard"]) — the node's own `slug` is the
+ *  leaf, but the parent folder slug carries the subdirectory. We use the
+ *  full path (not the node's `source_path`, which is null for authored wiki
+ *  nodes) to place the file. */
+function wikiNodeToLocalPath(slugPath: string[], _node: KnowledgeNode): string | undefined {
+  if (slugPath.length === 0) return undefined;
+  const top = slugPath[0];
+  const rest = slugPath.slice(1).join("/");
+  // The wiki's top-level docs are `index` / `log` (lowercase, no extension);
+  // the mirror calls them `INDEX.md` / `Log.md`.
+  if (slugPath.length === 1 && (top === "index" || top === "log")) {
+    return join("skills/engineering-workflow/resources", top === "index" ? "INDEX.md" : "Log.md");
+  }
   // Blueprint content is fetched via getBlueprintFiles, not the wiki tree —
   // skip nodes that live under blueprint/ on the wiki to avoid duplicates.
-  if (p.startsWith("blueprint/")) return undefined;
-  // The engineering-foundation canon maps to resources/ with a few renames:
-  //   top-level INDEX.md / Log.md -> resources/INDEX.md / resources/Log.md
-  //   guides/<x>.md              -> resources/guides/<x>.md
-  //   workflow/<x>.md            -> resources/workflow/<x>.md
-  //   rules/<x>.mdc              -> resources/rules/<x>.mdc
-  // Anything else: mirror under resources/ preserving the path.
-  const segs = p.split("/");
-  const top = segs[0];
-  const rest = segs.slice(1).join("/");
-  if (top === "INDEX.md" || top === "Log.md") {
-    return join("skills/engineering-workflow/resources", top);
-  }
+  if (top === "blueprint") return undefined;
   if (top === "guides" || top === "workflow" || top === "rules") {
-    return join("skills/engineering-workflow/resources", top, rest);
+    return join("skills/engineering-workflow/resources", top, rest + ".md");
   }
   // Unknown structure: mirror under resources/ preserving the path so the
   // author sees it and can decide during reconciliation.
-  return join("skills/engineering-workflow/resources", p);
+  return join("skills/engineering-workflow/resources", slugPath.join("/"));
+}
+
+/** Flatten the nested wiki tree into a list of {node, slugPath} for every
+ *  non-FOLDER node, recursing `children`. Used for the authored-router
+ *  structure signature (full slug paths, so nested additions are detected). */
+interface FlatNode {
+  node: KnowledgeNode;
+  slugPath: string[];
+}
+function flattenTreeNodes(nodes: KnowledgeNode[], parentSlugPath: string[] = []): FlatNode[] {
+  const out: FlatNode[] = [];
+  for (const node of nodes) {
+    const slugPath = [...parentSlugPath, node.slug];
+    if (node.kind === "FOLDER") {
+      const children = (node as KnowledgeNode & { children?: KnowledgeNode[] }).children ?? [];
+      out.push(...flattenTreeNodes(children, slugPath));
+    } else {
+      out.push({ node, slugPath });
+    }
+  }
+  return out;
+}
+
+/** Flatten the nested wiki tree to a list of full slug paths (one per non-FOLDER
+ *  node), recursing `children`. Used for the authored-router structure
+ *  signature so nested structural changes (a guide added/removed/renamed) are
+ *  detected, not just top-level ones. */
+function flattenTreeSlugs(nodes: KnowledgeNode[], parentSlugPath: string[] = []): string[] {
+  return flattenTreeNodes(nodes, parentSlugPath).map((f) => f.slugPath.join("/"));
 }
 
 // ---------------------------------------------------------------------------
@@ -468,7 +531,7 @@ async function fetchCmd(): Promise<void> {
   info(`manifest: ${existsSync(MANIFEST_PATH) ? relative(REPO_ROOT, MANIFEST_PATH) : "(absent — initial seeding)"}`);
 
   // Enumerate remote state.
-  const { items: bpItems, files: bpFiles } = await fetchBlueprintItems(client);
+  const { items: bpItems, files: bpFiles } = await fetchBlueprintItems(client, manifest);
   const wikiItems = await fetchWikiItems(client, manifest);
   const remoteItems = new Map<string, MirroredItem>();
   for (const it of [...bpItems, ...wikiItems]) remoteItems.set(it.key, it);
@@ -675,11 +738,7 @@ async function surfaceAuthoredDiff(client: AuraClient, manifest: Manifest, repor
   // On the first run (no manifest), there's nothing to diff against.
   if (!routerEntry) return;
   const tree = await client.getKnowledgeTree(SPACE_SLUG);
-  const structureSlugs = tree.nodes
-    .filter((n) => n.kind !== "FOLDER")
-    .map((n) => n.slug)
-    .sort()
-    .join("\n");
+  const structureSlugs = flattenTreeSlugs(tree.nodes).sort().join("\n");
   const structureSha = sha256(structureSlugs);
   if (routerEntry.sourceSha256 === structureSha) return; // no structural drift
   // Structural drift: write CURRENT snapshot of the router + a NEW_REMOTE
@@ -687,14 +746,12 @@ async function surfaceAuthoredDiff(client: AuraClient, manifest: Manifest, repor
   const routerAbs = AUTHORED_ROUTER_PATH;
   const currentPath = suffixed(routerAbs, CURRENT_SUFFIX);
   if (!existsSync(currentPath)) renameSyncSafe(routerAbs, currentPath);
+  const flatNodes = flattenTreeNodes(tree.nodes);
   const digest = `# engineering-foundation wiki structure (NEW_REMOTE)\n\n` +
     `The wiki's structure has changed since the router was last reconciled.\n` +
     `Reconcile the routing table in the router SKILL.md against the structure below.\n\n` +
     `## Structural signature\n\n${structureSha}\n\n## Nodes (slug | kind | title)\n\n` +
-    tree.nodes
-      .filter((n) => n.kind !== "FOLDER")
-      .map((n) => `- ${n.slug} | ${n.kind} | ${n.title}`)
-      .join("\n") + "\n";
+    flatNodes.map((n) => `- ${n.slugPath.join("/")} | ${n.node.kind} | ${n.node.title}`).join("\n") + "\n";
   writeSuffixed(routerAbs, NEW_REMOTE_SUFFIX, digest);
   report.edited.push(relative(REPO_ROOT, routerAbs));
   info(`EDIT (authored) ${relative(REPO_ROOT, routerAbs)} -> router reconciliation needed`);
@@ -724,12 +781,32 @@ function scanThreeWay(dir: string): string[] {
 async function finishCmd(): Promise<void> {
   // 1. Gate: refuse if any three-way files remain. `.IGNORE` tombstones are
   //    NOT three-way files — they're consumed below (they pair with a
-  //    NEW_REMOTE file the agent chose not to reconcile).
+  //    NEW_REMOTE file the agent chose not to reconcile). A NEW_REMOTE file
+  //    with a paired `.IGNORE` tombstone is also not unresolved — the
+  //    tombstone flow consumes both — so exclude it from the gate too.
+  const tombstoneStems = new Set<string>();
+  for (const p of scanThreeWay(MIRROR_ROOT)) {
+    if (hasSuffix(p) === "IGNORE") {
+      const b = basename(p);
+      tombstoneStems.add(b.slice(0, -IGNORE_SUFFIX.length));
+    }
+  }
+  const isPairedWithTombstone = (p: string): boolean => {
+    if (hasSuffix(p) !== "NEW_REMOTE") return false;
+    // The NEW_REMOTE file is <stem>.NEW_REMOTE.<ext>; the tombstone is
+    // <stem>.IGNORE. Strip the `.NEW_REMOTE` marker and everything after
+    // it to recover the stem (NOT just the final extension — that would
+    // leave `.NEW_REMOTE` in the stem).
+    const b = basename(p);
+    const marker = b.indexOf(".NEW_REMOTE");
+    const stem = marker > 0 ? b.slice(0, marker) : b;
+    return tombstoneStems.has(stem);
+  };
   const mirrorThreeWay = scanThreeWay(MIRROR_ROOT).filter(
-    (p) => hasSuffix(p) !== "IGNORE",
+    (p) => hasSuffix(p) !== "IGNORE" && !isPairedWithTombstone(p),
   );
   const routerThreeWay = scanThreeWay(dirname(AUTHORED_ROUTER_PATH)).filter((p) =>
-    hasSuffix(p) && p.startsWith(dirname(AUTHORED_ROUTER_PATH)) && hasSuffix(p) !== "IGNORE",
+    hasSuffix(p) && p.startsWith(dirname(AUTHORED_ROUTER_PATH)) && hasSuffix(p) !== "IGNORE" && !isPairedWithTombstone(p),
   );
   // Dedupe.
   const allThreeWay = Array.from(new Set([...mirrorThreeWay, ...routerThreeWay]))
@@ -844,15 +921,34 @@ async function finishCmd(): Promise<void> {
       try {
         const client = await createDefaultAuraClient();
         const tree = await client.getKnowledgeTree(SPACE_SLUG);
-        const structureSlugs = tree.nodes
-          .filter((n) => n.kind !== "FOLDER")
-          .map((n) => n.slug)
-          .sort()
-          .join("\n");
+        const structureSlugs = flattenTreeSlugs(tree.nodes).sort().join("\n");
         manifest.entries[routerKey].sourceSha256 = sha256(structureSlugs);
         manifest.entries[routerKey].auraUpdatedAt = new Date().toISOString();
       } catch {
         info("warning: could not refresh authored router structure signature");
+      }
+    } else {
+      // Bootstrap the authored router entry on the initial seeding: the
+      // first `fetch` has no manifest entry to diff against, so
+      // `surfaceAuthoredDiff` skipped and no entry was created. Seed one now
+      // (with the current structure signature) so subsequent `fetch` runs can
+      // detect structural drift against the router.
+      try {
+        const client = await createDefaultAuraClient();
+        const tree = await client.getKnowledgeTree(SPACE_SLUG);
+        const structureSlugs = flattenTreeSlugs(tree.nodes).sort().join("\n");
+        const key = relative(REPO_ROOT, AUTHORED_ROUTER_PATH);
+        manifest.entries[key] = {
+          wikiPathOrUuid: key,
+          localPath: key,
+          sourceSha256: sha256(structureSlugs),
+          auraChecksumOrVersion: "",
+          auraUpdatedAt: new Date().toISOString(),
+          authored: true,
+        };
+        info(`manifest: bootstrapped authored router entry (${key})`);
+      } catch {
+        info("warning: could not bootstrap authored router structure signature");
       }
     }
   }

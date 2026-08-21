@@ -4788,7 +4788,13 @@ function mapKnowledgeNode(d) {
     // engineering-sync manifest); kept off the named interface via the index
     // signature so callers opt in explicitly.
     updated_at: g2.updated_at,
-    body_hash: g2.body_hash
+    body_hash: g2.body_hash,
+    // Preserve the nested `children` the REST tree carries (the wiki tree is
+    // recursive: folders contain documents/other folders). The named
+    // KnowledgeNode interface hides this behind its index signature so callers
+    // opt in explicitly (engineering-sync recurses it; pretty-printers ignore
+    // it). Without this the nested docs (guides/*, workflow/*) are invisible.
+    children: (g2.children ?? []).map(mapKnowledgeNode)
   };
 }
 function mapUploadDocument(d) {
@@ -5040,14 +5046,14 @@ function sha256(data) {
 }
 function parseBlueprintManifest(content) {
   const parsed = load(content);
-  const list = parsed.files ?? parsed.blocks ?? [];
+  const list = parsed.entries ?? parsed.files ?? parsed.blocks ?? [];
   if (!Array.isArray(list)) return [];
   return list.filter((e) => e && typeof e.path === "string");
 }
-async function fetchBlueprintItems(client2) {
+async function fetchBlueprintItems(client2, manifest) {
   const items = [];
   const files = /* @__PURE__ */ new Map();
-  const manifestRes = await client2.getBlueprintFiles({ path: "manifest.yaml" });
+  const manifestRes = await client2.getBlueprintFiles({ path: "blueprint/manifest.yaml" });
   const manifestFile = manifestRes.files.find((f) => f.path === "blueprint/manifest.yaml" || f.filename === "manifest.yaml");
   if (manifestFile) {
     files.set(manifestFile.path, manifestFile);
@@ -5066,7 +5072,8 @@ async function fetchBlueprintItems(client2) {
   }
   const manifestEntries = parseBlueprintManifest(manifestFile.content);
   for (const entry of manifestEntries) {
-    const bpPath = entry.path.startsWith("blueprint/") ? entry.path : `blueprint/${entry.path}`;
+    const rawPath = entry.path.replace(/\/+$/, "");
+    const bpPath = rawPath.startsWith("blueprint/") ? rawPath : `blueprint/${rawPath}`;
     let res;
     try {
       res = await client2.getBlueprintFiles({ path: bpPath });
@@ -5076,6 +5083,8 @@ async function fetchBlueprintItems(client2) {
     }
     for (const f of res.files) {
       if (files.has(f.path)) continue;
+      const existing = manifest.entries[f.path];
+      const ignored = existing?.ignored === true;
       files.set(f.path, f);
       items.push({
         key: f.path,
@@ -5083,7 +5092,8 @@ async function fetchBlueprintItems(client2) {
         localPath: blueprintPathToLocal(f.path, f.filename),
         remoteSha256: f.checksum,
         auraChecksumOrVersion: f.checksum,
-        auraUpdatedAt: f.provenance.source_commit_sha ?? ""
+        auraUpdatedAt: f.provenance.source_commit_sha ?? "",
+        ignored
       });
     }
   }
@@ -5093,44 +5103,67 @@ function blueprintPathToLocal(bpPath, filename) {
   const under = bpPath.replace(/^blueprint\//, "");
   const dir = dirname2(under);
   const localName = filename || basename(under);
+  if (under.startsWith("rules/")) {
+    return join3("skills/engineering-workflow/resources/rules", localName);
+  }
   return join3("skills/engineering-workflow/resources/blueprint", dir, localName);
 }
 async function fetchWikiItems(client2, manifest) {
   const tree = await client2.getKnowledgeTree(SPACE_SLUG);
   const items = [];
-  for (const node of tree.nodes) {
-    if (node.kind === "FOLDER") continue;
-    const localPath = wikiNodeToLocalPath(node);
-    if (!localPath) continue;
-    const existing = manifest.entries[node.id];
-    const ignored = existing?.ignored === true;
-    items.push({
-      key: node.id,
-      source: "wiki-doc",
-      localPath,
-      kind: node.kind,
-      slug: node.slug,
-      ignored
-    });
-  }
+  const walk = (nodes, parentSlugPath) => {
+    for (const node of nodes) {
+      const slugPath = [...parentSlugPath, node.slug];
+      if (node.kind === "FOLDER") {
+        const children = node.children ?? [];
+        walk(children, slugPath);
+        continue;
+      }
+      const localPath = wikiNodeToLocalPath(slugPath, node);
+      if (!localPath) continue;
+      const existing = manifest.entries[node.id];
+      const ignored = existing?.ignored === true;
+      items.push({
+        key: node.id,
+        source: "wiki-doc",
+        localPath,
+        kind: node.kind,
+        slug: slugPath.join("/"),
+        ignored
+      });
+    }
+  };
+  walk(tree.nodes, []);
   return items;
 }
-function wikiNodeToLocalPath(node) {
-  const n = node;
-  const base = n.source_path ?? node.slug;
-  if (!base) return void 0;
-  let p = base.replace(new RegExp(`^${SPACE_SLUG}/?`), "");
-  if (p.startsWith("blueprint/")) return void 0;
-  const segs = p.split("/");
-  const top = segs[0];
-  const rest = segs.slice(1).join("/");
-  if (top === "INDEX.md" || top === "Log.md") {
-    return join3("skills/engineering-workflow/resources", top);
+function wikiNodeToLocalPath(slugPath, _node) {
+  if (slugPath.length === 0) return void 0;
+  const top = slugPath[0];
+  const rest = slugPath.slice(1).join("/");
+  if (slugPath.length === 1 && (top === "index" || top === "log")) {
+    return join3("skills/engineering-workflow/resources", top === "index" ? "INDEX.md" : "Log.md");
   }
+  if (top === "blueprint") return void 0;
   if (top === "guides" || top === "workflow" || top === "rules") {
-    return join3("skills/engineering-workflow/resources", top, rest);
+    return join3("skills/engineering-workflow/resources", top, rest + ".md");
   }
-  return join3("skills/engineering-workflow/resources", p);
+  return join3("skills/engineering-workflow/resources", slugPath.join("/"));
+}
+function flattenTreeNodes(nodes, parentSlugPath = []) {
+  const out = [];
+  for (const node of nodes) {
+    const slugPath = [...parentSlugPath, node.slug];
+    if (node.kind === "FOLDER") {
+      const children = node.children ?? [];
+      out.push(...flattenTreeNodes(children, slugPath));
+    } else {
+      out.push({ node, slugPath });
+    }
+  }
+  return out;
+}
+function flattenTreeSlugs(nodes, parentSlugPath = []) {
+  return flattenTreeNodes(nodes, parentSlugPath).map((f) => f.slugPath.join("/"));
 }
 function consumeIgnoreTombstones(tombstonePaths, items, _repoRoot) {
   const consumed = [];
@@ -5168,7 +5201,7 @@ async function fetchCmd() {
   const manifest = loadManifest();
   info(`mirror root: ${relative(REPO_ROOT, MIRROR_ROOT)}`);
   info(`manifest: ${existsSync3(MANIFEST_PATH) ? relative(REPO_ROOT, MANIFEST_PATH) : "(absent \u2014 initial seeding)"}`);
-  const { items: bpItems, files: bpFiles } = await fetchBlueprintItems(client2);
+  const { items: bpItems, files: bpFiles } = await fetchBlueprintItems(client2, manifest);
   const wikiItems = await fetchWikiItems(client2, manifest);
   const remoteItems = /* @__PURE__ */ new Map();
   for (const it of [...bpItems, ...wikiItems]) remoteItems.set(it.key, it);
@@ -5316,12 +5349,13 @@ async function surfaceAuthoredDiff(client2, manifest, report) {
   const routerEntry = Object.values(manifest.entries).find((e) => e.authored && e.localPath === relative(REPO_ROOT, AUTHORED_ROUTER_PATH));
   if (!routerEntry) return;
   const tree = await client2.getKnowledgeTree(SPACE_SLUG);
-  const structureSlugs = tree.nodes.filter((n) => n.kind !== "FOLDER").map((n) => n.slug).sort().join("\n");
+  const structureSlugs = flattenTreeSlugs(tree.nodes).sort().join("\n");
   const structureSha = sha256(structureSlugs);
   if (routerEntry.sourceSha256 === structureSha) return;
   const routerAbs = AUTHORED_ROUTER_PATH;
   const currentPath = suffixed(routerAbs, CURRENT_SUFFIX);
   if (!existsSync3(currentPath)) renameSyncSafe(routerAbs, currentPath);
+  const flatNodes = flattenTreeNodes(tree.nodes);
   const digest = `# engineering-foundation wiki structure (NEW_REMOTE)
 
 The wiki's structure has changed since the router was last reconciled.
@@ -5333,7 +5367,7 @@ ${structureSha}
 
 ## Nodes (slug | kind | title)
 
-` + tree.nodes.filter((n) => n.kind !== "FOLDER").map((n) => `- ${n.slug} | ${n.kind} | ${n.title}`).join("\n") + "\n";
+` + flatNodes.map((n) => `- ${n.slugPath.join("/")} | ${n.node.kind} | ${n.node.title}`).join("\n") + "\n";
   writeSuffixed(routerAbs, NEW_REMOTE_SUFFIX, digest);
   report.edited.push(relative(REPO_ROOT, routerAbs));
   info(`EDIT (authored) ${relative(REPO_ROOT, routerAbs)} -> router reconciliation needed`);
@@ -5353,11 +5387,25 @@ function scanThreeWay(dir) {
   return found;
 }
 async function finishCmd() {
+  const tombstoneStems = /* @__PURE__ */ new Set();
+  for (const p of scanThreeWay(MIRROR_ROOT)) {
+    if (hasSuffix(p) === "IGNORE") {
+      const b = basename(p);
+      tombstoneStems.add(b.slice(0, -IGNORE_SUFFIX.length));
+    }
+  }
+  const isPairedWithTombstone = (p) => {
+    if (hasSuffix(p) !== "NEW_REMOTE") return false;
+    const b = basename(p);
+    const marker = b.indexOf(".NEW_REMOTE");
+    const stem = marker > 0 ? b.slice(0, marker) : b;
+    return tombstoneStems.has(stem);
+  };
   const mirrorThreeWay = scanThreeWay(MIRROR_ROOT).filter(
-    (p) => hasSuffix(p) !== "IGNORE"
+    (p) => hasSuffix(p) !== "IGNORE" && !isPairedWithTombstone(p)
   );
   const routerThreeWay = scanThreeWay(dirname2(AUTHORED_ROUTER_PATH)).filter(
-    (p) => hasSuffix(p) && p.startsWith(dirname2(AUTHORED_ROUTER_PATH)) && hasSuffix(p) !== "IGNORE"
+    (p) => hasSuffix(p) && p.startsWith(dirname2(AUTHORED_ROUTER_PATH)) && hasSuffix(p) !== "IGNORE" && !isPairedWithTombstone(p)
   );
   const allThreeWay = Array.from(/* @__PURE__ */ new Set([...mirrorThreeWay, ...routerThreeWay])).filter((p) => {
     const s = hasSuffix(p);
@@ -5449,11 +5497,29 @@ async function finishCmd() {
       try {
         const client2 = await createDefaultAuraClient();
         const tree = await client2.getKnowledgeTree(SPACE_SLUG);
-        const structureSlugs = tree.nodes.filter((n) => n.kind !== "FOLDER").map((n) => n.slug).sort().join("\n");
+        const structureSlugs = flattenTreeSlugs(tree.nodes).sort().join("\n");
         manifest.entries[routerKey].sourceSha256 = sha256(structureSlugs);
         manifest.entries[routerKey].auraUpdatedAt = (/* @__PURE__ */ new Date()).toISOString();
       } catch {
         info("warning: could not refresh authored router structure signature");
+      }
+    } else {
+      try {
+        const client2 = await createDefaultAuraClient();
+        const tree = await client2.getKnowledgeTree(SPACE_SLUG);
+        const structureSlugs = flattenTreeSlugs(tree.nodes).sort().join("\n");
+        const key = relative(REPO_ROOT, AUTHORED_ROUTER_PATH);
+        manifest.entries[key] = {
+          wikiPathOrUuid: key,
+          localPath: key,
+          sourceSha256: sha256(structureSlugs),
+          auraChecksumOrVersion: "",
+          auraUpdatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          authored: true
+        };
+        info(`manifest: bootstrapped authored router entry (${key})`);
+      } catch {
+        info("warning: could not bootstrap authored router structure signature");
       }
     }
   }

@@ -21,6 +21,40 @@ The agent (you, when invoked) is the **mergetool**. The CLI only stages files
 and gates the result; the reconciliation is done by you, per change, using
 the three-way files as context.
 
+## Change inventory (mandatory, written live)
+
+**As the run progresses you MUST keep a change inventory in a markdown file at
+`.pi/engineering-sync-inventory.md`.** Write it **live**, appending a line the
+moment you open, read, run, or change a file — not reconstructed from memory
+at the end (memory inventories hallucinate). The file is the human-readable
+provenance of the run; the author (who may not have been in the loop) needs to
+see, at a glance, what the agent touched and what it only looked at.
+
+The inventory covers **every file you opened, read, or ran** during the
+session — not just the ones you changed. For each entry, state what you did:
+
+- **changed** — what you changed and why (the fix, with the file:line if
+  useful);
+- **read only** — why you looked (and that you left it untouched).
+
+Group by:
+1. Source files changed (with the reason per fix).
+2. Generated/bundled files rebuilt by the pipeline.
+3. Files read but not changed.
+4. Files created by the run (the mirror + manifest).
+
+The inventory is on top of the `finish` gate — the gate only checks that
+diff files are gone. This file is the audit trail `finish` cannot give.
+
+## User review before `finish` (mandatory)
+
+`finish` is the point of no return: it deletes the diff files and writes the
+manifest. **Before you run `finish`, you MUST ask the user to review the
+inventory and the changes** (the inventory file + the `git status` of the
+reconciled mirror). Do not run `finish`, and do not delete any diff files,
+until the user gives explicit approval. See "How to reconcile" for the
+keep-the-diff-files rule.
+
 ## The two subcommands
 
 The utility is built by the repo's esbuild pipeline to
@@ -64,11 +98,13 @@ node .pi/skills/engineering-sync/dist/engineering-sync.mjs finish
 ```
 
 **Refuses and exits non-zero** if any `*.OLD_REMOTE.*` / `*.NEW_REMOTE.*` /
-`*.CURRENT.*` three-way files remain (prints the list). `.IGNORE` tombstones
-(see below) are not three-way files and don't trigger the refusal. On
-success: recomputes the local adapted sha256s from the now-reconciled files,
-consumes any `.IGNORE` tombstones into `ignored: true` manifest entries,
-updates `.pi/engineering-foundation.json`, and removes the fetch report.
+`*.CURRENT.*` three-way files remain (prints the list) — so only run it
+**after the user has approved the run and you have deleted the diff files**
+(see "User review before finish"). `.IGNORE` tombstones (see below) are not
+three-way files and don't trigger the refusal. On success: recomputes the
+local adapted sha256s from the now-reconciled files, consumes any `.IGNORE`
+tombstones into `ignored: true` manifest entries, updates
+`.pi/engineering-foundation.json`, and removes the fetch report.
 
 A partial reconciliation is **not** a success — resolve every cluster before
 finishing.
@@ -84,16 +120,21 @@ key lookups); it is **not** a content change.
 
 Then:
 
-1. Write the reconciled result back to `c.md` (the plain name, no suffix).
-2. Delete all three suffix files (`c.OLD_REMOTE.md`, `c.NEW_REMOTE.md`,
-   `c.CURRENT.md` — or `.mdc` for rules, e.g. `tracker-aura.NEW_REMOTE.mdc`).
+1. Write the reconciled result back to `c.md` (the plain name, no suffix),
+   next to the diff files.
+2. **Do NOT delete the diff files** (`c.OLD_REMOTE.md`, `c.NEW_REMOTE.md`,
+   `c.CURRENT.md` — or `.mdc` for rules). Keep them in place so the user can
+   review the reconciliation against the source versions.
 3. Repeat for every cluster.
-4. Run `finish`. If it refuses, it prints the unresolved files — fix them
-   and re-run.
+4. **Ask the user to review** the inventory (`.pi/engineering-sync-inventory.md`)
+   and the reconciled mirror. Do not proceed until they approve.
+5. **After the user approves**, delete all the diff files for every cluster
+   (the `*.OLD_REMOTE.*`, `*.NEW_REMOTE.*`, `*.CURRENT.*`), then run `finish`.
+   If `finish` refuses, it prints the unresolved files — fix them and re-run.
 
 For **adds** (only `c.NEW_REMOTE.*` exists), create `c.md` (or `c.mdc`) from
-the `NEW_REMOTE` content, applying pi adaptations for skills, then delete the
-`NEW_REMOTE` file.
+the `NEW_REMOTE` content, applying pi adaptations for skills — but keep the
+`NEW_REMOTE` file until the user approves, then delete it with the rest.
 
 For **deletes**, nothing to reconcile — the file is gone; commit the
 removal.
@@ -206,7 +247,8 @@ keyring. If the PAT is missing, run `/aura secrets discover` to store one
 - Do not edit mirrored files by hand to "fix" wiki content — the mirror is
   read-only; corrections go to the wiki, then re-sync.
 - Do not commit `*.OLD_REMOTE.*` / `*.NEW_REMOTE.*` / `*.CURRENT.*` or
-  `*.IGNORE` files — they are staging artifacts; `finish` requires they all
-  be gone (the `.IGNORE` tombstones are consumed, not committed).
+  `*.IGNORE` files — they are staging artifacts kept for review and deleted
+  after the user approves (the `.IGNORE` tombstones are consumed by `finish`,
+  not committed).
 - Do not run the initial seeding casually — use the
   `seed-engineering-mirror` manual task in a separate session.
