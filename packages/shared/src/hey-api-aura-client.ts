@@ -152,6 +152,15 @@ async function unwrap<TDomain>(
   return mapper(res.data);
 }
 
+/** Extract a status + message from an SDK error response. */
+function sdkErrorMessage(error: unknown): string {
+  if (error && typeof error === "object" && "detail" in error) {
+    return String((error as { detail: unknown }).detail);
+  }
+  if (typeof error === "string") return error;
+  return JSON.stringify(error);
+}
+
 /** Variant of {@link unwrap} for endpoints that return no body (HTTP 204 / 201 unknown).
  *  Checks for error then returns void; treats a null/undefined data as success. */
 async function unwrapVoid(
@@ -159,15 +168,7 @@ async function unwrapVoid(
 ): Promise<void> {
   if (res.error !== undefined) {
     const status = res.response?.status ?? 0;
-    let msg = "unknown error";
-    if (res.error && typeof res.error === "object" && "detail" in res.error) {
-      msg = String((res.error as { detail: unknown }).detail);
-    } else if (typeof res.error === "string") {
-      msg = res.error;
-    } else {
-      msg = JSON.stringify(res.error);
-    }
-    throw new AuraApiError(status, msg);
+    throw new AuraApiError(status, sdkErrorMessage(res.error));
   }
 }
 
