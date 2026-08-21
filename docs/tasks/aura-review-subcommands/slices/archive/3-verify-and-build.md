@@ -4,7 +4,7 @@ slug: verify-and-build
 title: Verify the full gate + bundle; mark task done
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: s
 blocked_by:
 - wire-aura-mjs-review-subcommands
