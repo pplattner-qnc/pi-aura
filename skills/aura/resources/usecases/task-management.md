@@ -35,16 +35,20 @@ and other tasks.
 | Goal | Tool | Notes |
 |---|---|---|
 | By human key (e.g. AURA-42) | `getTaskByHumanKey` | Single call, preferred |
-| By UUID | `mcpGetTask` | Returns planning hub with linked artifacts/uploads/questions |
+| By UUID | `getTask` | Returns planning hub with linked artifacts/uploads/questions |
 | By Jira key | `getTaskByJiraKey` | For Jira-linked tasks |
-| Search by description | `mcpUnifiedSearch` | `source_types: ["TASK"]` |
+| Search by description | `unifiedSearch` | `source_types: ["TASK"]` |
 | List my tasks | `listTasks` | Filter by status, level, role, tags |
-| Task tree for a project | `getProjectTaskTree` | Nested hierarchy |
-| Task neighborhood | `getTaskNeighborhood` | Scoped hierarchy view |
+| Task neighborhood | `getTaskNeighborhood` | Local hierarchy view (ancestors to root, siblings, direct children); optional `depth` bounds the ancestor chain |
+
+> **Note:** The project task tree is not available via MCP after
+> the overhaul. Use `listProjects` (paginated; `archived` filter) to find a
+> project and `getProject` (UUID) for its detail, then the REST endpoint
+> `/projects/{uuid}/tasks` (GET) for the tree, or the Aura UI.
 
 ## Creating tasks
 
-Use `mcpCreateTask` (agent-facing) or `createTask` (full API).
+Use `createTask` (full param set available via MCP).
 
 **Key fields:**
 - `title` (required) — concise task title
@@ -57,12 +61,12 @@ Use `mcpCreateTask` (agent-facing) or `createTask` (full API).
 - `repository_ids` / `repository_uuids` — linked repos
 
 **Best practices:**
-1. **Search first** — `mcpUnifiedSearch({ query: "...", source_types: ["TASK"] })`
+1. **Search first** — `unifiedSearch({ query: "...", source_types: ["TASK"] })`
    to avoid duplicates.
 2. **Set the right level** — SUBTASK for small units, STORY for user-facing
    features, EPIC for multi-story efforts, SAGA for cross-epic initiatives.
 3. **Link repositories** when the task involves code changes.
-4. **Add tags** for discoverability.
+4. **Add tags** for discoverability (`tags` field at create time or `attachTagToTask` later).
 
 ## Updating tasks
 
@@ -76,7 +80,15 @@ READY_FOR_REVIEW → IN_REVIEW → READY_FOR_DEPLOYMENT →
 IN_DEPLOYMENT → DONE
 ```
 
-Tasks can also be `DISCARDED` (via `discardTask`) and reopened (via `reopenTask`).
+Tasks can also be `DISCARDED` (via `discardTask`, `reason` required) and
+reopened (via `reopenTask`, `to_status` + `reason` required).
+
+**Phase goals / deadlines:** Use `batchUpsertTaskPhaseGoals` to
+atomically upsert (or clear) phase-goal rows for a task — each row gives a
+work `phase`, a day-only `deadline`, and a free-text `goal_description`. A
+row with `deadline: null` and an empty `goal_description` deletes that
+phase goal. The target status must be part of the task's status series and
+not already reached.
 
 **Important notes:**
 - Changing `level` (e.g. SUBTASK → STORY) usually requires setting
@@ -94,6 +106,17 @@ Use `createTaskRelation` to link tasks:
 | `PART_OF` | Composition (child → parent) |
 | `BLOCKS` | This task blocks another |
 | `DUPLICATES` | This task duplicates another |
+
+## Tags
+
+Tags help discoverability and grouping. Use `attachTagToTask` to attach a
+tag by name (upsert-by-slug, idempotent) after creation, and `listTags` to
+browse existing tags (paginated, with usage counts; `q` for prefix search).
+
+## Phase goals / deadlines
+
+See `batchUpsertTaskPhaseGoals` in the [Updating tasks](#updating-tasks)
+section.
 
 ## Tracking progress
 
@@ -114,16 +137,17 @@ This appears in the Aura Timeline and never triggers notifications.
 
 Use `createComment` with `entity_type: "TASK"` to add comments. Set
 `is_ai_generated: true` when posting as an agent. Use `listComments` to read
-existing discussion.
+existing discussion. To @-mention people in a comment, first resolve
+mention candidates with `listMentionCandidates` (pass `entity_type: "TASK"`
+and the task `entity_id`; each candidate carries a `has_access` flag) and
+include the handles in the comment body. To edit a comment's body or
+mentions, use `updateComment` (author-only; keep `is_ai_generated: true` on
+edits — the `mentioned_user_ids` array re-resolves @mentions). For broader
+people-finding use `searchUsers` (min 2 chars, all authenticated users) or
+`listUsers` (admin only, paginated).
 
 ## Owner and crew management
 
-| Action | Tool |
-|---|---|
-| Apply as owner | `applyForOwner` |
-| Apply as crew | `applyAsCrew` |
-| Invite crew | `inviteCrew` |
-| Start owner search | `startOwnerSearch` |
-| Start crew search | `startCrewSearch` |
-| Set member roles | `setTaskMemberRoles` |
-| Add member | `addTaskMember` |
+Owner/crew assignment is not available via MCP after the overhaul. Use the
+Aura UI, or the REST endpoints in `openapi-new.yaml` (`/tasks/{uuid}/owner-search*`,
+`/tasks/{uuid}/crew-search*`).

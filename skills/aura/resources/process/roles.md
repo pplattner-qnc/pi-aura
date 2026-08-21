@@ -53,16 +53,6 @@ Reviews plans (Alignment) or results (Review). Does not implement.
 
 ## Relevant MCP tools
 
-| Action | Tool |
-|---|---|
-| Apply as owner | `applyForOwner` |
-| Apply as crew | `applyAsCrew` |
-| Invite crew | `inviteCrew` |
-| Start owner search | `startOwnerSearch` |
-| Start crew search | `startCrewSearch` |
-| End crew search | `endCrewSearch` |
-| Set member roles | `setTaskMemberRoles` |
-| Add member | `addTaskMember` |
-| Update participation | `updateTaskMemberParticipation` |
-| List owner-search tasks | `listLookingForOwnerTasks` |
-| List crew-search tasks | `listLookingForCrewTasks` |
+Owner/crew assignment is not available via MCP after the overhaul. Use the
+Aura UI, or the REST endpoints in `openapi-new.yaml` (`/tasks/{uuid}/owner-search*`,
+`/tasks/{uuid}/crew-search*`).

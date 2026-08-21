@@ -11,8 +11,8 @@ with frontmatter support.
 Via MCP:
 
 ```
-mcpWikiSearch({ query: "deployment pipeline", limit: 10 })
-mcpWikiSearch({ query: "deployment pipeline", space_slug: "engineering", limit: 5 })
+searchKnowledge({ query: "deployment pipeline", limit: 10 })
+searchKnowledge({ query: "deployment pipeline", space_slug: "engineering", limit: 5 })
 ```
 
 Via `aura.mjs` (inline results — search returns small summaries, safe on stdout):
@@ -62,7 +62,7 @@ node skills/aura/dist/aura.mjs wiki tree --slug "knowledge-hub"
 ### Cross-entity search
 
 ```
-mcpUnifiedSearch({ query: "...", source_types: ["KNOWLEDGE_DOCUMENT"] })
+unifiedSearch({ query: "...", source_types: ["KNOWLEDGE_DOCUMENT"] })
 ```
 
 Also `searchKnowledge` for hybrid search over wiki, repository, and skill
@@ -185,12 +185,44 @@ updateKnowledgeNode({
 restoreKnowledgeNodeVersion({ uuid: "<node-uuid>", version: 2 })
 ```
 
+### Space administration
+
+```
+createKnowledgeSpace({
+  slug: "engineering",
+  title: "Engineering",
+  description: "Engineering knowledge base",
+  visibility: "PRIVATE",         // PRIVATE | PUBLIC_READ | PUBLIC_WRITE
+  embedding_enabled: true,       // enable semantic search indexing
+  editor_user_ids: ["<uuid>"]    // grant read+write editors on creation
+})
+
+updateKnowledgeSpace({
+  slug: "engineering",
+  title: "Engineering Wiki",
+  description: "Updated description",
+  visibility: "PUBLIC_READ",
+  embedding_enabled: false,
+  editor_user_ids: ["<uuid>"]    // full replacement list (owner-only)
+})
+```
+
+`listKnowledgeSpaces` and `getKnowledgeSpace` (listed in the browse table
+above) cover read access; `createKnowledgeSpace`/`updateKnowledgeSpace`
+are for creating and modifying spaces. `createKnowledgeSpace` requires
+`slug` + `title`; `description`, `visibility`, `embedding_enabled`, and
+`editor_user_ids` are optional. `updateKnowledgeSpace` accepts the same
+fields (all optional) — `editor_user_ids` is a full replacement list
+(owner-only).
+
 ### Upload files and images
 
-| Action | Tool |
-|---|---|
-| Upload file to space | `uploadKnowledgeFile` |
-| Upload image for a node | `uploadKnowledgeNodeImage` |
+> **Not available via MCP.** File and image uploads are REST-only — use
+> REST (`POST /knowledge/nodes/{uuid}/file` for files,
+> `POST /knowledge/nodes/{uuid}/images` for node images) or the Aura UI.
+> The MCP surface covers reading and editing document bodies/frontmatter
+> via `saveKnowledgeNodeBody`/`saveKnowledgeNodeFrontmatter`, but binary
+> uploads require the REST endpoints above.
 
 ## Best practices
 

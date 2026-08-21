@@ -47,6 +47,13 @@ Best for: breaking async ping-pong that has gone on too long.
 | Comment on artifact | `createComment` with `entity_type: "ARTIFACT"` |
 | Comment on task | `createComment` with `entity_type: "TASK"` |
 | List comments | `listComments` |
-| Request artifact review | `requestArtifactReview` |
-| Get review status | `getArtifactReview` |
-| Submit review decision | `submitArtifactDecision` |
+
+> **Artifact review workflow tools are not available via MCP after the
+> aura-mcp-dev overhaul.** The gone tools — `requestArtifactReview` (not
+> available via MCP), `getArtifactReview` (not available via MCP),
+> `submitArtifactDecision` (not available via MCP), `startArtifactReview`
+> (not available via MCP), `reopenArtifactReview` (not available via MCP),
+> `getArtifactApprovals` (not available via MCP) — have REST endpoints in
+> `openapi-new.yaml`. Use `aura.mjs artifact review-*` subcommands, or the
+> REST endpoints (`/artifacts/{id}/review-request`, `/artifacts/{id}/review`,
+> `/artifacts/{id}/decisions`, `/artifacts/{id}/approvals`).

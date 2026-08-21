@@ -8,7 +8,7 @@ description: Work with Aura — the AI-native project management and knowledge p
 Aura is an AI-native project management and knowledge platform. It combines task
 management, documentation (artifacts), a wiki/knowledge base, code search, and
 organizational memory into a single system. The `aura-mcp-dev` MCP server exposes
-~195 tools for interacting with all of these capabilities.
+90 tools for interacting with all of these capabilities.
 
 ## What Aura can do
 
@@ -27,7 +27,12 @@ organizational memory into a single system. The `aura-mcp-dev` MCP server expose
   services, people, tasks, and concepts with confidence-scored edges
 - **Signals** — inbound planning signals that can be triaged into tasks
 - **Skills** — reusable skill documents with assets, plugins, and import/export
-- **Glossary** — shared vocabulary with proposal/approval workflow
+- **Glossary** — shared vocabulary with proposal/approval workflow:
+  - `createGlossaryEntry` — create an entry with `term`, `definition`, `category` (`ACRONYM`/`DOMAIN_CONCEPT`/`PRODUCT`/`PROCESS`), optional `language` (`DE`/`EN`), `aliases`, `source`; triggers embedding on create.
+  - `getGlossaryEntry` — fetch a single entry by `uuid`.
+  - `listGlossaryEntries` — paginated list (all authenticated users); `q` search, `category` filter, `sort_by` (`term`/`category`/`created_at`/`updated_at`).
+  - `updateGlossaryEntry` — update `term`/`definition`/`category`/`language`/`aliases`/`source` by `uuid`; re-embeds the entry.
+  - `listPendingGlossaryEntries` — list entries awaiting review (admin-only, `MANAGE_GLOSSARY` capability; `PENDING` entries are never embedded/searchable until approved).
 - **Notifications** — per-user preference matrix and notification inbox
 - **Capacity** — team capacity tracking and leadership overview
 - **Comments** — threaded comments on tasks and artifacts with mentions
@@ -72,19 +77,39 @@ All tools are prefixed with `aura_2d_mcp_2d_dev_`. There are two families:
 
 1. **`mcp*` tools** — agent-facing tools designed for MCP clients. These use
    the caller's PAT for authentication and are the primary interface for
-   agent workflows.
+   agent workflows. Only **10 `mcp*` tools** survive on the live 90-tool
+   server:
+   - `mcpAnswerQuestion` — answer a question directed at you.
+   - `mcpCreateArtifact` — create a new artifact (plan, review, generic doc).
+   - `mcpCreateUploadDocument` — upload a document and create an artifact for it.
+   - `mcpGetKnowledgeDocument` — fetch a knowledge-base document.
+   - `mcpGetQuestion` — fetch a question directed at you.
+   - `mcpGetRepoDocument` — fetch a repository document.
+   - `mcpGetUploadDocument` — fetch an uploaded document.
+   - `mcpLinkUploadToTask` — link an uploaded document to a task.
+   - `mcpListCodeRepositories` — list the allowlisted Bitbucket repositories.
+   - `mcpUpdateArtifact` — update an artifact (full or section mode).
+
 2. **All other tools** — the full Aura API surface, including admin operations,
    board views, notifications, capacity, and user management. These are equally
    available and useful for broader workflows.
 
+   Capabilities that left MCP entirely (capacity, board, notifications write,
+   artifact review flow, owner/crew search, Jira/Asana linking, memory-graph
+   expansion, skills admin import pipeline, wiki file/image upload) are **not
+   available via MCP** — use the REST API (see `openapi-new.yaml` for paths and
+   operationIds) or the Aura UI.
+
 ### Key patterns
 
 - **Always search first** before creating tasks or artifacts to avoid duplicates.
-  Use `mcpUnifiedSearch` or `unifiedSearch` with relevant source types.
+  Use `unifiedSearch` (cross-entity) or `searchKnowledge` (wiki/knowledge base)
+  with relevant source types.
 - **Use human keys** (e.g. `AURA-42`) to reference tasks when possible;
   `getTaskByHumanKey` resolves them in a single call.
-- **Prefer `mcp*` variants** when both exist (e.g. `mcpGetTask` over `getTask`)
-  as they are optimized for agent consumption.
+- **Prefer the surviving `mcp*` variants** when one exists (the 10 listed
+  above). For capabilities with no `mcp*` variant, use the matching base tool:
+  `getTask`, `getArtifact`, `getSkill`, `unifiedSearch`, `searchKnowledge`.
 - **Section-mode updates** for artifacts: use `mcpUpdateArtifact` with
   `mode: "section"` and `target_heading` for large documents to avoid
   output budget issues.

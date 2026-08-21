@@ -59,35 +59,12 @@ Edges also have a `status`: `CONFIRMED`, `CANDIDATE`, `SUPERSEDED`, or
 
 ## Exploring the graph
 
-### `getMemoryGraph` — expand from an anchor
-
-```
-getMemoryGraph({
-  anchor: "<entity-stable-id>",
-  depth: 2,
-  include_candidates: "false",
-  include_superseded: "false",
-  show_evidence_edges: "true"
-})
-```
-
-**Filters:** `confidence_min`, `entity_type`, `fact_layer`, `status`,
-`edge_origin`, `predicate`, `sensitivity`
-
-Edge line style: solid = structural/source, dashed = inferred/candidate.
-
-### `getMemoryMap` — cluster overview
-
-```
-getMemoryMap({
-  level: "overview",
-  include_candidates: "false",
-  include_superseded: "false",
-  show_evidence_edges: "false"
-})
-```
-
-Returns aggregated clusters of connected entities.
+Graph expansion (`getMemoryGraph`/`getMemoryMap`) is not available via MCP
+after the overhaul. Use `listMemoryEntities` for the faceted entity list,
+`getMemoryEntitySource` to resolve an entity's source, and
+`reportMemoryEntityQuestion` to flag questionable entities. For
+anchor→depth expansion, use the REST endpoints `/memory/graph` and
+`/memory/map` (see `openapi-new.yaml`).
 
 ### `listMemoryEntities` — faceted entity list
 
@@ -103,11 +80,9 @@ listMemoryEntities({
 })
 ```
 
-### `mcpExpandGraph` — agent-facing graph expansion
-
-```
-mcpExpandGraph({ stable_id: "<entity-stable-id>", depth: 2 })
-```
+Returns a faceted list of entities matching the query, optionally filtered
+by type, status, and provenance. Use this to find entities of interest
+before resolving their sources or expanding the graph via REST.
 
 ### `getMemoryEntitySource` — resolve entity source
 
@@ -115,8 +90,16 @@ mcpExpandGraph({ stable_id: "<entity-stable-id>", depth: 2 })
 getMemoryEntitySource({ stable_id: "<entity-stable-id>" })
 ```
 
+Returns the source system and provenance for a given entity, so you can
+trace where a graph node originated (e.g. which task or Jira issue it came
+from).
+
 ## Reporting issues
 
 ```
 reportMemoryEntityQuestion({ stable_id: "<entity-stable-id>", reason: "..." })
 ```
+
+Flags an entity as questionable — e.g. an inferred edge that seems wrong, a
+duplicate entity, or a stale fact. Use this whenever the graph surfaces
+something that doesn't look right so the system can re-evaluate.
