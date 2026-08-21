@@ -167,7 +167,7 @@ node skills/aura/dist/aura.mjs artifact review-start <artifact-uuid> \
   --deadline <iso-deadline>
 
 # 5. Reopen an approved review
-node skills/aura/dist/aura.mjs artifact review-reopen <artifact-uuid>
+node skills/aura/dist/aura.mjs artifact review-reopen <artifact-uuid> --version <version>
 
 # 6. Check approval status (decisions + decided/total counts)
 node skills/aura/dist/aura.mjs artifact review-approvals <artifact-uuid>
