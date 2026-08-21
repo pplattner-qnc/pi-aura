@@ -8062,6 +8062,44 @@ var getArtifact = (options) => {
     ...options
   });
 };
+var requestArtifactReview = (options) => {
+  return (options.client ?? client).post({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
+    url: "/artifacts/{id}/review-request",
+    ...options
+  });
+};
+var submitArtifactDecision = (options) => {
+  return (options.client ?? client).post({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
+    url: "/artifacts/{id}/decisions",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers
+    }
+  });
+};
 var getArtifactApprovals = (options) => {
   return (options.client ?? client).get({
     security: [
@@ -8077,6 +8115,48 @@ var getArtifactApprovals = (options) => {
     ],
     url: "/artifacts/{id}/approvals",
     ...options
+  });
+};
+var startArtifactReview = (options) => {
+  return (options.client ?? client).post({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
+    url: "/artifacts/{id}/review-start",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers
+    }
+  });
+};
+var reopenArtifactReview = (options) => {
+  return (options.client ?? client).post({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
+    url: "/artifacts/{id}/review-reopen",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers
+    }
   });
 };
 var getArtifactReview = (options) => {
@@ -8247,6 +8327,19 @@ async function unwrap(res, mapper) {
     throw new AuraApiError(res.response?.status ?? 0, "empty response");
   }
   return mapper(res.data);
+}
+function sdkErrorMessage(error2) {
+  if (error2 && typeof error2 === "object" && "detail" in error2) {
+    return String(error2.detail);
+  }
+  if (typeof error2 === "string") return error2;
+  return JSON.stringify(error2);
+}
+async function unwrapVoid(res) {
+  if (res.error !== void 0) {
+    const status = res.response?.status ?? 0;
+    throw new AuraApiError(status, sdkErrorMessage(res.error));
+  }
 }
 var HeyApiAuraClient = class {
   keyring;
@@ -8477,6 +8570,42 @@ var HeyApiAuraClient = class {
   async getArtifactReview(id) {
     const res = await getArtifactReview({ client: this.client, path: { id } });
     return unwrap(res, mapArtifactReview);
+  }
+  async requestArtifactReview(id) {
+    const res = await requestArtifactReview({ client: this.client, path: { id } });
+    return unwrapVoid(res);
+  }
+  async startArtifactReview(input) {
+    const res = await startArtifactReview({
+      client: this.client,
+      path: { id: input.id },
+      body: {
+        version: input.version,
+        roles: input.roles,
+        userIds: input.user_ids,
+        deadline: input.deadline
+      }
+    });
+    return unwrapVoid(res);
+  }
+  async submitArtifactDecision(input) {
+    const res = await submitArtifactDecision({
+      client: this.client,
+      path: { id: input.id },
+      body: {
+        version: input.version,
+        decision: input.decision
+      }
+    });
+    return unwrapVoid(res);
+  }
+  async reopenArtifactReview(id, version2) {
+    const res = await reopenArtifactReview({
+      client: this.client,
+      path: { id },
+      body: { version: version2 }
+    });
+    return unwrapVoid(res);
   }
 };
 function mapPagination(p) {

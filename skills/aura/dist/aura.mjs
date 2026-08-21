@@ -1053,6 +1053,44 @@ var getArtifact = (options) => {
     ...options
   });
 };
+var requestArtifactReview = (options) => {
+  return (options.client ?? client).post({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
+    url: "/artifacts/{id}/review-request",
+    ...options
+  });
+};
+var submitArtifactDecision = (options) => {
+  return (options.client ?? client).post({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
+    url: "/artifacts/{id}/decisions",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers
+    }
+  });
+};
 var getArtifactApprovals = (options) => {
   return (options.client ?? client).get({
     security: [
@@ -1068,6 +1106,48 @@ var getArtifactApprovals = (options) => {
     ],
     url: "/artifacts/{id}/approvals",
     ...options
+  });
+};
+var startArtifactReview = (options) => {
+  return (options.client ?? client).post({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
+    url: "/artifacts/{id}/review-start",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers
+    }
+  });
+};
+var reopenArtifactReview = (options) => {
+  return (options.client ?? client).post({
+    security: [
+      {
+        in: "cookie",
+        name: "aura-session",
+        type: "apiKey"
+      },
+      {
+        scheme: "bearer",
+        type: "http"
+      }
+    ],
+    url: "/artifacts/{id}/review-reopen",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers
+    }
   });
 };
 var getArtifactReview = (options) => {
@@ -1238,6 +1318,19 @@ async function unwrap(res, mapper) {
     throw new AuraApiError(res.response?.status ?? 0, "empty response");
   }
   return mapper(res.data);
+}
+function sdkErrorMessage(error) {
+  if (error && typeof error === "object" && "detail" in error) {
+    return String(error.detail);
+  }
+  if (typeof error === "string") return error;
+  return JSON.stringify(error);
+}
+async function unwrapVoid(res) {
+  if (res.error !== void 0) {
+    const status = res.response?.status ?? 0;
+    throw new AuraApiError(status, sdkErrorMessage(res.error));
+  }
 }
 var HeyApiAuraClient = class {
   keyring;
@@ -1468,6 +1561,42 @@ var HeyApiAuraClient = class {
   async getArtifactReview(id) {
     const res = await getArtifactReview({ client: this.client, path: { id } });
     return unwrap(res, mapArtifactReview);
+  }
+  async requestArtifactReview(id) {
+    const res = await requestArtifactReview({ client: this.client, path: { id } });
+    return unwrapVoid(res);
+  }
+  async startArtifactReview(input) {
+    const res = await startArtifactReview({
+      client: this.client,
+      path: { id: input.id },
+      body: {
+        version: input.version,
+        roles: input.roles,
+        userIds: input.user_ids,
+        deadline: input.deadline
+      }
+    });
+    return unwrapVoid(res);
+  }
+  async submitArtifactDecision(input) {
+    const res = await submitArtifactDecision({
+      client: this.client,
+      path: { id: input.id },
+      body: {
+        version: input.version,
+        decision: input.decision
+      }
+    });
+    return unwrapVoid(res);
+  }
+  async reopenArtifactReview(id, version) {
+    const res = await reopenArtifactReview({
+      client: this.client,
+      path: { id },
+      body: { version }
+    });
+    return unwrapVoid(res);
   }
 };
 function mapPagination(p) {
@@ -1716,6 +1845,12 @@ var USAGE = `Usage:
   node aura.mjs artifact create --title T --kind K [--body-file F] [--summary S]
   node aura.mjs artifact section <id> --heading H --body B --summary S
   node aura.mjs artifact cleanup <workdir> | --stale
+  node aura.mjs artifact review-get <id>                  compact review state
+  node aura.mjs artifact review-approvals <id>            decisions + decided/total
+  node aura.mjs artifact review-request <id>             request a review
+  node aura.mjs artifact review-start <id> --version V --roles R[,R] --user-ids U[,U] [--deadline D]
+  node aura.mjs artifact review-decide <id> --version V --decision APPROVED|REJECTED
+  node aura.mjs artifact review-reopen <id> --version V  reopen an approved review
   node aura.mjs wiki get --slug "eng/auth" | --uuid <node-uuid>   fetch body+meta into a workdir
   node aura.mjs wiki save <workdir> [--summary S]                upload, then remove workdir
   node aura.mjs wiki search "<query>" [--space <slug>] [--limit N]
@@ -1817,6 +1952,65 @@ async function artifactSection(client2, id, heading, body, summary) {
     summary
   });
   console.error(`updated section ${heading} of ${id}`);
+}
+function parseCsv(value) {
+  if (!value) return [];
+  return value.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+}
+async function reviewGet(client2, id) {
+  const review = await client2.getArtifactReview(id);
+  console.log(`artifact ${id}  v${review.version}  state: ${review.review_state}`);
+  if (review.reviewers.length > 0) {
+    console.log("  reviewers:");
+    for (const r of review.reviewers) {
+      console.log(`    ${r.user_name} (${r.user_id})  ${r.status}`);
+    }
+  } else {
+    console.log("  reviewers: (none)");
+  }
+  if (review.review_deadline_at) console.log(`  deadline: ${review.review_deadline_at}`);
+  const init = review.initiator;
+  console.log(`  initiator: ${init ? `${init.user_name} (${init.user_id})` : "(none)"}`);
+}
+async function reviewApprovals(client2, id) {
+  const ap = await client2.getArtifactApprovals(id);
+  console.log(`artifact ${id}  v${ap.version} (latest ${ap.latest_version})  ${ap.decided_count}/${ap.total_required} decided`);
+  for (const d of ap.decisions) {
+    console.log(`  ${d.user_name}: ${d.decision}`);
+  }
+  if (ap.open_reviews.length > 0) {
+    console.log("  pending:");
+    for (const o of ap.open_reviews) {
+      const tag = o.decided ? "decided" : "open";
+      console.log(`    ${o.user_name} (${o.user_id})  ${tag}`);
+    }
+  }
+}
+async function reviewRequest(client2, id) {
+  await client2.requestArtifactReview(id);
+  console.log(`review requested for ${id}`);
+}
+async function reviewStart(client2, opts) {
+  await client2.startArtifactReview({
+    id: opts.id,
+    version: opts.version,
+    roles: opts.roles,
+    user_ids: opts.userIds,
+    deadline: opts.deadline
+  });
+  console.log(`review started for ${opts.id} v${opts.version} (roles: ${opts.roles.join(",") || "(none)"}, reviewers: ${opts.userIds.join(",") || "(none)"}${opts.deadline ? `, deadline: ${opts.deadline}` : ""})`);
+}
+async function reviewDecide(client2, opts) {
+  await client2.submitArtifactDecision({
+    id: opts.id,
+    version: opts.version,
+    decision: opts.decision
+  });
+  console.log(`${opts.decision} recorded for ${opts.id} v${opts.version}`);
+}
+async function reviewReopen(client2, id, version) {
+  await client2.reopenArtifactReview(id, version);
+  console.log(`review reopened for ${id} v${version}`);
 }
 async function wikiGet(client2, opts) {
   let node;
@@ -1984,6 +2178,63 @@ async function main() {
           if (!dir) fail("artifact cleanup: <workdir> or --stale required", true);
           removeWorkdir(resolve(dir));
           console.error(`cleaned up ${dir}`);
+          return;
+        }
+        case "review-get": {
+          const id = rest[0];
+          if (!id) fail("artifact review-get: missing <id>", true);
+          await reviewGet(client2, id);
+          return;
+        }
+        case "review-approvals": {
+          const id = rest[0];
+          if (!id) fail("artifact review-approvals: missing <id>", true);
+          await reviewApprovals(client2, id);
+          return;
+        }
+        case "review-request": {
+          const id = rest[0];
+          if (!id) fail("artifact review-request: missing <id>", true);
+          await reviewRequest(client2, id);
+          return;
+        }
+        case "review-start": {
+          const id = rest[0];
+          if (!id) fail("artifact review-start: missing <id>", true);
+          const flags = parseFlags(rest.slice(1));
+          if (!flags.version) fail("artifact review-start: --version required", true);
+          if (!flags.roles) fail("artifact review-start: --roles required", true);
+          if (!flags["user-ids"]) fail("artifact review-start: --user-ids required", true);
+          const version = Number(flags.version);
+          if (!Number.isFinite(version)) fail("artifact review-start: --version must be a number", true);
+          const roles = parseCsv(flags.roles);
+          const userIds = parseCsv(flags["user-ids"]);
+          await reviewStart(client2, { id, version, roles, userIds, deadline: flags.deadline });
+          return;
+        }
+        case "review-decide": {
+          const id = rest[0];
+          if (!id) fail("artifact review-decide: missing <id>", true);
+          const flags = parseFlags(rest.slice(1));
+          if (!flags.version) fail("artifact review-decide: --version required", true);
+          if (!flags.decision) fail("artifact review-decide: --decision required", true);
+          const version = Number(flags.version);
+          if (!Number.isFinite(version)) fail("artifact review-decide: --version must be a number", true);
+          const decision = flags.decision.toUpperCase();
+          if (decision !== "APPROVED" && decision !== "REJECTED") {
+            fail("artifact review-decide: --decision must be APPROVED or REJECTED", true);
+          }
+          await reviewDecide(client2, { id, version, decision });
+          return;
+        }
+        case "review-reopen": {
+          const id = rest[0];
+          if (!id) fail("artifact review-reopen: missing <id>", true);
+          const flags = parseFlags(rest.slice(1));
+          if (!flags.version) fail("artifact review-reopen: --version required", true);
+          const version = Number(flags.version);
+          if (!Number.isFinite(version)) fail("artifact review-reopen: --version must be a number", true);
+          await reviewReopen(client2, id, version);
           return;
         }
         default:
