@@ -47,7 +47,7 @@ Specifically:
   initiative (8 tasks, 2026-08-20) at the code layer. Its code (rest-client,
   fetcher migration, review subcommands, test harness) was **dropped** in favor
   of main's `AuraClient`.
-- The original branch's **docs were net-new**: main still has ~30 gone-tool
+- The original branch's **docs were net-new**: main still had ~30 gone-tool
   references across its skill docs that the original branch cleaned to zero,
   plus 21 newly-exposed tools main doesn't document, plus the
   `replacement-table.md` audit. These were salvaged by copying the final doc
@@ -56,9 +56,19 @@ Specifically:
   `aura.mjs artifact review-*` subcommands that existed only in the dropped
   code → catalogued in `dangling-review-cli-refs.md` → re-implemented by the
   `aura-review-subcommands` task.
-- main's `AuraClient` interface has review/approval **types** but no review
-  **verbs** on the interface yet → the review-subcommands task adds them (or
-  calls the generated `HeyApiAuraClient` methods directly).
+- main's `AuraClient` interface had review/approval **types** but no review
+  **verbs** → `aura-review-subcommands` added the 6 verbs + `HeyApiAuraClient`
+  impl + the `aura.mjs` subcommands.
+- **Divergence:** `reopenArtifactReview` requires a `version` param (the
+  generated SDK's `POST /artifacts/{id}/review-reopen` has a required
+  `ArtifactReviewVersionRequest` body). The interface + CLI became
+  `reopenArtifactReview(id, version)` / `aura.mjs artifact review-reopen <id>
+  --version V`; `artifact-management.md` updated to match so the prose stays
+  truthful.
+- `openapi-spec-bump` found the new spec purely additive (no existing
+  operationIds removed/renamed, no schema fields changed); the only removed
+  operation was `mcpGetTask`, which was unused. It also fixed main's
+  pre-existing red typecheck (missing `generated/sdk.gen.js` + an implicit-any).
 
 ## Fog
 
