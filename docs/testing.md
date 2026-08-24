@@ -107,3 +107,34 @@ The extension ships only committed `dist/` (`app.js`, `app.css`, `server.mjs`)
 — zero runtime npm deps for end users. `index.ts` + `listener.ts` are loaded
 by pi's jiti at runtime (not bundled); `server.ts` is esbuild-bundled to
 `dist/server.mjs` (the detached entry `spawn` runs).
+
+### Real-data-shaped fixtures (the stuck-loading regression)
+
+`test/digest-dashboard/real-data-load.test.ts` exists because the small
+`live/digest.json` fixture never triggered the bug that stuck the dashboard on
+"Loading…" with real Aura data. The real `~/.pi/aura/digest.json` had a
+**duplicate task key** (`AURA-742` twice in `attention.waiting_on_others`),
+which made Svelte 5's keyed `{#each … (item.key)}` throw `each_key_duplicate`,
+aborting the render so `loading` never flipped to `false`.
+
+Lesson for future dashboard tests: mirror the **real** `~/.pi/aura/digest.json`
+shape + size (3 actions, 9 queue rows, 2 reviews, 9 `dev_links`, 6
+`older_unread`, 1 warning, AND any duplicate keys the real data has), mock
+`fetch("/api/digest")` with a small `setTimeout` delay (instant-resolve mocks
+don't reproduce the timing), and mock `EventSource` with the `FakeEventSource`
+pattern so the SSE `$effect` doesn't re-fire and race the initial load. Small,
+clean fixtures render fine and hide the real-data crash. Read-only
+attention lists are now keyed by index `(i)` (not `item.key`) since they need
+no identity reconciliation.
+
+### `/digest` command + digest-fetch/save tools
+
+`test/digest-dashboard/slash-command.test.ts` tests the `/digest` extension
+command handler with a fake `pi` (captures `setActiveTools` + `sendMessage`).
+`test/digest-dashboard/fetch-save-tools.test.ts` tests the `digest-fetch` +
+`digest-save` tools with a mocked `child_process.spawn` (no real Aura). The
+tools are thin wrappers over `aura-digest.mjs` (D5: the `.mjs` stays the single
+source of truth). The digest tools (`digest-dashboard-start`,
+`digest-dashboard-stop`, `digest-fetch`, `digest-save`) are registered but
+**inactive by default** — the `session_start` handler filters `DIGEST_TOOLS` out
+of the active set; `/digest` activates them additively.

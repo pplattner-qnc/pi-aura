@@ -13,3 +13,11 @@ dist/**
 
 # Task-workflow runtime state
 docs/tasks/state.yaml
+
+# Subagent per-slice scratch outputs (tdd/verify/deviation/land/ui-noter results)
+# — these are workflow artifacts, not repo content.
+tdd-*/
+verify-*/
+deviation-*/
+land-*/
+ui-note-*/
