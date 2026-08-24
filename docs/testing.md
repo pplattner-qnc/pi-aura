@@ -51,3 +51,22 @@ make build            # typecheck + bundle
   binding / optional `x11` require that can't bundle). Any new native-ish dep
   pulled in transitively via `@pi-aura/shared` must be added to
   `scripts/esbuild.config.mjs`'s `external` array or the bundle breaks.
+
+## `scripts/src/engineering-sync.test.ts`
+
+A logic-only unit test for the sync utility's pure helpers (`suffixed`,
+`hasSuffix`, `consumeIgnoreTombstones`, stem matching). It imports from
+`./engineering-sync.ts`, which in turn re-exports from `@pi-aura/shared`.
+
+**Run it with `tsx`, not `node --experimental-strip-types`:**
+
+```bash
+node_modules/.bin/tsx scripts/src/engineering-sync.test.ts
+```
+
+`node --experimental-strip-types` fails with `ERR_MODULE_NOT_FOUND` for
+`packages/shared/src/hey-api-aura-client.js` because the `.ts` sources
+re-export with a `.js` extension that the raw-node strip-types loader cannot
+resolve through the workspace package boundary. `tsx` resolves it correctly.
+This is a pre-existing `@pi-aura/shared` module-resolution issue, not a test
+logic failure — all 5 sub-tests pass under `tsx`.

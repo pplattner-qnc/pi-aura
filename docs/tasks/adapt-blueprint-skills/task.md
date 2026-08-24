@@ -89,6 +89,26 @@ the substantive body is otherwise carried verbatim.
 
 ## Implementation notes
 
+### Architecture lesson (task-level)
+
+- **The seed already did the adaptation.** Commit `7def2b1` ("adapt on first
+  seed too — no verbatim copies kept") changed the seeding flow *after* this
+  task was written, so the 14 skills arrived already pi-adapted at
+  `resources/blueprint/skills/`. The task's original premise ("adapt from
+  verbatim sources") was stale; the real work was (1) fixing the few residual
+  Cursor-edges the seed missed and (2) relocating to the design-Q6 top-level
+  layout with the sync manifest + utility rewired. Future blueprint-content
+  tasks should check the drift manifest's `adaptedSha256` presence before
+  assuming verbatim sources.
+- **Workflow friction (recorded to telemetry):** (a) the `implement-task`
+  skill's `subagent({chain:[...]})` syntax is not supported by the actual
+  `subagent` tool (`workflowScript` API); a stored-but-unawaited `runs.run`
+  is rejected at static-validation time, which produced a false-negative on
+  slice 1 *after* the tdd-worker had committed (the deviation report was
+  stale as a result). (b) `node --experimental-strip-types` can't run the
+  sync test (`@pi-aura/shared` `.js` re-export issue) — use `tsx`. Both are
+  documented in `docs/testing.md` and in telemetry feedback.
+
 ### Slice 1 — edge-fixes (landed)
 
 - All 8 specified Cursor-edge edits applied across two files:
