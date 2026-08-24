@@ -156,3 +156,14 @@ the temp-dir digest's `actions[]`/`followup`.
 - `dist/aura-digest.mjs` regenerated bundle included in the commit (tracked build artifact per repo convention).
 - Verify output: typecheck, build, followup-working-on.test.ts, build-actions.test.ts regression, packages/shared suite (30/30) all green.
 - Deviation: advisory note — test verifies the type contract (field exists, defaults to null) on a static fixture, not the runtime wiring of `fetch`; the wiring is a one-liner visible in the diff and exercised indirectly by future `fetch` integration tests. Non-blocking.
+
+### Slice 3: digest-json-writer (landed)
+
+- Added `DASHBOARD_DIGEST_PATH = join(homedir(), ".pi", "aura", "digest.json")` constant beside `LAST_DIGEST_PATH` in `aura-digest.ts`.
+- Extracted `writeDashboardDigest(digest, log)` helper into `write-dashboard-digest.ts` (modularity improvement; creates `~/.pi/aura/` if absent, writes the full corrected digest including `actions[]` + `followup`). Identical contract — called inline from `fetch`.
+- `fetch` wires the write call at the end of its digest-build path; temp-dir `digest.json` (for `render`/`save`/`diff`) and `last-digest.json` store are unaffected.
+- Non-fatal warning handling: a write permission/IO error is caught and pushed to `warnings[]` (graceful degradation, mirroring the keyring-skip pattern) rather than crashing `fetch`.
+- New `write-dashboard-digest.test.ts` (3 scenarios): dashboard digest exists after `fetch` with `actions`+`followup`; `~/.pi/aura/` created if absent; temp-dir `digest.json` still present for `render`/`save`.
+- `dist/aura-digest.mjs` regenerated bundle included in the commit (tracked build artifact per repo convention).
+- Verify output: typecheck, build, write-dashboard-digest.test.ts (3 scenarios), build-actions + followup regressions, packages/shared (30/30) all green. No blockers.
+- Deviation: clean — helper extraction into `write-dashboard-digest.ts` is a modularity improvement with identical contract; non-fatal warning handling correct; no out-of-scope changes.
