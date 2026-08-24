@@ -154,3 +154,21 @@ Concretely, done looks like:
 - Mirroring other wiki spaces (only `engineering-foundation`).
 - Editing the wiki content itself — the mirror is read-only; corrections go
   to the wiki, then re-sync.
+
+## Deviation: `adapt-blueprint-skills` overtook by the seed
+
+The `seed-engineering-mirror` run (commit `7def2b1`, "adapt on first seed
+  too — no verbatim copies kept") changed the seeding flow *after* the map's
+  decisions were written: the seed adapts every file in place, so the 14
+  blueprint skills arrived already pi-adapted at
+  `skills/engineering-workflow/resources/blueprint/skills/`. The
+  `adapt-blueprint-skills` task (originally scoped as a from-scratch
+  adaptation from verbatim sources) therefore became (1) fixing the 8
+  residual Cursor-edges the seed missed and (2) moving the 14 skills to the
+  design-Q6 top-level layout `skills/engineering-workflow/<name>/SKILL.md` with
+  the drift manifest + sync utility + router rewired to the new locations.
+  The map's "verbatim source under `resources/blueprint/...` + adapted
+  derivative generated from it" decision (Q5) is superseded in practice by
+  the seed's adapt-in-place flow — there are no verbatim copies on disk; the
+  manifest records `adaptedSha256` directly against the wiki `sourceSha256`.
+  The three-way reconciliation model still holds for steady-state syncs.

@@ -23,9 +23,9 @@ Before anything else, determine **which task** is being refined. Resolve it in t
 
 1. **Explicit reference in the current message** — the user typed a ticket key or task name, actively attached a file via `@`, or described the target in prose. This wins over everything else.
 2. **The task established in the current chat conversation** — typically the task just created via `/task-create`/`/task-draft` earlier in this same conversation. This is the normal case right after drafting.
-3. **Otherwise, ask** — if neither (1) nor (2) unambiguously identifies a task, ask the user via the Q&A module which task to refine. Never guess.
+3. **Otherwise, ask** — if neither (1) nor (2) unambiguously identifies a task, ask the user via `ask_user_question` which task to refine. Never guess.
 
-**A file open or focused in the editor is never evidence of the target, on its own.** In particular, an automatically injected editor-context block (e.g. Cursor's "open and recently viewed files") does **not** count as an explicit reference under (1) — only a deliberate user action does (typing the key/name, attaching via `@`, or describing it in prose). Silently picking up an unrelated open file as the refinement target is the single most common source of confusion in this skill; treat it as a hard rule, not a heuristic.
+**A file open or focused in the editor is never evidence of the target, on its own.** In particular, an automatically injected editor-context block (e.g. an IDE's automatically injected "open and recently viewed files" context) does **not** count as an explicit reference under (1) — only a deliberate user action does (typing the key/name, attaching via `@`, or describing it in prose). Silently picking up an unrelated open file as the refinement target is the single most common source of confusion in this skill; treat it as a hard rule, not a heuristic.
 
 **Always state the resolved target in one sentence before starting the interview** — even when it is unambiguous from the conversation. This surfaces a wrong resolution immediately instead of after a round of questions.
 
@@ -33,7 +33,7 @@ Before anything else, determine **which task** is being refined. Resolve it in t
 
 Interview me relentlessly about every aspect of this plan until we reach a shared understanding. Walk down each branch of the design tree, resolving dependencies between decisions one-by-one.
 
-Ask the questions one at a time using Cursor's Question & Answer (Q&A) module — the structured multiple-choice question tool — rather than plain prose. For each question:
+Ask the questions one at a time using pi's `ask_user_question` tool — the structured multiple-choice question tool — rather than plain prose. For each question:
 
 - Offer concrete answer options, not an open-ended prompt.
 - Put your recommended answer first and mark it with "(Recommended)" in the label.
@@ -45,9 +45,9 @@ If a question can be answered by exploring the codebase, explore the codebase in
 
 A fresh AI draft is usually skimmed, not truly read. So a bare multiple-choice question feels ripped out of context: the user cannot tell what it refers to in the plan, why it matters, or what the options practically mean — and ends up "confirming" decisions they never actually understood. Refinement must therefore *actively build* the user's understanding, not assume it. This is not a separate phase; it is how every question in the interview is posed.
 
-Before each question, explain — as a natural, flowing conversation in the chat — what the question is about: which part of the plan it touches, why it matters, and what the options mean in practice. Then ask the clean, short question via the Q&A module.
+Before each question, explain — as a natural, flowing conversation in the chat — what the question is about: which part of the plan it touches, why it matters, and what the options mean in practice. Then ask the clean, short question via `ask_user_question`.
 
-- **Context goes in the chat prose right before the Q&A call**, never stuffed into the question prompt or the answer labels — those stay short and clean.
+- **Context goes in the chat prose right before the `ask_user_question` call**, never stuffed into the question prompt or the answer labels — those stay short and clean.
 - **Keep it a casual, continuous conversation.** Do not label the context ("Kontext:") and do not number the questions ("Frage 1/5"); just talk to the user.
 - **Scale the depth to the question's difficulty:** a tricky, deep-in-the-plan decision gets a fuller lead-in; an obvious one gets a single sentence. Never pad a trivial question.
 - **Comprehension-by-reading, not a quiz:** the aim is that the user understands by following your explanation (explain → ask). Do not interrogate the user to "check" that they understood. Checking is a separate step at a later point in the lifecycle, and it has its own skill — [`/task-quiz`](../task-quiz/SKILL.md) puts the *finished* plan up against the picture in its author's head. Here the plan is still being decided, and a comprehension check would interrupt the very decision it is testing.
@@ -61,7 +61,7 @@ A grilling round accretes decisions incrementally — Grimmy answers, refinement
 
 Once the interview reaches the same completeness bar as the Closing step below (shared understanding, no open questions, phase `Refined`) — and only then — judge whether the plan actually reads as fragmented, keyword-like, or redundant. If it already reads as one coherent, well-structured document, skip this step entirely; do not offer it reflexively on every run.
 
-If the plan does look stitched together, offer the rewrite via the Q&A tool, e.g. "The plan looks a bit fragmented from the grilling round — should I rewrite it now as one clean, coherent document?". On agreement, rewrite the plan **in the same turn**:
+If the plan does look stitched together, offer the rewrite via `ask_user_question`, e.g. "The plan looks a bit fragmented from the grilling round — should I rewrite it now as one clean, coherent document?". On agreement, rewrite the plan **in the same turn**:
 
 - **Losslessly.** No information gathered during refinement may be lost. Resolved open questions are folded in as the decisions actually made — they no longer appear as "open" — while genuine remaining uncertainties stay explicit.
 - **Following the plan's existing structure.** Smooth and consolidate the sections already present; do not force a different template onto the content.

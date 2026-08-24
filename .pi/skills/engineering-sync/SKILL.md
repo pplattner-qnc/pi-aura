@@ -152,7 +152,7 @@ of wiki item → repo path). The wiki-dir → repo-dir mapping `fetch` uses:
 | Wiki source | Repo destination |
 |---|---|
 | `blueprint/manifest.yaml` | `skills/engineering-workflow/resources/blueprint/manifest.yaml` |
-| `blueprint/skills/<name>/SKILL.md` (+ companion `.ts`) | `skills/engineering-workflow/resources/blueprint/skills/<name>/SKILL.md` (+ the `.ts`) |
+| `blueprint/skills/<name>/SKILL.md` (+ companion `.ts`) | `skills/engineering-workflow/<name>/SKILL.md` (+ the `.ts`) |
 | `blueprint/rules/<name>.mdc` | `skills/engineering-workflow/resources/rules/<name>.mdc` (flat, one dir) |
 | `index` (top-level doc) | `skills/engineering-workflow/resources/INDEX.md` |
 | `log` (top-level doc) | `skills/engineering-workflow/resources/Log.md` |
@@ -266,7 +266,7 @@ inventory:
 - **Placement vs the consumer** — every plain file's path matches the layout
   the `engineering-workflow` SKILL.md router's routing table expects (INDEX.md,
   Log.md, `workflow/`, `guides/`, `rules/`, `blueprint/manifest.yaml`,
-  `blueprint/skills/<name>/SKILL.md`). Flag any path the sync utility chose that
+  `<name>/SKILL.md`). Flag any path the sync utility chose that
   the router doesn't list.
 - **No orphans, no missing** — the plain-file set is exactly the expected
   count (first seed: 1 manifest + INDEX + Log + 4 guides + 2 workflow + 15
@@ -343,7 +343,7 @@ wiki canonical identity (blueprint path or knowledge-node uuid):
   "entries": {
     "blueprint/skills/ai-setup/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/ai-setup/skill.md",
-      "localPath": "skills/engineering-workflow/resources/blueprint/skills/ai-setup/SKILL.md",
+      "localPath": "skills/engineering-workflow/ai-setup/SKILL.md",
       "sourceSha256": "sha256:...",
       "auraChecksumOrVersion": "sha256:...",
       "auraUpdatedAt": "<provenance commit sha>",
