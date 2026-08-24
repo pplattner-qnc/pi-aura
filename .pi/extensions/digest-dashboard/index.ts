@@ -386,6 +386,8 @@ export default function (pi: ExtensionAPI): void {
 
   pi.on("session_start", (_event: unknown, ctx: ExtensionContext) => {
     sessionCwd = ctx.cwd;
+    const initial = pi.getActiveTools().filter((n) => !DIGEST_TOOLS.includes(n));
+    pi.setActiveTools([...new Set([...initial])]);
   });
 
   pi.on("session_shutdown", async () => {
