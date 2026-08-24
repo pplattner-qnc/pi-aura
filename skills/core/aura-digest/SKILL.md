@@ -271,15 +271,33 @@ rather than creating it by hand.
 
 ---
 
+## Routing table
+
+This table is a **reference** for which dashboard action routes to which
+`aura` use case. The source of truth is `buildActions` in
+`scripts/src/build-actions.ts`; keep this table in sync with it.
+
+| Section | `action` | `aura_use_case` | Notes |
+|---|---|---|---|
+| 🔴 Overdue | `advance` | `task-management` | max 3 |
+| 🟡 Waiting on you | `unblock` | `task-management` | max 3 |
+| Reviews I owe (current) | `review` | `artifact-management` | review-decision flow is REST/UI; route via artifact-management |
+| Capacity >100% | `flag_capacity` | `capacity-planning` | 1 |
+| Corrections (stale) | — | — | informational, no button |
+| ⚠️ Warnings | `run_setup` | `aura-digest` | 1, only if warnings |
+| Active queue | `advance` | `task-management` | fill to max 6 |
+
+---
+
 ## Scope and handoff
 
 **This skill covers only the fetch + digest + verification + notification
-cleanup.** The moment you move on to any further Aura work — looking up
-tasks, posting or editing comments, reading or editing artifacts, capacity
-changes, wiki work, code search, signals, etc. — **load the `aura` skill** and
-follow its conventions for the remainder of the session. Do not call
-`aura-mcp-dev` tools ad-hoc from this skill; route that work through the `aura`
-skill instead.
+cleanup.** The moment a forwarded click (Step 4 step 6) asks you to act on an
+item — looking up tasks, posting or editing comments, reading or editing
+artifacts, capacity changes, wiki work, code search, signals, etc. — **load
+the `aura` skill** and follow its conventions for the remainder of the session.
+Do not call `aura-mcp-dev` tools ad-hoc from this skill; route that work
+through the `aura` skill instead. The teardown is `/digest-dashboard stop`.
 
 Key conventions the `aura` skill enforces (so you don't silently miss them):
 - Set `is_ai_generated: true` on AI-authored comments.
@@ -287,12 +305,8 @@ Key conventions the `aura` skill enforces (so you don't silently miss them):
 - Prefer `mcp*` tool variants (`mcpGetArtifact`, `mcpUnifiedSearch`, …).
 - Log activity with `recordTaskProgress` when you act on a task.
 
-**[ASK]** only if there are actionable items:
-
-- Anything overdue or waiting on you → "These need your attention. Want to tackle any now?"
-- Reviews pending → "You have N reviews waiting. Start any?"
-- Over-committed → "You're at X% commitment — adjust or flag to manager?"
-- Otherwise → "Ready to go?"
+Interaction is via the dashboard's action buttons (Step 4); teardown is
+`/digest-dashboard stop`.
 
 ---
 
