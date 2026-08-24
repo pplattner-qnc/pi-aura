@@ -1,3 +1,3 @@
-task: digest-dashboard
-slice: wire-extension-entry
+task: digest-real-data-render-bug
+slice: fix-stuck-loading-real-data
 done: true
