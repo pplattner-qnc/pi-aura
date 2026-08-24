@@ -39,6 +39,18 @@ const startToolParameters = Type.Object({
 
 type StartToolParams = Static<typeof startToolParameters>;
 
+const fetchToolParameters = Type.Object({});
+
+type FetchToolParams = Static<typeof fetchToolParameters>;
+
+const saveToolParameters = Type.Object({
+  dir: Type.String({
+    description: "The output directory returned by digest-fetch (details.dir).",
+  }),
+});
+
+type SaveToolParams = Static<typeof saveToolParameters>;
+
 // Current session cwd, used by command argument completions. Updated on session_start.
 let sessionCwd: string | undefined;
 
@@ -63,6 +75,45 @@ function defaultAuraPaths(): {
 function resolveServerEntryPath(): string {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(moduleDir, "dist", "server.mjs");
+}
+
+function resolveAuraDigestScriptPath(): string {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(moduleDir, "../../../skills/core/aura-digest/dist/aura-digest.mjs");
+}
+
+interface SpawnResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+async function runAuraDigest(args: string[]): Promise<SpawnResult> {
+  const scriptPath = resolveAuraDigestScriptPath();
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf-8");
+    });
+
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf-8");
+    });
+
+    child.on("close", (exitCode) => {
+      resolve({ exitCode, stdout, stderr });
+    });
+
+    child.on("error", (err: Error) => {
+      resolve({ exitCode: 1, stdout, stderr: `${stderr}${err.message}` });
+    });
+  });
 }
 
 async function waitForServerUrl(
@@ -359,6 +410,90 @@ export default function (pi: ExtensionAPI): void {
       return {
         content: [{ type: "text", text: result.message }],
         details: result.url ? { url: result.url } : { url: "" },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "digest-fetch",
+    label: "Fetch Aura digest",
+    description:
+      "Fetch today's Aura digest data. Returns the digest and report JSON plus the output directory. Also writes ~/.pi/aura/digest.json for the dashboard.",
+    parameters: fetchToolParameters,
+    async execute(
+      _toolCallId: string,
+      _params: FetchToolParams,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+    ): Promise<AgentToolResult<{ dir?: string }>> {
+      const result = await runAuraDigest(["fetch"]);
+      if (result.exitCode !== 0) {
+        const errorText = result.stderr.trim() || `digest-fetch exited with code ${result.exitCode}`;
+        return {
+          content: [{ type: "text", text: `digest-fetch failed: ${errorText}` }],
+          details: {},
+        };
+      }
+
+      const match = result.stdout.match(/output directory:\s*(.+?)\/?\s*$/m);
+      if (!match) {
+        return {
+          content: [{ type: "text", text: "digest-fetch failed: could not parse output directory from script stdout" }],
+          details: {},
+        };
+      }
+
+      const dir = path.normalize(match[1]);
+      const digestPath = path.join(dir, "digest.json");
+      const reportPath = path.join(dir, "report.json");
+
+      try {
+        const digest = JSON.parse(readFileSync(digestPath, "utf-8")) as unknown;
+        const report = JSON.parse(readFileSync(reportPath, "utf-8")) as unknown;
+        const dashboardPath = defaultAuraPaths().dashboardPath;
+        if (!existsSync(dashboardPath)) {
+          return {
+            content: [{ type: "text", text: `digest-fetch failed: dashboard digest not written to ${dashboardPath}` }],
+            details: {},
+          };
+        }
+        return {
+          content: [{ type: "text", text: JSON.stringify({ digest, report }) }],
+          details: { dir },
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text", text: `digest-fetch failed: ${message}` }],
+          details: {},
+        };
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "digest-save",
+    label: "Save Aura digest",
+    description:
+      "Save the digest from the given directory as the last presented digest (~/.pi/aura/last-digest.json). Pass the directory returned by digest-fetch.",
+    parameters: saveToolParameters,
+    async execute(
+      _toolCallId: string,
+      params: SaveToolParams,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+    ): Promise<AgentToolResult<Record<string, never>>> {
+      const result = await runAuraDigest(["save", params.dir]);
+      if (result.exitCode !== 0) {
+        const errorText = result.stderr.trim() || `digest-save exited with code ${result.exitCode}`;
+        return {
+          content: [{ type: "text", text: `digest-save failed: ${errorText}` }],
+          details: {},
+        };
+      }
+      return {
+        content: [{ type: "text", text: `digest-save: saved last digest from ${params.dir}` }],
+        details: {},
       };
     },
   });
