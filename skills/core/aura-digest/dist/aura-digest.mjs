@@ -19612,6 +19612,109 @@ function loadSettings(settingsPath = SETTINGS_PATH2) {
   }
 }
 
+// src/build-actions.ts
+function buildActions(digest) {
+  const overdue = digest.attention?.overdue ?? [];
+  const waitingOnYou = digest.attention?.waiting_on_you ?? [];
+  const reviewsOwed = digest.reviews_owed ?? [];
+  const corrections = digest.corrections ?? [];
+  const capacity = digest.capacity;
+  const warnings = digest.warnings ?? [];
+  const queue = digest.queue ?? [];
+  const staleArtifactIds = new Set(
+    corrections.filter((c) => c.stale).map((c) => c.artifact_id)
+  );
+  const actions = [];
+  for (const item of overdue.slice(0, 3)) {
+    actions.push(buildOverdueAction(item));
+  }
+  for (const item of waitingOnYou.slice(0, 3)) {
+    actions.push(buildWaitingAction(item));
+  }
+  for (const review of reviewsOwed.slice(0, 3)) {
+    if (staleArtifactIds.has(review.artifact_id)) continue;
+    actions.push(buildReviewAction(review));
+  }
+  if (capacity?.over) {
+    actions.push(buildCapacityAction(capacity));
+  }
+  if (warnings.length > 0) {
+    actions.push(buildWarningAction(warnings[0]));
+  }
+  const remaining = Math.max(0, 6 - actions.length);
+  if (remaining > 0) {
+    const activeQueue = queue.filter((row) => row.capacity_pct !== null && row.capacity_pct > 0);
+    for (const row of activeQueue.slice(0, remaining)) {
+      actions.push(buildQueueAction(row));
+    }
+  }
+  return actions.slice(0, 6);
+}
+function buildOverdueAction(item) {
+  const daySuffix = item.days !== void 0 ? ` (${item.days}d)` : "";
+  const instructionSuffix = item.days !== void 0 ? ` (it's ${item.days} days overdue)` : "";
+  return {
+    section: "overdue",
+    key: item.key,
+    action: "advance",
+    label: `Advance ${item.key} \u2014 ${item.title}${daySuffix}`,
+    instruction: `Advance ${item.key} \u2014 ${item.title}${instructionSuffix}`,
+    aura_use_case: "task-management"
+  };
+}
+function buildWaitingAction(item) {
+  const text = `Unblock ${item.key} \u2014 ${item.title}`;
+  return {
+    section: "waiting_on_you",
+    key: item.key,
+    action: "unblock",
+    label: text,
+    instruction: text,
+    aura_use_case: "task-management"
+  };
+}
+function buildReviewAction(review) {
+  return {
+    section: "reviews_owed",
+    key: review.artifact_id,
+    action: "review",
+    label: `Review ${review.title} v${review.version}`,
+    instruction: `Review artifact ${review.title} (v${review.version}) \u2014 you owe it`,
+    aura_use_case: "artifact-management"
+  };
+}
+function buildCapacityAction(capacity) {
+  const pct = capacity.utilization_pct;
+  return {
+    section: "capacity",
+    key: "capacity",
+    action: "flag_capacity",
+    label: `Flag over-commitment (${pct}%)`,
+    instruction: `Capacity is at ${pct}% committed \u2014 adjust or flag to manager`,
+    aura_use_case: "capacity-planning"
+  };
+}
+function buildWarningAction(warning) {
+  return {
+    section: "warnings",
+    key: "warnings",
+    action: "run_setup",
+    label: "Run setup / auth",
+    instruction: `Run the digest setup \u2014 ${warning}`,
+    aura_use_case: "aura-digest"
+  };
+}
+function buildQueueAction(row) {
+  return {
+    section: "queue",
+    key: row.key,
+    action: "advance",
+    label: `Advance ${row.key} \u2014 ${row.title} (${row.status})`,
+    instruction: `Advance ${row.key} \u2014 ${row.title} (${row.status})`,
+    aura_use_case: "task-management"
+  };
+}
+
 // src/aura-digest.ts
 var WORKDAY_HOURS = 8;
 var NOTIF_PAGE_SIZE = 50;
@@ -19887,7 +19990,6 @@ async function fetchAction() {
       reviewById.set(m2[1], r);
     }
   }
-  const suggestedActions = seedSuggestedActions(overdue, waitingOnYou, reviews, queueRows);
   const waitingOnOthersLinks = (summary.waiting_on_others?.items ?? []).map(
     (i) => safeString(i.link)
   );
@@ -19992,17 +20094,22 @@ async function fetchAction() {
     queue: queueRows,
     capacity: digestCapacity,
     reviews,
-    suggested_actions: suggestedActions,
+    suggested_actions: [],
+    actions: [],
     corrections: [],
     dev_links: devLinks,
     reviews_owed: reviewsOwed,
     warnings,
+    followup: { currentlyWorkingOn: null },
     meta: {
       generated_at: fetchedAt,
       raw_path: rawPath,
       report_path: reportPath
     }
   };
+  const actions = buildActions(digest);
+  digest.actions = actions;
+  digest.suggested_actions = actions.map((a) => a.instruction);
   const report = {
     fetched_at: fetchedAt,
     warnings,
@@ -20087,22 +20194,6 @@ function summarizeNotifications(items) {
     lines.push(line);
   }
   return lines;
-}
-function seedSuggestedActions(overdue, waitingOnYou, reviews, queue) {
-  const actions = [];
-  for (const o of overdue.slice(0, 3)) {
-    actions.push(`Move overdue ${o.key} \u2014 ${o.title}${o.days ? ` (${o.days}d)` : ""}`);
-  }
-  for (const w2 of waitingOnYou.slice(0, 3)) {
-    actions.push(`Unblock ${w2.key} \u2014 ${w2.title}`);
-  }
-  for (const r of reviews.slice(0, 3)) {
-    actions.push(`Review ${r.title} (v${r.version})`);
-  }
-  for (const q2 of queue.filter((row) => row.capacity_pct && row.capacity_pct > 0).slice(0, 3)) {
-    actions.push(`Advance ${q2.key} \u2014 ${q2.title} (${q2.status})`);
-  }
-  return actions.slice(0, 6);
 }
 function extractVerifyTargets(notifications, pendingArtifacts, waitingOnOthersLinks) {
   const isReviewEvent = (type) => type.includes("artifact") && type.includes("review");

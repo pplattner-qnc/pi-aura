@@ -553,6 +553,7 @@ async function fetchAction(): Promise<void> {
     dev_links: devLinks,
     reviews_owed: reviewsOwed,
     warnings,
+    followup: { currentlyWorkingOn: null },
     meta: {
       generated_at: fetchedAt,
       raw_path: rawPath,
