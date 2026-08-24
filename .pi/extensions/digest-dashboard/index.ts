@@ -287,12 +287,12 @@ export async function startDashboard(
   return { ok: true, message, url: serverUrl.url };
 }
 
-const DIGEST_TOOLS = [
+const DIGEST_TOOLS: readonly string[] = [
   "digest-dashboard-start",
   "digest-dashboard-stop",
   "digest-fetch",
   "digest-save",
-] as const;
+];
 
 export async function digestCommandHandler(
   pi: ExtensionAPI,
