@@ -127,7 +127,7 @@ describe("Digest dashboard rendering", () => {
 
     const buttons = target.querySelectorAll("button[data-action-key]");
     expect(buttons).toHaveLength(3);
-    const labels = [...buttons].map((b) => b.textContent?.trim());
+    const labels = [...buttons].map((b) => b.querySelector(".label")?.textContent?.trim() ?? "");
     expect(labels).toContain("Advance AURA-1");
     expect(labels).toContain("Review AURA-2");
     expect(labels).toContain("Flag capacity");

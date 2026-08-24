@@ -107,366 +107,429 @@
   function fmtPct(n: number | null): string {
     return n == null ? "—" : `${n}%`;
   }
+
+  const WORKDAY_HOURS = 8;
+
+  function fmtHours(hours: number | null): string {
+    if (hours === null) return "—";
+    const rounded = Math.round(hours / 0.25) * 0.25;
+    const h = Math.floor(rounded);
+    const m = Math.round((rounded - h) * 60);
+    return `~${h}:${String(m).padStart(2, "0")}`;
+  }
+
+  function decisionEmoji(d: { decided: boolean; decision: string }): string {
+    if (!d.decided) return "⏳";
+    const dec = d.decision.toUpperCase();
+    if (dec === "APPROVED") return "✅";
+    if (dec === "REJECTED" || dec === "NEEDS_REVISION") return "❌";
+    return "•";
+  }
+
+  function stateEmoji(state: string): string {
+    const s = state.toUpperCase();
+    if (s === "OPEN") return "🟢";
+    if (s === "MERGED") return "✅";
+    if (s === "CLOSED" || s === "DECLINED") return "⚫";
+    return "•";
+  }
+
+  function reviewerNames(reviews: DigestReview[]): string[] {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    for (const r of reviews) {
+      for (const d of r.decisions) {
+        const first = d.user_name.split(",")[0].trim();
+        if (!seen.has(first)) {
+          seen.add(first);
+          names.push(first);
+        }
+      }
+    }
+    return names;
+  }
+
+  function pctToHours(pct: number | null): number | null {
+    if (pct === null) return null;
+    return (pct * WORKDAY_HOURS) / 100;
+  }
 </script>
 
 {#if loading}
-  <p class="loading">Loading digest…</p>
+  <p class="text-base-content/60 italic">Loading digest…</p>
 {:else if error}
-  <p class="error">Error: {error}</p>
+  <p class="text-error">Error: {error}</p>
 {:else if digest}
-  <div class="digest">
-    <header>
-      <h1>Digest — {digest.date}</h1>
-      {#if digest.summary}
-        <p class="summary">{digest.summary}</p>
-      {/if}
-    </header>
+  {@const day = new Date(digest.date + "T00:00:00").toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  })}
+  <div class="digest min-h-screen bg-base-100 text-base-content p-4 sm:p-6">
+    <div class="max-w-5xl mx-auto space-y-6">
+      <header class="space-y-3">
+        <p class="text-sm font-medium uppercase tracking-widest text-base-content/50">Morning briefing</p>
+        <h1 class="text-3xl sm:text-4xl font-bold tracking-tight">{day}</h1>
+        {#if digest.summary}
+          <blockquote class="bg-base-200/60 rounded-lg px-4 py-3 text-base text-base-content/80 italic leading-relaxed">
+            {digest.summary}
+          </blockquote>
+        {/if}
+      </header>
 
-    <section class="attention">
-      <h2>Attention</h2>
-      <div class="attention-grid">
-        <div>
-          <h3>Overdue</h3>
-          {#if digest.attention.overdue.length === 0}
-            <p class="empty">None</p>
+      <main class="space-y-6">
+        <!-- Today's priorities (interactive actions) -->
+        <section class="bg-base-100 shadow-sm ring-1 ring-base-200 rounded-2xl p-5 sm:p-6">
+          <h2 class="text-lg font-semibold tracking-tight mb-4">Today's priorities</h2>
+          {#if filteredActions.length === 0}
+            <p class="text-base-content/60 italic">No suggestions.</p>
           {:else}
-            <ul>
-              {#each digest.attention.overdue as item, i (i)}
-                <li><span class="key">{item.key}</span> {item.title}</li>
+            <ol class="space-y-2">
+              {#each filteredActions as action, i (actionKey(action))}
+                {@const key = actionKey(action)}
+                {@const active = key === followup.currentlyWorkingOn}
+                <li>
+                  <button
+                    type="button"
+                    class="btn btn-ghost w-full justify-start text-left flex gap-3 items-start h-auto min-h-[2.5rem] py-2 px-3"
+                    class:btn-active={active}
+                    class:btn-disabled={hasWorkingMatch && !active}
+                    data-action-key={key}
+                    title={active ? "continue in pi" : undefined}
+                    disabled={hasWorkingMatch && !active}
+                    aria-disabled={hasWorkingMatch && !active ? "true" : undefined}
+                    onclick={() => postAction(action)}
+                  >
+                    <span class="badge badge-primary badge-sm shrink-0 tabular-nums">{i + 1}</span>
+                    {#if active}
+                      <span class="spinner loading loading-spinner loading-sm shrink-0" aria-hidden="true"></span>
+                      <span class="badge badge-soft badge-primary badge-sm shrink-0">Working…</span>
+                    {/if}
+                    <span class="label">{action.label}</span>
+                  </button>
+                </li>
+              {/each}
+            </ol>
+          {/if}
+        </section>
+
+        <!-- Attention -->
+        <section class="bg-base-100 shadow-sm ring-1 ring-base-200 rounded-2xl p-5 sm:p-6">
+          <h2 class="text-lg font-semibold tracking-tight mb-4">Needs your attention</h2>
+          <div class="space-y-4">
+            <div class="flex gap-3 items-start">
+              <span class="badge badge-error badge-lg shrink-0" aria-hidden="true">🔴</span>
+              <div class="min-w-0">
+                <p class="font-semibold text-sm uppercase tracking-wide text-base-content/70 mb-1">Overdue</p>
+                <ul class="space-y-0.5">
+                  {#if digest.attention.overdue.length === 0}
+                    <li><p class="text-base-content/60 italic">None</p></li>
+                  {:else}
+                    {#each digest.attention.overdue as item, i (i)}
+                      <li>
+                        {#if item.key}{item.key} — {/if}{item.title}
+                        {#if item.days}<span class="text-base-content/60">({item.days}d)</span>{/if}
+                      </li>
+                    {/each}
+                  {/if}
+                </ul>
+              </div>
+            </div>
+
+            <div class="flex gap-3 items-start">
+              <span class="badge badge-warning badge-lg shrink-0" aria-hidden="true">🟡</span>
+              <div class="min-w-0">
+                <p class="font-semibold text-sm uppercase tracking-wide text-base-content/70 mb-1">Waiting on you</p>
+                <ul class="space-y-0.5">
+                  {#if digest.attention.waiting_on_you.length === 0}
+                    <li><p class="text-base-content/60 italic">None</p></li>
+                  {:else}
+                    {#each digest.attention.waiting_on_you as item, i (i)}
+                      <li>
+                        {#if item.key}{item.key} — {/if}{item.title}
+                        {#if item.days}<span class="text-base-content/60">({item.days}d)</span>{/if}
+                      </li>
+                    {/each}
+                  {/if}
+                </ul>
+              </div>
+            </div>
+
+            <div class="flex gap-3 items-start">
+              <span class="badge badge-info badge-lg shrink-0" aria-hidden="true">🔵</span>
+              <div class="min-w-0">
+                <p class="font-semibold text-sm uppercase tracking-wide text-base-content/70 mb-1">Waiting on others</p>
+                <ul class="space-y-0.5">
+                  {#if digest.attention.waiting_on_others.length === 0}
+                    <li><p class="text-base-content/60 italic">None</p></li>
+                  {:else}
+                    {#each digest.attention.waiting_on_others as item, i (i)}
+                      <li>
+                        {#if item.key}{item.key} — {/if}{item.title}
+                        {#if item.days}<span class="text-base-content/60">({item.days}d)</span>{/if}
+                      </li>
+                    {/each}
+                  {/if}
+                </ul>
+              </div>
+            </div>
+
+            <div class="flex gap-3 items-start">
+              <span class="badge badge-neutral badge-lg shrink-0" aria-hidden="true">📬</span>
+              <div class="min-w-0">
+                <p class="font-semibold text-sm uppercase tracking-wide text-base-content/70 mb-1">Since last run</p>
+                <ul class="space-y-0.5">
+                  {#if digest.attention.notifications.since_last_run.length === 0}
+                    <li><p class="text-base-content/60 italic">Nothing new since last run.</p></li>
+                  {:else}
+                    {#each digest.attention.notifications.since_last_run as note, i (i)}
+                      <li class="text-sm">{note}</li>
+                    {/each}
+                  {/if}
+                </ul>
+              </div>
+            </div>
+
+            <div class="flex gap-3 items-start">
+              <span class="badge badge-neutral badge-lg shrink-0" aria-hidden="true">📬</span>
+              <div class="min-w-0">
+                <p class="font-semibold text-sm uppercase tracking-wide text-base-content/70 mb-1">Older unread</p>
+                <ul class="space-y-0.5">
+                  {#if digest.attention.notifications.older_unread.length === 0}
+                    <li><p class="text-base-content/60 italic">No unread notifications.</p></li>
+                  {:else}
+                    {#each digest.attention.notifications.older_unread as note, i (i)}
+                      <li class="text-sm">{note}</li>
+                    {/each}
+                  {/if}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Queue -->
+        <section class="bg-base-100 shadow-sm ring-1 ring-base-200 rounded-2xl p-5 sm:p-6">
+          <h2 class="text-lg font-semibold tracking-tight mb-4">Today's queue</h2>
+          {#if digest.queue.length === 0}
+            <p class="text-base-content/60 italic">No tasks in the queue.</p>
+          {:else}
+            {@const committedRows = digest.queue.filter((r) => r.capacity_pct !== null && r.capacity_pct > 0)}
+            {@const totalPct = committedRows.reduce((s, r) => s + (r.capacity_pct ?? 0), 0)}
+            {@const totalHours = committedRows.reduce((s, r) => s + (r.hours ?? pctToHours(r.capacity_pct) ?? 0), 0)}
+            <div class="overflow-x-auto">
+              <table class="table table-sm w-full">
+                <thead>
+                  <tr class="text-base-content/60 text-xs uppercase tracking-wide">
+                    <th>#</th>
+                    <th>Task</th>
+                    <th>Status</th>
+                    <th>Role</th>
+                    <th>Cap</th>
+                    <th>Hours</th>
+                    <th>Git</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each digest.queue as row (row.key)}
+                    <tr>
+                      <td class="tabular-nums text-base-content/50">{row.rank}</td>
+                      <td>
+                        {#if row.key}{row.key} — {/if}{row.title}
+                      </td>
+                      <td><span class="badge badge-ghost badge-sm">{row.status}</span></td>
+                      <td><span class="badge badge-outline badge-sm">{row.role}</span></td>
+                      <td class="tabular-nums">{fmtPct(row.capacity_pct)}</td>
+                      <td class="tabular-nums">{fmtHours(row.hours ?? pctToHours(row.capacity_pct))}</td>
+                      <td class="text-base-content/70">{row.git_summary ?? ""}</td>
+                    </tr>
+                  {/each}
+                  <tr class="font-semibold border-t-2 border-base-300">
+                    <td></td>
+                    <td>Committed</td>
+                    <td></td>
+                    <td></td>
+                    <td class="tabular-nums">{totalPct}%</td>
+                    <td class="tabular-nums">{fmtHours(totalHours)}</td>
+                    <td></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="text-xs text-base-content/50 mt-2">8hr workday → hours = capacity% × {WORKDAY_HOURS}, rounded to ¼h</p>
+          {/if}
+        </section>
+
+        <!-- Capacity -->
+        <section class="bg-base-100 shadow-sm rounded-2xl p-5 sm:p-6">
+          <h2 class="text-lg font-semibold tracking-tight mb-4">Capacity</h2>
+          <div>
+            {#if true}
+            {@const c = digest.capacity}
+            {@const over = c.over}
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div class="flex flex-col gap-0.5">
+                <span class="text-xs uppercase tracking-wide text-base-content/50">Base</span>
+                <span class="text-lg font-semibold tabular-nums">{c.base_pct}%</span>
+              </div>
+              <div class="flex flex-col gap-0.5">
+                <span class="text-xs uppercase tracking-wide text-base-content/50">Committed</span>
+                <span class="text-lg font-semibold tabular-nums" class:text-warning={over}>{c.committed_pct}%{#if over} ⚠️{/if}</span>
+              </div>
+              <div class="flex flex-col gap-0.5">
+                <span class="text-xs uppercase tracking-wide text-base-content/50">Free</span>
+                <span class="text-lg font-semibold tabular-nums">{c.free_pct}%</span>
+              </div>
+              <div class="flex flex-col gap-0.5">
+                <span class="text-xs uppercase tracking-wide text-base-content/50">Utilization</span>
+                <span class="text-lg font-semibold tabular-nums" class:text-warning={over}>{c.utilization_pct}%{#if over} ⚠️{/if}</span>
+              </div>
+            </div>
+            <p class="text-sm text-base-content/60 mt-3">
+              Committed hours: <strong class="text-base-content tabular-nums">{c.total_hours.toFixed(1)}h</strong> / {WORKDAY_HOURS}h workday
+            </p>
+            {/if}
+          </div>
+        </section>
+
+        <!-- Reviews due -->
+        <section class="bg-base-100 shadow-sm rounded-2xl p-5 sm:p-6">
+          <h2 class="text-lg font-semibold tracking-tight mb-4">Reviews due</h2>
+          {#if digest.reviews.length === 0}
+            <p class="text-base-content/60 italic">Nothing pending.</p>
+          {:else}
+            <div>
+              {#if true}
+              {@const names = reviewerNames(digest.reviews)}
+              <div class="overflow-x-auto">
+                <table class="table table-sm w-full">
+                  <thead>
+                    <tr class="text-base-content/60 text-xs uppercase tracking-wide">
+                      <th>Artifact</th>
+                      <th>v</th>
+                      {#each names as name (name)}
+                        <th>{name}</th>
+                      {/each}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each digest.reviews as review (review.artifact_id)}
+                      {@const byName = new Map(review.decisions.map((d) => [d.user_name.split(",")[0].trim(), decisionEmoji(d)]))}
+                      <tr>
+                        <td>{review.title}</td>
+                        <td class="tabular-nums text-base-content/50">{review.version}</td>
+                        {#each names as name (name)}
+                          <td class="text-center">{byName.get(name) ?? ""}</td>
+                        {/each}
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+              {/if}
+              <p class="text-xs text-base-content/50 mt-2">
+                <span aria-hidden="true">⏳</span> pending · <span aria-hidden="true">✅</span> approved · <span aria-hidden="true">❌</span> rejected/needs revision
+              </p>
+            </div>
+          {/if}
+        </section>
+
+        <!-- Reviews owed -->
+        <section class="bg-base-100 shadow-sm rounded-2xl p-5 sm:p-6">
+          <h2 class="text-lg font-semibold tracking-tight mb-4">Reviews I owe</h2>
+          {#if digest.reviews_owed.length === 0}
+            <p class="text-base-content/60 italic">None — you're not blocking any reviews.</p>
+          {:else}
+            <ul class="space-y-1">
+              {#each digest.reviews_owed as review (review.artifact_id)}
+                <li>
+                  {review.title}
+                  <span class="text-base-content/50 tabular-nums">v{review.version}</span>
+                  {#if review.deadline}<span class="text-base-content/60">(due {review.deadline.slice(0, 10)})</span>{/if}
+                  {#if review.initiator}<span class="text-base-content/60">— from {review.initiator}</span>{/if}
+                </li>
               {/each}
             </ul>
           {/if}
-        </div>
-        <div>
-          <h3>Waiting on you</h3>
-          {#if digest.attention.waiting_on_you.length === 0}
-            <p class="empty">None</p>
-          {:else}
-            <ul>
-              {#each digest.attention.waiting_on_you as item, i (i)}
-                <li><span class="key">{item.key}</span> {item.title}</li>
-              {/each}
-            </ul>
-          {/if}
-        </div>
-        <div>
-          <h3>Waiting on others</h3>
-          {#if digest.attention.waiting_on_others.length === 0}
-            <p class="empty">None</p>
-          {:else}
-            <ul>
-              {#each digest.attention.waiting_on_others as item, i (i)}
-                <li><span class="key">{item.key}</span> {item.title}</li>
-              {/each}
-            </ul>
-          {/if}
-        </div>
-        <div>
-          <h3>Notifications</h3>
-          {#if digest.attention.notifications.since_last_run.length === 0 && digest.attention.notifications.older_unread.length === 0}
-            <p class="empty">None</p>
-          {:else}
-            {#if digest.attention.notifications.since_last_run.length > 0}
-              <p class="subhead">Since last run</p>
-              <ul>
-                {#each digest.attention.notifications.since_last_run as note, i (i)}
-                  <li>{note}</li>
+        </section>
+
+        <!-- Corrections -->
+        <section class="bg-base-100 shadow-sm rounded-2xl p-5 sm:p-6">
+          <h2 class="text-lg font-semibold tracking-tight mb-4">Corrections</h2>
+          <div>
+            {#if true}
+            {@const stale = digest.corrections.filter((c) => c.stale)}
+            {#if stale.length === 0}
+              <p class="text-base-content/60 italic">All reported review states match current versions.</p>
+            {:else}
+              <ul class="space-y-1">
+                {#each stale as correction (correction.artifact_id)}
+                  <li>
+                    <span class="text-base-content/50">↳</span>
+                    {correction.title} — <span class="text-base-content/70">{correction.note}</span>
+                  </li>
                 {/each}
               </ul>
             {/if}
-            {#if digest.attention.notifications.older_unread.length > 0}
-              <p class="subhead">Older unread</p>
-              <ul>
-                {#each digest.attention.notifications.older_unread as note, i (i)}
-                  <li>{note}</li>
+            {/if}
+          </div>
+        </section>
+
+        <!-- Dev links -->
+        <section class="bg-base-100 shadow-sm rounded-2xl p-5 sm:p-6">
+          <h2 class="text-lg font-semibold tracking-tight mb-4">Dev links</h2>
+          <div>
+            {#if true}
+            {@const links = digest.dev_links ?? []}
+            {@const withPrs = links.filter((l) => l.pull_requests.length > 0 || l.branches.length > 0)}
+            {#if links.length === 0}
+              <p class="text-base-content/60 italic">No dev-links configured (set auraDigest in settings to enable).</p>
+            {:else if withPrs.length === 0}
+              <p class="text-base-content/60 italic">No related PRs or branches found for queue tasks.</p>
+            {:else}
+              {@const errs = links.flatMap((l) => l.errors.map((e) => `${l.task_key}: ${e}`))}
+              <ul class="space-y-1">
+                {#each withPrs as link (link.task_key)}
+                  {#each link.pull_requests as pr (pr.url)}
+                    <li>
+                      {link.task_key}: {stateEmoji(pr.state)} {pr.provider} #{pr.id} — {pr.title} ({pr.state.toLowerCase()})
+                    </li>
+                  {/each}
+                  {#each link.branches as branch (branch.name)}
+                    <li>
+                      {link.task_key}: 🌿 {branch.provider} {branch.repo} <strong>{branch.name}</strong>
+                    </li>
+                  {/each}
                 {/each}
               </ul>
+              {#if errs.length > 0}
+                <p class="text-xs text-base-content/50 mt-3"><em>errors:</em></p>
+                <ul class="text-xs text-base-content/50 mt-1 space-y-0.5">
+                  {#each errs.slice(0, 3) as e, i (i)}
+                    <li>{e}</li>
+                  {/each}
+                </ul>
+              {/if}
             {/if}
-          {/if}
-        </div>
-      </div>
-    </section>
+            {/if}
+          </div>
+        </section>
 
-    <section class="queue">
-      <h2>Queue</h2>
-      {#if digest.queue.length === 0}
-        <p class="empty">No queued items.</p>
-      {:else}
-        <table>
-          <thead>
-            <tr><th>Rank</th><th>Key</th><th>Title</th><th>Status</th><th>Role</th><th>Capacity</th><th>Hours</th></tr>
-          </thead>
-          <tbody>
-            {#each digest.queue as row (row.key)}
-              <tr>
-                <td>{row.rank}</td>
-                <td class="key">{row.key}</td>
-                <td>{row.title}</td>
-                <td>{row.status}</td>
-                <td>{row.role}</td>
-                <td>{fmtPct(row.capacity_pct)}</td>
-                <td>{row.hours ?? "—"}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      {/if}
-    </section>
-
-    <section class="capacity">
-      <h2>Capacity</h2>
-      <p>
-        Base {fmtPct(digest.capacity.base_pct)} · Committed {fmtPct(digest.capacity.committed_pct)}
-        · Free {fmtPct(digest.capacity.free_pct)} · Utilization {fmtPct(digest.capacity.utilization_pct)}
-        · {digest.capacity.total_hours}h
-        {#if digest.capacity.over}<span class="over">(over-committed)</span>{/if}
-      </p>
-    </section>
-
-    <section class="reviews">
-      <h2>Reviews in flight</h2>
-      {#if digest.reviews.length === 0}
-        <p class="empty">None.</p>
-      {:else}
-        <ul>
-          {#each digest.reviews as review (review.artifact_id)}
-            <li>
-              <span class="key">{review.artifact_id}</span> {review.title} (v{review.version})
-              — {review.decided_count}/{review.total_required} decided
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </section>
-
-    <section class="reviews-owed">
-      <h2>Reviews owed</h2>
-      {#if digest.reviews_owed.length === 0}
-        <p class="empty">None.</p>
-      {:else}
-        <ul>
-          {#each digest.reviews_owed as review (review.artifact_id)}
-            <li>
-              <span class="key">{review.artifact_id}</span> {review.title}
-              {#if review.deadline}<span class="deadline">due {review.deadline}</span>{/if}
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </section>
-
-    <section class="corrections">
-      <h2>Corrections</h2>
-      {#if digest.corrections.length === 0}
-        <p class="empty">None.</p>
-      {:else}
-        <ul>
-          {#each digest.corrections as correction (correction.artifact_id)}
-            <li class={correction.stale ? "stale" : ""}>
-              <span class="key">{correction.artifact_id}</span> {correction.title}
-              {#if correction.stale}<span class="badge">stale</span>{/if}
-              <span class="note">{correction.note}</span>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </section>
-
-    <section class="warnings">
-      <h2>Warnings</h2>
-      {#if digest.warnings.length === 0}
-        <p class="empty">None.</p>
-      {:else}
-        <ul>
-          {#each digest.warnings as warning, i (i)}
-            <li>{warning}</li>
-          {/each}
-        </ul>
-      {/if}
-    </section>
-
-    <section class="actions">
-      <h2>Actions</h2>
-      {#if filteredActions.length === 0}
-        <p class="empty">No actions</p>
-      {:else}
-        <ul class="action-list">
-          {#each filteredActions as action (actionKey(action))}
-            {@const key = actionKey(action)}
-            {@const active = key === followup.currentlyWorkingOn}
-            <li>
-              <button
-                type="button"
-                class="digest-action"
-                class:active
-                data-action-key={key}
-                title={active ? "continue in pi" : undefined}
-                disabled={hasWorkingMatch && !active}
-                onclick={() => postAction(action)}
-              >
-                {#if active}
-                  <span class="spinner" aria-hidden="true"></span>
-                {/if}
-                <span class="label">{action.label}</span>
-              </button>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </section>
+        <!-- Warnings -->
+        {#if digest.warnings.length > 0}
+          <section class="alert alert-warning">
+            <h2 class="font-semibold">⚠️ Warnings</h2>
+            <ul class="list-disc list-inside mt-1">
+              {#each digest.warnings as warning, i (i)}
+                <li>{warning}</li>
+              {/each}
+            </ul>
+          </section>
+        {/if}
+      </main>
+    </div>
   </div>
 {/if}
 
 <style>
-  .digest {
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    max-width: 64rem;
-    margin: 0 auto;
-    padding: 1.5rem;
-    color: #1a1a1a;
-  }
-  .loading, .error, .empty {
-    color: #666;
-  }
-  .error {
-    color: #b91c1c;
-  }
-  header {
-    margin-bottom: 1.5rem;
-  }
-  h1 {
-    font-size: 1.5rem;
-    margin: 0 0 0.5rem;
-  }
-  .summary {
-    color: #444;
-    margin: 0;
-  }
-  section {
-    margin-bottom: 1.5rem;
-  }
-  h2 {
-    font-size: 1.125rem;
-    margin: 0 0 0.75rem;
-    border-bottom: 1px solid #e5e5e5;
-    padding-bottom: 0.25rem;
-  }
-  h3 {
-    font-size: 0.875rem;
-    margin: 0 0 0.5rem;
-    color: #555;
-  }
-  .attention-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-    gap: 1rem;
-  }
-  ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }
-  li {
-    padding: 0.25rem 0;
-  }
-  .key {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.875rem;
-    color: #2563eb;
-  }
-  .subhead {
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #777;
-    margin: 0.5rem 0 0.25rem;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.875rem;
-  }
-  th, td {
-    text-align: left;
-    padding: 0.5rem;
-    border-bottom: 1px solid #e5e5e5;
-  }
-  th {
-    font-weight: 600;
-    color: #555;
-  }
-  .over {
-    color: #b91c1c;
-    font-weight: 600;
-    margin-left: 0.5rem;
-  }
-  .deadline {
-    color: #777;
-    font-size: 0.875rem;
-    margin-left: 0.5rem;
-  }
-  .stale .note {
-    color: #b91c1c;
-  }
-  .badge {
-    display: inline-block;
-    margin-left: 0.5rem;
-    padding: 0.05rem 0.4rem;
-    border-radius: 9999px;
-    background: #fee2e2;
-    color: #b91c1c;
-    font-size: 0.75rem;
-    text-transform: uppercase;
-  }
-
-  .action-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-  .digest-action {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    width: 100%;
-    max-width: 32rem;
-    padding: 0.625rem 0.875rem;
-    border: 1px solid #d1d5db;
-    border-radius: 0.375rem;
-    background: #fff;
-    color: #111;
-    font-size: 0.9375rem;
-    text-align: left;
-    cursor: pointer;
-    transition: background 0.1s ease;
-  }
-  .digest-action:hover:not(:disabled) {
-    background: #f3f4f6;
-  }
-  .digest-action:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-  .digest-action.active {
-    border-color: #2563eb;
-    background: #eff6ff;
-  }
-  .digest-action .label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .spinner {
-    display: inline-block;
-    width: 1rem;
-    height: 1rem;
-    border: 2px solid #bfdbfe;
-    border-top-color: #2563eb;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    flex-shrink: 0;
-  }
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
 </style>
