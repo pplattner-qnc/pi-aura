@@ -124,6 +124,24 @@ export interface DigestCorrection {
   note: string;
 }
 
+/** A clickable next-action on the interactive dashboard. The routing table. */
+export interface DigestAction {
+  section: string; // "overdue" | "waiting_on_you" | "reviews_owed" | "capacity" | "warnings" | "queue"
+  key: string; // human key ("AURA-42") or singleton id ("capacity", "warnings")
+  action: string; // "advance" | "unblock" | "review" | "flag_capacity" | "run_setup"
+  label: string; // button text, e.g. "Advance AURA-42 — Fix login (3d)"
+  instruction: string; // human-readable form the agent shows + acts on
+  aura_use_case: string; // "task-management" | "artifact-management" | "capacity-planning" | "aura-digest"
+}
+
+/** In-flight lock for one-action-at-a-time. The agent sets
+ *  `currentlyWorkingOn` when it starts acting on a click; the SPA shows a
+ *  spinner + "continue in pi" tooltip on the matching button and disables
+ *  the others. `null` when idle. This task only owns the shape + default. */
+export interface DigestFollowup {
+  currentlyWorkingOn: string | null; // e.g. "overdue/AURA-42"; null when idle
+}
+
 export interface Digest {
   date: string; // YYYY-MM-DD
   summary: string | null; // orchestrator fills: 2-3 sentence situation
@@ -131,7 +149,7 @@ export interface Digest {
   queue: DigestQueueRow[];
   capacity: DigestCapacity;
   reviews: DigestReview[];
-  suggested_actions: string[]; // seeded rule-based, orchestrator re-ranks
+  suggested_actions: string[]; // derived from actions[].map(a => a.instruction)
   corrections: DigestCorrection[]; // orchestrator fills after verification
   dev_links: TaskDevLinks[]; // related PRs/branches per queue task (dev-links feature)
   reviews_owed: DigestReviewOwed[]; // reviews assigned to me I haven't decided yet
@@ -140,6 +158,8 @@ export interface Digest {
    * Teamwork Graph dev-links layer was skipped). Each entry is a short human-
    * readable string. Empty when everything ran fully. */
   warnings: string[];
+  actions: DigestAction[]; // structured routing table (SPA renders)
+  followup: DigestFollowup; // in-flight lock (default {currentlyWorkingOn: null})
   meta: {
     generated_at: string;
     raw_path: string;

@@ -7614,7 +7614,7 @@ var require_content_type = __commonJS({
 });
 
 // src/aura-digest.ts
-import { mkdirSync, writeFileSync, readFileSync as readFileSync5, rmSync, existsSync as existsSync4 } from "node:fs";
+import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync5, rmSync, existsSync as existsSync4 } from "node:fs";
 import { resolve, join as join6 } from "node:path";
 import { tmpdir, homedir as homedir6 } from "node:os";
 import { randomBytes as randomBytes2 } from "node:crypto";
@@ -19612,6 +19612,117 @@ function loadSettings(settingsPath = SETTINGS_PATH2) {
   }
 }
 
+// src/build-actions.ts
+function buildActions(digest) {
+  const overdue = digest.attention?.overdue ?? [];
+  const waitingOnYou = digest.attention?.waiting_on_you ?? [];
+  const reviewsOwed = digest.reviews_owed ?? [];
+  const corrections = digest.corrections ?? [];
+  const capacity = digest.capacity;
+  const warnings = digest.warnings ?? [];
+  const queue = digest.queue ?? [];
+  const staleArtifactIds = new Set(
+    corrections.filter((c) => c.stale).map((c) => c.artifact_id)
+  );
+  const actions = [];
+  for (const item of overdue.slice(0, 3)) {
+    actions.push(buildOverdueAction(item));
+  }
+  for (const item of waitingOnYou.slice(0, 3)) {
+    actions.push(buildWaitingAction(item));
+  }
+  for (const review of reviewsOwed.slice(0, 3)) {
+    if (staleArtifactIds.has(review.artifact_id)) continue;
+    actions.push(buildReviewAction(review));
+  }
+  if (capacity?.over) {
+    actions.push(buildCapacityAction(capacity));
+  }
+  if (warnings.length > 0) {
+    actions.push(buildWarningAction(warnings[0]));
+  }
+  const remaining = Math.max(0, 6 - actions.length);
+  if (remaining > 0) {
+    const activeQueue = queue.filter((row) => row.capacity_pct !== null && row.capacity_pct > 0);
+    for (const row of activeQueue.slice(0, remaining)) {
+      actions.push(buildQueueAction(row));
+    }
+  }
+  return actions.slice(0, 6);
+}
+function buildOverdueAction(item) {
+  const daySuffix = item.days !== void 0 ? ` (${item.days}d)` : "";
+  const instructionSuffix = item.days !== void 0 ? ` (it's ${item.days} days overdue)` : "";
+  return {
+    section: "overdue",
+    key: item.key,
+    action: "advance",
+    label: `Advance ${item.key} \u2014 ${item.title}${daySuffix}`,
+    instruction: `Advance ${item.key} \u2014 ${item.title}${instructionSuffix}`,
+    aura_use_case: "task-management"
+  };
+}
+function buildWaitingAction(item) {
+  const text = `Unblock ${item.key} \u2014 ${item.title}`;
+  return {
+    section: "waiting_on_you",
+    key: item.key,
+    action: "unblock",
+    label: text,
+    instruction: text,
+    aura_use_case: "task-management"
+  };
+}
+function buildReviewAction(review) {
+  return {
+    section: "reviews_owed",
+    key: review.artifact_id,
+    action: "review",
+    label: `Review ${review.title} v${review.version}`,
+    instruction: `Review artifact ${review.title} (v${review.version}) \u2014 you owe it`,
+    aura_use_case: "artifact-management"
+  };
+}
+function buildCapacityAction(capacity) {
+  const pct = capacity.utilization_pct;
+  return {
+    section: "capacity",
+    key: "capacity",
+    action: "flag_capacity",
+    label: `Flag over-commitment (${pct}%)`,
+    instruction: `Capacity is at ${pct}% committed \u2014 adjust or flag to manager`,
+    aura_use_case: "capacity-planning"
+  };
+}
+function buildWarningAction(warning) {
+  return {
+    section: "warnings",
+    key: "warnings",
+    action: "run_setup",
+    label: "Run setup / auth",
+    instruction: `Run the digest setup \u2014 ${warning}`,
+    aura_use_case: "aura-digest"
+  };
+}
+function buildQueueAction(row) {
+  return {
+    section: "queue",
+    key: row.key,
+    action: "advance",
+    label: `Advance ${row.key} \u2014 ${row.title} (${row.status})`,
+    instruction: `Advance ${row.key} \u2014 ${row.title} (${row.status})`,
+    aura_use_case: "task-management"
+  };
+}
+
+// src/write-dashboard-digest.ts
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname as dirname2 } from "node:path";
+function writeDashboardDigest(digest, dashboardPath) {
+  mkdirSync(dirname2(dashboardPath), { recursive: true });
+  writeFileSync(dashboardPath, JSON.stringify(digest, null, 2) + "\n", "utf8");
+}
+
 // src/aura-digest.ts
 var WORKDAY_HOURS = 8;
 var NOTIF_PAGE_SIZE = 50;
@@ -19665,6 +19776,7 @@ var USAGE = `Usage:
   node aura.mjs diff <dir>            print what changed since the last saved digest (JSON)
   node aura.mjs last                  print the last saved digest (JSON)`;
 var LAST_DIGEST_PATH = join6(homedir6(), ".pi", "aura", "last-digest.json");
+var DASHBOARD_DIGEST_PATH = join6(homedir6(), ".pi", "aura", "digest.json");
 var LAST_DIGEST_SCHEMA_VERSION = 1;
 var ACTIVE_STATUS_TYPES = /* @__PURE__ */ new Set([
   "ACTIVE"
@@ -19731,7 +19843,7 @@ async function fetchNotifications(aura, lastFetchedAt, warnings) {
 }
 async function fetchAction() {
   const outDir = join6(tmpdir(), `aura-morning-${randomBytes2(6).toString("hex")}`);
-  mkdirSync(outDir, { recursive: true });
+  mkdirSync2(outDir, { recursive: true });
   const aura = await createDefaultAuraClient();
   const warnings = [];
   const [
@@ -19887,7 +19999,6 @@ async function fetchAction() {
       reviewById.set(m2[1], r);
     }
   }
-  const suggestedActions = seedSuggestedActions(overdue, waitingOnYou, reviews, queueRows);
   const waitingOnOthersLinks = (summary.waiting_on_others?.items ?? []).map(
     (i) => safeString(i.link)
   );
@@ -19992,17 +20103,22 @@ async function fetchAction() {
     queue: queueRows,
     capacity: digestCapacity,
     reviews,
-    suggested_actions: suggestedActions,
+    suggested_actions: [],
+    actions: [],
     corrections: [],
     dev_links: devLinks,
     reviews_owed: reviewsOwed,
     warnings,
+    followup: { currentlyWorkingOn: null },
     meta: {
       generated_at: fetchedAt,
       raw_path: rawPath,
       report_path: reportPath
     }
   };
+  const actions = buildActions(digest);
+  digest.actions = actions;
+  digest.suggested_actions = actions.map((a) => a.instruction);
   const report = {
     fetched_at: fetchedAt,
     warnings,
@@ -20016,9 +20132,15 @@ async function fetchAction() {
     })),
     notification_review_events: notificationReviewEvents
   };
-  writeFileSync(rawPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
-  writeFileSync(digestPath, JSON.stringify(digest, null, 2) + "\n", "utf8");
-  writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+  writeFileSync2(rawPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
+  writeFileSync2(digestPath, JSON.stringify(digest, null, 2) + "\n", "utf8");
+  writeFileSync2(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+  try {
+    writeDashboardDigest(digest, DASHBOARD_DIGEST_PATH);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    warnings.push(`Could not write dashboard digest to ${DASHBOARD_DIGEST_PATH}: ${message}`);
+  }
   console.log(`output directory: ${outDir}/`);
   console.error(`fetched ${fetchedAt}`);
   console.error(`  raw:     ${rawPath}`);
@@ -20087,22 +20209,6 @@ function summarizeNotifications(items) {
     lines.push(line);
   }
   return lines;
-}
-function seedSuggestedActions(overdue, waitingOnYou, reviews, queue) {
-  const actions = [];
-  for (const o of overdue.slice(0, 3)) {
-    actions.push(`Move overdue ${o.key} \u2014 ${o.title}${o.days ? ` (${o.days}d)` : ""}`);
-  }
-  for (const w2 of waitingOnYou.slice(0, 3)) {
-    actions.push(`Unblock ${w2.key} \u2014 ${w2.title}`);
-  }
-  for (const r of reviews.slice(0, 3)) {
-    actions.push(`Review ${r.title} (v${r.version})`);
-  }
-  for (const q2 of queue.filter((row) => row.capacity_pct && row.capacity_pct > 0).slice(0, 3)) {
-    actions.push(`Advance ${q2.key} \u2014 ${q2.title} (${q2.status})`);
-  }
-  return actions.slice(0, 6);
 }
 function extractVerifyTargets(notifications, pendingArtifacts, waitingOnOthersLinks) {
   const isReviewEvent = (type) => type.includes("artifact") && type.includes("review");
@@ -20374,7 +20480,7 @@ function renderAction() {
   }
   const md = render(d);
   if (outPath) {
-    writeFileSync(outPath, md, "utf8");
+    writeFileSync2(outPath, md, "utf8");
     console.error(`rendered ${outPath}`);
   } else {
     process.stdout.write(md);
@@ -20409,8 +20515,8 @@ function saveAction() {
     fetched_at: digest.meta?.generated_at ?? presentedAt,
     digest
   };
-  mkdirSync(join6(homedir6(), ".pi", "aura"), { recursive: true });
-  writeFileSync(LAST_DIGEST_PATH, JSON.stringify(store, null, 2) + "\n", "utf8");
+  mkdirSync2(join6(homedir6(), ".pi", "aura"), { recursive: true });
+  writeFileSync2(LAST_DIGEST_PATH, JSON.stringify(store, null, 2) + "\n", "utf8");
   console.error(`saved last digest to ${LAST_DIGEST_PATH} (presented ${presentedAt})`);
 }
 function daysBetween(aIso, bIso) {
