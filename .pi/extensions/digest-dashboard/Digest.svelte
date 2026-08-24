@@ -96,10 +96,18 @@
   );
 
   // --- Mount effects ---
+  // Initial load on mount. (Svelte 5 has no onMount in runes mode; $effect runs
+  // post-mount. We guard with a `started` flag so strict-mode double-invocation
+  // doesn't fire two competing loads.)
+  let started = $state(false);
   $effect(() => {
+    if (started) return;
+    started = true;
     loadDigest();
   });
 
+  // Hot-reload via SSE. Kept separate from the initial load so a slow initial
+  // fetch isn't raced by an onmessage re-fetch.
   $effect(() => {
     const source = new EventSource("/events");
     source.onmessage = () => loadDigest();

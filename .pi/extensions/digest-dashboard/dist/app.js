@@ -3951,7 +3951,10 @@
     let workingKey = /* @__PURE__ */ user_derived(() => get(followup).currentlyWorkingOn);
     let hasWorkingMatch = /* @__PURE__ */ user_derived(() => get(filteredActions).some((a) => actionKey(a) === get(workingKey)));
     let allClear = /* @__PURE__ */ user_derived(() => !!get(digest) && get(filteredActions).length === 0 && get(digest).attention.overdue.length + get(digest).attention.waiting_on_you.length + get(digest).attention.waiting_on_others.length === 0 && get(digest).queue.length === 0 && get(digest).reviews_owed.length === 0 && get(digest).warnings.length === 0);
+    let started = /* @__PURE__ */ state(false);
     user_effect(() => {
+      if (get(started)) return;
+      set(started, true);
       loadDigest();
     });
     user_effect(() => {
