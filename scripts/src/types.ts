@@ -134,6 +134,14 @@ export interface DigestAction {
   aura_use_case: string; // "task-management" | "artifact-management" | "capacity-planning" | "aura-digest"
 }
 
+/** In-flight lock for one-action-at-a-time. The agent sets
+ *  `currentlyWorkingOn` when it starts acting on a click; the SPA shows a
+ *  spinner + "continue in pi" tooltip on the matching button and disables
+ *  the others. `null` when idle. This task only owns the shape + default. */
+export interface DigestFollowup {
+  currentlyWorkingOn: string | null; // e.g. "overdue/AURA-42"; null when idle
+}
+
 export interface Digest {
   date: string; // YYYY-MM-DD
   summary: string | null; // orchestrator fills: 2-3 sentence situation
@@ -151,6 +159,7 @@ export interface Digest {
    * readable string. Empty when everything ran fully. */
   warnings: string[];
   actions: DigestAction[]; // structured routing table (SPA renders)
+  followup: DigestFollowup; // in-flight lock (default {currentlyWorkingOn: null})
   meta: {
     generated_at: string;
     raw_path: string;

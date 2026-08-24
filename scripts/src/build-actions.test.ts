@@ -35,6 +35,7 @@ function minimalDigest(overrides: Partial<Digest> = {}): Digest {
     reviews_owed: [],
     warnings: [],
     actions: [],
+    followup: { currentlyWorkingOn: null },
     meta: {
       generated_at: "2026-01-01T00:00:00.000Z",
       raw_path: "/tmp/raw.json",
