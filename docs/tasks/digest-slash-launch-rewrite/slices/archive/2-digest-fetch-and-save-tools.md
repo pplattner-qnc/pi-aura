@@ -5,6 +5,7 @@ title: digest-fetch + digest-save tools (thin wrappers over aura-digest.mjs)
 task: ../task.md
 mode: afk
 size: m
+status: done
 blocked_by: [slash-command-and-tool-activation]
 ---
 

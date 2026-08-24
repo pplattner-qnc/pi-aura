@@ -164,3 +164,36 @@ Keep `registerTool` for start/stop (now inactive-by-default). Final e2e.
   arguments — they do not prove the runtime executes the injected turn. If
   it fails, the fallback is `pi.sendUserMessage("Run the aura-digest skill")`
   + keep the skill user-invokable via `/skill:`.
+
+### Slice 2: digest-fetch-and-save-tools (landed)
+
+- `.pi/extensions/digest-dashboard/index.ts` (+135 lines): added
+  `pi.registerTool("digest-fetch", …)` and `pi.registerTool("digest-save", …)`
+  as thin `child_process.spawn` wrappers over
+  `skills/core/aura-digest/dist/aura-digest.mjs`. A `runAuraDigest` helper
+  (reusing the already-imported `spawn` from `node:child_process`) spawns the
+  `.mjs`; `resolveAuraDigestScriptPath` resolves the script module-dir
+  relative, consistent with slice 1's path pattern.
+- `digest-fetch` `execute`: spawns `node <aura-digest.mjs> fetch`, parses the
+  `output directory: <dir>/` line from stdout, reads `<dir>/digest.json` +
+  `<dir>/report.json`, returns both as a single JSON text content
+  (`{digest, report}`) with `details: { dir }`, and confirms
+  `~/.pi/aura/digest.json` exists (error result if not). Error results return
+  `details: {}` (no `dir`) — the success contract L4 depends on is preserved.
+- `digest-save` `execute`: takes a required string `dir` param (schema via
+  `Type` from `typebox`), spawns `save <dir>`, returns a short confirmation
+  string.
+- Both tools inactive by default: named in L1's `DIGEST_TOOLS` const, so the
+  `session_start` filter removes them from a fresh session. No
+  `promptSnippet`/`promptGuidelines` on the new tools (lazy-loading).
+- `test/digest-dashboard/fetch-save-tools.test.ts` (242 lines, 3 new tests):
+  fetch success, fetch failure, save success — all with a mocked
+  `child_process.spawn` (no real Aura).
+- `test/digest-dashboard/start.test.ts`: maintenance — find the
+  `digest-dashboard-start` tool by name instead of index (the two new
+  registrations broke the old `registerToolCalls.length === 1` assertion).
+- Verification: full vitest suite green (52 tests / 9 files); typecheck clean.
+- Deviation report: clean (all API surfaces match, no out-of-scope changes).
+  One minor type divergence — `details: { dir?: string }` (optional on the
+  error path only) — is a TypeScript typing relaxation, not a behavioral
+  deviation.
