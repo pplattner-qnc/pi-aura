@@ -268,6 +268,20 @@ describe("digest-dashboard server", () => {
     expect(ids).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
+  it("calls the browser opener when openBrowser is true", async () => {
+    const opened: string[] = [];
+    const opts: StartServerOptions = {
+      dashboardPath,
+      statePath,
+      serverUrlPath,
+      openBrowser: true,
+      browserOpener: (url) => opened.push(url),
+    };
+    server = await startServer(opts);
+
+    expect(opened).toEqual([server.url]);
+  });
+
   it("preserves pid/server_started when appending an event", async () => {
     const opts: StartServerOptions = {
       dashboardPath,
