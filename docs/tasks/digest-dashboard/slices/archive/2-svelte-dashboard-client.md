@@ -6,6 +6,7 @@ task: ../task.md
 mode: afk
 size: l
 blocked_by: [sub-package-skeleton]
+status: done
 ---
 
 ## End-to-end behavior
