@@ -1,3 +1,9 @@
 # Local npm artifacts (the pi package itself has no runtime deps).
 node_modules/
 package-lock.json
+
+# Generated build artifacts — keep only the digest-dashboard runtime bundles.
+dist/**
+!.pi/extensions/digest-dashboard/dist/app.js
+!.pi/extensions/digest-dashboard/dist/app.css
+!.pi/extensions/digest-dashboard/dist/server.mjs
