@@ -2,7 +2,7 @@
 //
 // Package-author-only maintenance tool that keeps the local
 // `engineering-foundation` mirror (under
-// `skills/engineering-workflow/resources/`) fresh against the Aura wiki,
+// `skills/core/engineering-foundation/resources/`) fresh against the Aura wiki,
 // via a three-way reconciliation flow with a `finish` gate.
 //
 // The agent is the mergetool. This utility only:
@@ -73,8 +73,8 @@ function resolveRepoRoot(): string {
  *  Tests don't depend on this being correct — they stub paths. */
 const REPO_ROOT = resolveRepoRoot();
 
-/** The local mirror root. */
-const MIRROR_ROOT = join(REPO_ROOT, "skills", "engineering-workflow", "resources");
+/** The local mirror root (the index skill + all non-skill canon files). */
+const MIRROR_ROOT = join(REPO_ROOT, "skills", "core", "engineering-foundation", "resources");
 
 /** The drift manifest path (committed, under .pi/, invisible to skill discovery). */
 const MANIFEST_PATH = join(REPO_ROOT, ".pi", "engineering-foundation.json");
@@ -93,8 +93,11 @@ const IGNORE_SUFFIX = ".IGNORE";
 
 /** The router SKILL.md is an authored file (no wiki counterpart to sha256
  *  against); the sync surfaces a diff prompt when the wiki's structure
- *  changes. Tracked in the manifest with `authored: true`. */
-const AUTHORED_ROUTER_PATH = join(REPO_ROOT, "skills", "engineering-workflow", "SKILL.md");
+ *  changes. Tracked in the manifest with `authored: true`. It lives as the
+ *  index skill under `skills/core/engineering-foundation/` (not next to the
+ *  invokable sub-skills, so pi discovers both the index and the sub-skills —
+ *  see the layout note in `blueprintPathToLocal`). */
+const AUTHORED_ROUTER_PATH = join(REPO_ROOT, "skills", "core", "engineering-foundation", "SKILL.md");
 
 /** Rules live under resources/rules/ as .mdc files (Q: one directory). */
 // (Path derived dynamically per node; no constant needed.)
@@ -130,7 +133,7 @@ interface ManifestEntry {
   /** Mandatory when `ignored` is true. */
   ignoreReason?: string;
   /** True for authored files with no wiki counterpart (e.g. the
-   *  engineering-workflow router SKILL.md). */
+   *  engineering-foundation router SKILL.md). */
   authored?: boolean;
   /** Wiki node kind, for wiki docs (`DOCUMENT` | `FILE`); absent for blueprint. */
   kind?: string;
@@ -272,7 +275,7 @@ async function fetchBlueprintItems(client: AuraClient, manifest: Manifest): Prom
     items.push({
       key: manifestFile.path,
       source: "blueprint",
-      localPath: join("skills/engineering-workflow/resources/blueprint/manifest.yaml"),
+      localPath: join("skills/core/engineering-foundation/resources/blueprint/manifest.yaml"),
       remoteSha256: manifestFile.checksum,
       auraChecksumOrVersion: manifestFile.checksum,
       auraUpdatedAt: manifestFile.provenance.source_commit_sha ?? "",
@@ -329,14 +332,18 @@ async function fetchBlueprintItems(client: AuraClient, manifest: Manifest): Prom
  *  `blueprint/skills/ai-setup/skill.md`; the verbatim filename is `SKILL.md`.
  *  We write the verbatim filename in the local tree.
  *
- *  Layout exceptions:
+ *  Layout (the index skill is separate from the invokable sub-skills so pi
+ *  discovers both — a directory with a root `SKILL.md` is a skill root and
+ *  pi does not recurse into it, so the index cannot live next to the
+ *  sub-skills):
  *  - Rules -> `resources/rules/` (flat, one directory; see map decision
  *    Q-cursor).
- *  - Blueprint skills -> top-level `skills/engineering-workflow/<name>/`
+ *  - Blueprint skills -> top-level `skills/engineering-foundation/<name>/`
  *    (design Q6), so pi discovers them as invokable sub-skills.
  *  - The blueprint manifest -> `resources/blueprint/manifest.yaml` (reference
  *    material, not a skill).
- *  - Other blueprint files stay under `resources/blueprint/`. */
+ *  - Other blueprint files stay under `resources/blueprint/`.
+ *  - The authored router (the index skill) -> `skills/core/engineering-foundation/SKILL.md`. */
 function blueprintPathToLocal(bpPath: string, filename: string): string {
   // Strip the leading `blueprint/`; the local tree mirrors under
   // resources/blueprint/.
@@ -345,14 +352,14 @@ function blueprintPathToLocal(bpPath: string, filename: string): string {
   const localName = filename || basename(under);
   // Rules -> resources/rules/ (flat, one directory; see map decision Q-cursor).
   if (under.startsWith("rules/")) {
-    return join("skills/engineering-workflow/resources/rules", localName);
+    return join("skills/core/engineering-foundation/resources/rules", localName);
   }
   // Blueprint skills -> top-level invokable sub-skills (design Q6).
   if (under.startsWith("skills/")) {
-    return join("skills/engineering-workflow", dir.replace(/^skills\//, ""), localName);
+    return join("skills/engineering-foundation", dir.replace(/^skills\//, ""), localName);
   }
   // Blueprint manifest + any other reference material stays under resources/blueprint/.
-  return join("skills/engineering-workflow/resources/blueprint", under);
+  return join("skills/core/engineering-foundation/resources/blueprint", under);
 }
 
 /** Fetch the wiki tree and return a unified item per DOCUMENT/FILE node we
@@ -395,7 +402,7 @@ async function fetchWikiItems(client: AuraClient, manifest: Manifest): Promise<M
 
 /** Map a wiki node to its local repo path (relative to repo root), or
  *  `undefined` if the node is outside the mirror. The mirror layout (from the
- *  engineering-workflow SKILL.md):
+ *  engineering-foundation router SKILL.md):
  *    INDEX.md, Log.md, guides/*.md, workflow/*.md, rules/*.mdc
  *  Blueprint files come via getBlueprintFiles (not the wiki tree), so any
  *  node under a `blueprint/` path on the wiki is skipped here to avoid double
@@ -413,17 +420,17 @@ function wikiNodeToLocalPath(slugPath: string[], _node: KnowledgeNode): string |
   // The wiki's top-level docs are `index` / `log` (lowercase, no extension);
   // the mirror calls them `INDEX.md` / `Log.md`.
   if (slugPath.length === 1 && (top === "index" || top === "log")) {
-    return join("skills/engineering-workflow/resources", top === "index" ? "INDEX.md" : "Log.md");
+    return join("skills/core/engineering-foundation/resources", top === "index" ? "INDEX.md" : "Log.md");
   }
   // Blueprint content is fetched via getBlueprintFiles, not the wiki tree —
   // skip nodes that live under blueprint/ on the wiki to avoid duplicates.
   if (top === "blueprint") return undefined;
   if (top === "guides" || top === "workflow" || top === "rules") {
-    return join("skills/engineering-workflow/resources", top, rest + ".md");
+    return join("skills/core/engineering-foundation/resources", top, rest + ".md");
   }
   // Unknown structure: mirror under resources/ preserving the path so the
   // author sees it and can decide during reconciliation.
-  return join("skills/engineering-workflow/resources", slugPath.join("/"));
+  return join("skills/core/engineering-foundation/resources", slugPath.join("/"));
 }
 
 /** Flatten the nested wiki tree into a list of {node, slugPath} for every
@@ -733,7 +740,7 @@ function readBlueprintContent(files: Map<string, BlueprintFile>, key: string): s
   return files.get(key)?.content ?? "";
 }
 
-/** Authored files (e.g. the engineering-workflow router SKILL.md) have no wiki
+/** Authored files (e.g. the engineering-foundation router SKILL.md) have no wiki
  *  counterpart to sha256 against. When the wiki's *structure* for the topic
  *  changes (a guide added/removed/renamed), surface a diff prompt: write a
  *  NEW_REMOTE snapshot of the changed wiki node + a CURRENT snapshot of the

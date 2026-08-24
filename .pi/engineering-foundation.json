@@ -4,23 +4,23 @@
   "entries": {
     "blueprint/rules/tracker-aura.mdc": {
       "wikiPathOrUuid": "blueprint/rules/tracker-aura.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/tracker-aura.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/tracker-aura.mdc",
       "sourceSha256": "sha256:f563cff8f03df949e839768b990de73aa4bbf4b30b1b42c69983c1c6b2eaf02c",
       "auraChecksumOrVersion": "sha256:f563cff8f03df949e839768b990de73aa4bbf4b30b1b42c69983c1c6b2eaf02c",
       "auraUpdatedAt": "",
       "ignored": true,
-      "ignoreReason": "This rule is ignored in the pi-aura mirror: this repo talks to Aura via the `aura` skill / REST client (and the aura-mcp-dev MCP server), not via task-lifecycle skills reading an AGENTS.md \u2192 Tracker adapter. The `tracker-aura` adapter describes a Jira/Tracker-style integration pattern that does not apply here. The drift manifest records this entry with `ignored: true`."
+      "ignoreReason": "This rule is ignored in the pi-aura mirror: this repo talks to Aura via the `aura` skill / REST client (and the aura-mcp-dev MCP server), not via task-lifecycle skills reading an AGENTS.md → Tracker adapter. The `tracker-aura` adapter describes a Jira/Tracker-style integration pattern that does not apply here. The drift manifest records this entry with `ignored: true`."
     },
     "blueprint/manifest.yaml": {
       "wikiPathOrUuid": "blueprint/manifest.yaml",
-      "localPath": "skills/engineering-workflow/resources/blueprint/manifest.yaml",
+      "localPath": "skills/core/engineering-foundation/resources/blueprint/manifest.yaml",
       "sourceSha256": "sha256:7539d11d8bb4312e8ce8c7e0f62418ec1571f0e831479f3395759c0842b86d61",
       "auraChecksumOrVersion": "sha256:7539d11d8bb4312e8ce8c7e0f62418ec1571f0e831479f3395759c0842b86d61",
       "auraUpdatedAt": ""
     },
     "blueprint/rules/general-ai-docs-structure.mdc": {
       "wikiPathOrUuid": "blueprint/rules/general-ai-docs-structure.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/general-ai-docs-structure.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/general-ai-docs-structure.mdc",
       "sourceSha256": "sha256:eeea75eaf97695cdbc9865636bd7880559397117760b1a7f31101f18f8bca90e",
       "auraChecksumOrVersion": "sha256:eeea75eaf97695cdbc9865636bd7880559397117760b1a7f31101f18f8bca90e",
       "auraUpdatedAt": "",
@@ -28,7 +28,7 @@
     },
     "blueprint/rules/general-code-quality.mdc": {
       "wikiPathOrUuid": "blueprint/rules/general-code-quality.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/general-code-quality.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/general-code-quality.mdc",
       "sourceSha256": "sha256:010fc2b966ab79c3f6224c18286efe4eb07fb067f18e3c84448052110bd8ea8d",
       "auraChecksumOrVersion": "sha256:010fc2b966ab79c3f6224c18286efe4eb07fb067f18e3c84448052110bd8ea8d",
       "auraUpdatedAt": "",
@@ -36,7 +36,7 @@
     },
     "blueprint/rules/general-db-destructive-ops.mdc": {
       "wikiPathOrUuid": "blueprint/rules/general-db-destructive-ops.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/general-db-destructive-ops.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/general-db-destructive-ops.mdc",
       "sourceSha256": "sha256:21d5880f537276cd4fe4c3b9e01d5cb2fe8d30f01a495ee8a3e8b565c50f79d7",
       "auraChecksumOrVersion": "sha256:21d5880f537276cd4fe4c3b9e01d5cb2fe8d30f01a495ee8a3e8b565c50f79d7",
       "auraUpdatedAt": "",
@@ -44,7 +44,7 @@
     },
     "blueprint/rules/general-english-comments.mdc": {
       "wikiPathOrUuid": "blueprint/rules/general-english-comments.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/general-english-comments.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/general-english-comments.mdc",
       "sourceSha256": "sha256:dcdf72c1a860856539c0f6e11d417f65d771d26aee53cef79981e4bab1c230df",
       "auraChecksumOrVersion": "sha256:dcdf72c1a860856539c0f6e11d417f65d771d26aee53cef79981e4bab1c230df",
       "auraUpdatedAt": "",
@@ -52,7 +52,7 @@
     },
     "blueprint/rules/general-language-policy.mdc": {
       "wikiPathOrUuid": "blueprint/rules/general-language-policy.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/general-language-policy.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/general-language-policy.mdc",
       "sourceSha256": "sha256:9fa47701a7558f39891bbac429f19b708c1dc4d6697f3712a79e9d74f4fe4a04",
       "auraChecksumOrVersion": "sha256:9fa47701a7558f39891bbac429f19b708c1dc4d6697f3712a79e9d74f4fe4a04",
       "auraUpdatedAt": "",
@@ -60,7 +60,7 @@
     },
     "blueprint/rules/general-markdown-format.mdc": {
       "wikiPathOrUuid": "blueprint/rules/general-markdown-format.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/general-markdown-format.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/general-markdown-format.mdc",
       "sourceSha256": "sha256:25dd2e89274f2dfb9a0803f0be42b5ad69751ce7b9b3377a386cb3e18da6b4c2",
       "auraChecksumOrVersion": "sha256:25dd2e89274f2dfb9a0803f0be42b5ad69751ce7b9b3377a386cb3e18da6b4c2",
       "auraUpdatedAt": "",
@@ -68,7 +68,7 @@
     },
     "blueprint/rules/general-shared-state-and-handoff.mdc": {
       "wikiPathOrUuid": "blueprint/rules/general-shared-state-and-handoff.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/general-shared-state-and-handoff.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/general-shared-state-and-handoff.mdc",
       "sourceSha256": "sha256:71b8686f6e79278bcddf4b22cbdb27405e1d74ce2f54a2f6ccdd5dcd4d12940f",
       "auraChecksumOrVersion": "sha256:71b8686f6e79278bcddf4b22cbdb27405e1d74ce2f54a2f6ccdd5dcd4d12940f",
       "auraUpdatedAt": "",
@@ -76,7 +76,7 @@
     },
     "blueprint/rules/locale-json-safety.mdc": {
       "wikiPathOrUuid": "blueprint/rules/locale-json-safety.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/locale-json-safety.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/locale-json-safety.mdc",
       "sourceSha256": "sha256:65456d9883e53e914753d059aa0c9144efa2c85c5e23ed238c729aac35584595",
       "auraChecksumOrVersion": "sha256:65456d9883e53e914753d059aa0c9144efa2c85c5e23ed238c729aac35584595",
       "auraUpdatedAt": "",
@@ -84,7 +84,7 @@
     },
     "blueprint/rules/task-artifact-conventions.mdc": {
       "wikiPathOrUuid": "blueprint/rules/task-artifact-conventions.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/task-artifact-conventions.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/task-artifact-conventions.mdc",
       "sourceSha256": "sha256:67be3857a8de79cc4ac71cf3df80419523f6f54daef045db354bad51046c45ea",
       "auraChecksumOrVersion": "sha256:67be3857a8de79cc4ac71cf3df80419523f6f54daef045db354bad51046c45ea",
       "auraUpdatedAt": "",
@@ -92,7 +92,7 @@
     },
     "blueprint/rules/task-phase-tracking.mdc": {
       "wikiPathOrUuid": "blueprint/rules/task-phase-tracking.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/task-phase-tracking.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/task-phase-tracking.mdc",
       "sourceSha256": "sha256:54ea2914f6e0de2c0c504500a7778085b018dc2bec44261c03c5ad98ab31e9ef",
       "auraChecksumOrVersion": "sha256:54ea2914f6e0de2c0c504500a7778085b018dc2bec44261c03c5ad98ab31e9ef",
       "auraUpdatedAt": "",
@@ -100,7 +100,7 @@
     },
     "blueprint/rules/task-preflight-checks.mdc": {
       "wikiPathOrUuid": "blueprint/rules/task-preflight-checks.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/task-preflight-checks.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/task-preflight-checks.mdc",
       "sourceSha256": "sha256:eea3ea0e5e40a212397b0cb7430d92bdbfe0aeca37c7d85de0f4667496d9875b",
       "auraChecksumOrVersion": "sha256:eea3ea0e5e40a212397b0cb7430d92bdbfe0aeca37c7d85de0f4667496d9875b",
       "auraUpdatedAt": "",
@@ -108,7 +108,7 @@
     },
     "blueprint/rules/tracker-jira.mdc": {
       "wikiPathOrUuid": "blueprint/rules/tracker-jira.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/tracker-jira.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/tracker-jira.mdc",
       "sourceSha256": "sha256:8ccad20a5dcabca5907e652dcadfe5d16eaed99b431daacab978228e70a6a18f",
       "auraChecksumOrVersion": "sha256:8ccad20a5dcabca5907e652dcadfe5d16eaed99b431daacab978228e70a6a18f",
       "auraUpdatedAt": "",
@@ -116,7 +116,7 @@
     },
     "blueprint/rules/tracker-mirror.mdc": {
       "wikiPathOrUuid": "blueprint/rules/tracker-mirror.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/tracker-mirror.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/tracker-mirror.mdc",
       "sourceSha256": "sha256:45a34714a32f7856b7ac9d1e094ec25426524f59886caccf37073bcdba274f8c",
       "auraChecksumOrVersion": "sha256:45a34714a32f7856b7ac9d1e094ec25426524f59886caccf37073bcdba274f8c",
       "auraUpdatedAt": "",
@@ -124,7 +124,7 @@
     },
     "blueprint/rules/tracker-selection.mdc": {
       "wikiPathOrUuid": "blueprint/rules/tracker-selection.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/tracker-selection.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/tracker-selection.mdc",
       "sourceSha256": "sha256:f6be2ef8a7bc6b6a7e3fc52fe9811826e8bb3db3f0136b784e2d76fb8262f421",
       "auraChecksumOrVersion": "sha256:f6be2ef8a7bc6b6a7e3fc52fe9811826e8bb3db3f0136b784e2d76fb8262f421",
       "auraUpdatedAt": "",
@@ -132,7 +132,7 @@
     },
     "blueprint/rules/worklog-personal-tracking.mdc": {
       "wikiPathOrUuid": "blueprint/rules/worklog-personal-tracking.mdc",
-      "localPath": "skills/engineering-workflow/resources/rules/worklog-personal-tracking.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/worklog-personal-tracking.mdc",
       "sourceSha256": "sha256:f70a794c3409362904d5f815940a443fbb887eca20f206f6f3a4d73edbcae481",
       "auraChecksumOrVersion": "sha256:f70a794c3409362904d5f815940a443fbb887eca20f206f6f3a4d73edbcae481",
       "auraUpdatedAt": "",
@@ -140,7 +140,7 @@
     },
     "blueprint/skills/ai-setup/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/ai-setup/skill.md",
-      "localPath": "skills/engineering-workflow/ai-setup/SKILL.md",
+      "localPath": "skills/engineering-foundation/ai-setup/SKILL.md",
       "sourceSha256": "sha256:48a79cd9912d6257e21346f5927f3255b1fe8a2fc905b245fb2c3648b1828479",
       "auraChecksumOrVersion": "sha256:48a79cd9912d6257e21346f5927f3255b1fe8a2fc905b245fb2c3648b1828479",
       "auraUpdatedAt": "",
@@ -148,7 +148,7 @@
     },
     "blueprint/skills/ai-sync/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/ai-sync/skill.md",
-      "localPath": "skills/engineering-workflow/ai-sync/SKILL.md",
+      "localPath": "skills/engineering-foundation/ai-sync/SKILL.md",
       "sourceSha256": "sha256:a478f67cf72812005a876c16b77d73a3f0e67a0fc049a33a88ba03cb9b366f98",
       "auraChecksumOrVersion": "sha256:a478f67cf72812005a876c16b77d73a3f0e67a0fc049a33a88ba03cb9b366f98",
       "auraUpdatedAt": "",
@@ -156,7 +156,7 @@
     },
     "blueprint/skills/pr-review/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/pr-review/skill.md",
-      "localPath": "skills/engineering-workflow/pr-review/SKILL.md",
+      "localPath": "skills/engineering-foundation/pr-review/SKILL.md",
       "sourceSha256": "sha256:52bfd46183b6710f6055441a99c7934b14c5e877618401c8913ef4169a4bd853",
       "auraChecksumOrVersion": "sha256:52bfd46183b6710f6055441a99c7934b14c5e877618401c8913ef4169a4bd853",
       "auraUpdatedAt": "",
@@ -164,7 +164,7 @@
     },
     "blueprint/skills/retro-harvest/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/retro-harvest/skill.md",
-      "localPath": "skills/engineering-workflow/retro-harvest/SKILL.md",
+      "localPath": "skills/engineering-foundation/retro-harvest/SKILL.md",
       "sourceSha256": "sha256:9480bb326e57f20ec7c7dce7a4c3af86157602ad50912f0905620feb76e2347b",
       "auraChecksumOrVersion": "sha256:9480bb326e57f20ec7c7dce7a4c3af86157602ad50912f0905620feb76e2347b",
       "auraUpdatedAt": "",
@@ -172,7 +172,7 @@
     },
     "blueprint/skills/task-create/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/task-create/skill.md",
-      "localPath": "skills/engineering-workflow/task-create/SKILL.md",
+      "localPath": "skills/engineering-foundation/task-create/SKILL.md",
       "sourceSha256": "sha256:68aff530fa2fb69d4da3d5f1ed40e9bba35c359f896a3a6a497ef215acc3a14d",
       "auraChecksumOrVersion": "sha256:68aff530fa2fb69d4da3d5f1ed40e9bba35c359f896a3a6a497ef215acc3a14d",
       "auraUpdatedAt": "",
@@ -180,7 +180,7 @@
     },
     "blueprint/skills/task-draft/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/task-draft/skill.md",
-      "localPath": "skills/engineering-workflow/task-draft/SKILL.md",
+      "localPath": "skills/engineering-foundation/task-draft/SKILL.md",
       "sourceSha256": "sha256:228d055ad3a8a67ee52ba9c471ce4f939dfba5123c4bb87ae06f584cd40b512c",
       "auraChecksumOrVersion": "sha256:228d055ad3a8a67ee52ba9c471ce4f939dfba5123c4bb87ae06f584cd40b512c",
       "auraUpdatedAt": "",
@@ -188,7 +188,7 @@
     },
     "blueprint/skills/task-finish/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/task-finish/skill.md",
-      "localPath": "skills/engineering-workflow/task-finish/SKILL.md",
+      "localPath": "skills/engineering-foundation/task-finish/SKILL.md",
       "sourceSha256": "sha256:6d794779e8bf43adbe7c9549d9d5a2c3a0f00e5f7c6d95f94f84bfaa2c3f0d3c",
       "auraChecksumOrVersion": "sha256:6d794779e8bf43adbe7c9549d9d5a2c3a0f00e5f7c6d95f94f84bfaa2c3f0d3c",
       "auraUpdatedAt": "",
@@ -196,7 +196,7 @@
     },
     "blueprint/skills/task-implement/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/task-implement/skill.md",
-      "localPath": "skills/engineering-workflow/task-implement/SKILL.md",
+      "localPath": "skills/engineering-foundation/task-implement/SKILL.md",
       "sourceSha256": "sha256:b9da92f39524eb7e33706c4aa8e6429d3dc3fb1cb81a54213ef3a15c9dcf5bf4",
       "auraChecksumOrVersion": "sha256:b9da92f39524eb7e33706c4aa8e6429d3dc3fb1cb81a54213ef3a15c9dcf5bf4",
       "auraUpdatedAt": "",
@@ -204,7 +204,7 @@
     },
     "blueprint/skills/task-quiz/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/task-quiz/skill.md",
-      "localPath": "skills/engineering-workflow/task-quiz/SKILL.md",
+      "localPath": "skills/engineering-foundation/task-quiz/SKILL.md",
       "sourceSha256": "sha256:2e67014210e6e367b2133be520deed39140db1524fac34f778678143205c6493",
       "auraChecksumOrVersion": "sha256:2e67014210e6e367b2133be520deed39140db1524fac34f778678143205c6493",
       "auraUpdatedAt": "",
@@ -212,7 +212,7 @@
     },
     "blueprint/skills/task-refine/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/task-refine/skill.md",
-      "localPath": "skills/engineering-workflow/task-refine/SKILL.md",
+      "localPath": "skills/engineering-foundation/task-refine/SKILL.md",
       "sourceSha256": "sha256:156704dedbf2f913f1e06bd214e12ec8655da493cb31b10ccf3885c87cd0c2a9",
       "auraChecksumOrVersion": "sha256:156704dedbf2f913f1e06bd214e12ec8655da493cb31b10ccf3885c87cd0c2a9",
       "auraUpdatedAt": "",
@@ -220,7 +220,7 @@
     },
     "blueprint/skills/task-refine-review/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/task-refine-review/skill.md",
-      "localPath": "skills/engineering-workflow/task-refine-review/SKILL.md",
+      "localPath": "skills/engineering-foundation/task-refine-review/SKILL.md",
       "sourceSha256": "sha256:1981c4f0156fb109c09515fe7f23c29089959cf2bd91b3462a18c2b01dd1f1d4",
       "auraChecksumOrVersion": "sha256:1981c4f0156fb109c09515fe7f23c29089959cf2bd91b3462a18c2b01dd1f1d4",
       "auraUpdatedAt": "",
@@ -228,7 +228,7 @@
     },
     "blueprint/skills/task-retro/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/task-retro/skill.md",
-      "localPath": "skills/engineering-workflow/task-retro/SKILL.md",
+      "localPath": "skills/engineering-foundation/task-retro/SKILL.md",
       "sourceSha256": "sha256:3988f56694a6959bf72917056871cf77f52eb89f624fb54818cdc7793d712651",
       "auraChecksumOrVersion": "sha256:3988f56694a6959bf72917056871cf77f52eb89f624fb54818cdc7793d712651",
       "auraUpdatedAt": "",
@@ -236,7 +236,7 @@
     },
     "blueprint/skills/task-slice/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/task-slice/skill.md",
-      "localPath": "skills/engineering-workflow/task-slice/SKILL.md",
+      "localPath": "skills/engineering-foundation/task-slice/SKILL.md",
       "sourceSha256": "sha256:c21465acf5f0a8f2ac721bd00831986d8a7a52f4dce1a11f9e580fafa52eb30c",
       "auraChecksumOrVersion": "sha256:c21465acf5f0a8f2ac721bd00831986d8a7a52f4dce1a11f9e580fafa52eb30c",
       "auraUpdatedAt": "",
@@ -244,28 +244,28 @@
     },
     "blueprint/skills/task-untangle/bundle.ts": {
       "wikiPathOrUuid": "blueprint/skills/task-untangle/bundle.ts",
-      "localPath": "skills/engineering-workflow/task-untangle/bundle.ts",
+      "localPath": "skills/engineering-foundation/task-untangle/bundle.ts",
       "sourceSha256": "sha256:88eecde16ce8fea455eb2f4de190d4301cd9c67c3f4514044d61733707863e6f",
       "auraChecksumOrVersion": "sha256:88eecde16ce8fea455eb2f4de190d4301cd9c67c3f4514044d61733707863e6f",
       "auraUpdatedAt": ""
     },
     "blueprint/skills/task-untangle/check-bundle.ts": {
       "wikiPathOrUuid": "blueprint/skills/task-untangle/check-bundle.ts",
-      "localPath": "skills/engineering-workflow/task-untangle/check-bundle.ts",
+      "localPath": "skills/engineering-foundation/task-untangle/check-bundle.ts",
       "sourceSha256": "sha256:93c0396faabb30974f7db699c3ff24941ef05263cb49b59f9dd0d07de589f819",
       "auraChecksumOrVersion": "sha256:93c0396faabb30974f7db699c3ff24941ef05263cb49b59f9dd0d07de589f819",
       "auraUpdatedAt": ""
     },
     "blueprint/skills/task-untangle/serve-plans.ts": {
       "wikiPathOrUuid": "blueprint/skills/task-untangle/serve-plans.ts",
-      "localPath": "skills/engineering-workflow/task-untangle/serve-plans.ts",
+      "localPath": "skills/engineering-foundation/task-untangle/serve-plans.ts",
       "sourceSha256": "sha256:f9869e472a694000c0d6722f364d4158eeca29fe8ee60be2dd3d92cd00dedddc",
       "auraChecksumOrVersion": "sha256:f9869e472a694000c0d6722f364d4158eeca29fe8ee60be2dd3d92cd00dedddc",
       "auraUpdatedAt": ""
     },
     "blueprint/skills/task-untangle/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/task-untangle/skill.md",
-      "localPath": "skills/engineering-workflow/task-untangle/SKILL.md",
+      "localPath": "skills/engineering-foundation/task-untangle/SKILL.md",
       "sourceSha256": "sha256:a681446a113fbbf50d441458159e244ae6da303f213350e6fbac9c9c6a9d0657",
       "auraChecksumOrVersion": "sha256:a681446a113fbbf50d441458159e244ae6da303f213350e6fbac9c9c6a9d0657",
       "auraUpdatedAt": "",
@@ -273,14 +273,14 @@
     },
     "blueprint/skills/task-untangle/views.ts": {
       "wikiPathOrUuid": "blueprint/skills/task-untangle/views.ts",
-      "localPath": "skills/engineering-workflow/task-untangle/views.ts",
+      "localPath": "skills/engineering-foundation/task-untangle/views.ts",
       "sourceSha256": "sha256:4c403b2bbdc0714e703e5d53e2f8cc714aad71f5f736d56f178b870d35c9dab7",
       "auraChecksumOrVersion": "sha256:4c403b2bbdc0714e703e5d53e2f8cc714aad71f5f736d56f178b870d35c9dab7",
       "auraUpdatedAt": ""
     },
     "709bcd95-ce61-4dc5-937e-dda58ea2e375": {
       "wikiPathOrUuid": "709bcd95-ce61-4dc5-937e-dda58ea2e375",
-      "localPath": "skills/engineering-workflow/resources/guides/ai-foundation-file-map.md",
+      "localPath": "skills/core/engineering-foundation/resources/guides/ai-foundation-file-map.md",
       "sourceSha256": "sha256:8ab28763af8691ee802772ebe23c0e13ac9722840f43d7022ebdca7a7c5d9aad",
       "auraChecksumOrVersion": "2",
       "auraUpdatedAt": "2026-08-12T10:22:52.815Z",
@@ -290,7 +290,7 @@
     },
     "2103332e-7957-434d-bcb4-3e35775883f1": {
       "wikiPathOrUuid": "2103332e-7957-434d-bcb4-3e35775883f1",
-      "localPath": "skills/engineering-workflow/resources/guides/ai-readiness-standard.md",
+      "localPath": "skills/core/engineering-foundation/resources/guides/ai-readiness-standard.md",
       "sourceSha256": "sha256:65152640fdd8d95d4b208bd37f0ce6d8176e25bc76cdd79a3223ddb50e42bdc0",
       "auraChecksumOrVersion": "2",
       "auraUpdatedAt": "2026-08-12T11:36:11.041Z",
@@ -300,7 +300,7 @@
     },
     "50a97693-7aa5-44f4-92d1-5ae1a74bd902": {
       "wikiPathOrUuid": "50a97693-7aa5-44f4-92d1-5ae1a74bd902",
-      "localPath": "skills/engineering-workflow/resources/guides/deployment-ber-bitbucket-pipelines.md",
+      "localPath": "skills/core/engineering-foundation/resources/guides/deployment-ber-bitbucket-pipelines.md",
       "sourceSha256": "sha256:b4032fbdd5a7b146a9afa80f3db41230c5008e7d9bd7ba9cb8eed188a608cedc",
       "auraChecksumOrVersion": "2",
       "auraUpdatedAt": "2026-08-06T13:36:35.558Z",
@@ -310,7 +310,7 @@
     },
     "cabc988a-7c74-4736-8c5d-cf674356f728": {
       "wikiPathOrUuid": "cabc988a-7c74-4736-8c5d-cf674356f728",
-      "localPath": "skills/engineering-workflow/resources/guides/developer-guides.md",
+      "localPath": "skills/core/engineering-foundation/resources/guides/developer-guides.md",
       "sourceSha256": "sha256:6dac9bb42fc22f3444914e0e85d08a96c21f875e41e51dd6fdb948095f3b4404",
       "auraChecksumOrVersion": "5",
       "auraUpdatedAt": "2026-08-14T11:29:03.549Z",
@@ -320,7 +320,7 @@
     },
     "ec10f508-6d3b-4f33-a2f0-598b23f81c0a": {
       "wikiPathOrUuid": "ec10f508-6d3b-4f33-a2f0-598b23f81c0a",
-      "localPath": "skills/engineering-workflow/resources/workflow/ai-readiness-rollout.md",
+      "localPath": "skills/core/engineering-foundation/resources/workflow/ai-readiness-rollout.md",
       "sourceSha256": "sha256:0153ae7f255f8b2618e4e2189bb54b2537771d63ae27e905156225c3a011ec87",
       "auraChecksumOrVersion": "2",
       "auraUpdatedAt": "2026-08-12T10:22:30.454Z",
@@ -330,7 +330,7 @@
     },
     "6c5d125c-e7ba-46ed-b3a4-0047d67dac77": {
       "wikiPathOrUuid": "6c5d125c-e7ba-46ed-b3a4-0047d67dac77",
-      "localPath": "skills/engineering-workflow/resources/workflow/development-workflow.md",
+      "localPath": "skills/core/engineering-foundation/resources/workflow/development-workflow.md",
       "sourceSha256": "sha256:cdf53cde36626779be89506b671aad07f7d35b3fc83bf712f4afa4ccda35ed87",
       "auraChecksumOrVersion": "9",
       "auraUpdatedAt": "2026-08-21T08:59:34.677Z",
@@ -340,7 +340,7 @@
     },
     "21db3a70-079e-4533-bd03-40610ef81f5d": {
       "wikiPathOrUuid": "21db3a70-079e-4533-bd03-40610ef81f5d",
-      "localPath": "skills/engineering-workflow/resources/INDEX.md",
+      "localPath": "skills/core/engineering-foundation/resources/INDEX.md",
       "sourceSha256": "sha256:88b63801c04395b9adc2a5d08d3c4137634d83dff7a43e931a998c68b063e3dd",
       "auraChecksumOrVersion": "4",
       "auraUpdatedAt": "2026-08-21T08:59:55.224Z",
@@ -350,7 +350,7 @@
     },
     "28ecbb49-d5fb-49dd-bfa7-2ef5ecc13835": {
       "wikiPathOrUuid": "28ecbb49-d5fb-49dd-bfa7-2ef5ecc13835",
-      "localPath": "skills/engineering-workflow/resources/Log.md",
+      "localPath": "skills/core/engineering-foundation/resources/Log.md",
       "sourceSha256": "sha256:b70c13635ae34ca481fbea03f34bb043fa3a100644bdc67af650a5ff9e5733fa",
       "auraChecksumOrVersion": "5",
       "auraUpdatedAt": "2026-08-21T09:00:13.937Z",
@@ -358,9 +358,9 @@
       "slug": "log",
       "adaptedSha256": "sha256:0e906a339a16549a33555337a810d529820b6cf78535e3f30a509bf7a9e89e86"
     },
-    "skills/engineering-workflow/SKILL.md": {
-      "wikiPathOrUuid": "skills/engineering-workflow/SKILL.md",
-      "localPath": "skills/engineering-workflow/SKILL.md",
+    "skills/core/engineering-foundation/SKILL.md": {
+      "wikiPathOrUuid": "skills/core/engineering-foundation/SKILL.md",
+      "localPath": "skills/core/engineering-foundation/SKILL.md",
       "sourceSha256": "sha256:fd10851b83c9416568bd8db53a2be1c128a2ab27ae79a9076662ee8e4c6e1cae",
       "auraChecksumOrVersion": "",
       "auraUpdatedAt": "2026-08-21T17:31:04.692Z",

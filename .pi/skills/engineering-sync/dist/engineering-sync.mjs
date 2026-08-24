@@ -5007,13 +5007,13 @@ function resolveRepoRoot() {
   return process.cwd();
 }
 var REPO_ROOT = resolveRepoRoot();
-var MIRROR_ROOT = join3(REPO_ROOT, "skills", "engineering-workflow", "resources");
+var MIRROR_ROOT = join3(REPO_ROOT, "skills", "core", "engineering-foundation", "resources");
 var MANIFEST_PATH = join3(REPO_ROOT, ".pi", "engineering-foundation.json");
 var OLD_REMOTE_SUFFIX = ".OLD_REMOTE";
 var NEW_REMOTE_SUFFIX = ".NEW_REMOTE";
 var CURRENT_SUFFIX = ".CURRENT";
 var IGNORE_SUFFIX = ".IGNORE";
-var AUTHORED_ROUTER_PATH = join3(REPO_ROOT, "skills", "engineering-workflow", "SKILL.md");
+var AUTHORED_ROUTER_PATH = join3(REPO_ROOT, "skills", "core", "engineering-foundation", "SKILL.md");
 function fail(msg, code = 2) {
   console.error(`engineering-sync: error: ${msg}`);
   process.exit(code);
@@ -5060,7 +5060,7 @@ async function fetchBlueprintItems(client2, manifest) {
     items.push({
       key: manifestFile.path,
       source: "blueprint",
-      localPath: join3("skills/engineering-workflow/resources/blueprint/manifest.yaml"),
+      localPath: join3("skills/core/engineering-foundation/resources/blueprint/manifest.yaml"),
       remoteSha256: manifestFile.checksum,
       auraChecksumOrVersion: manifestFile.checksum,
       auraUpdatedAt: manifestFile.provenance.source_commit_sha ?? ""
@@ -5104,12 +5104,12 @@ function blueprintPathToLocal(bpPath, filename) {
   const dir = dirname2(under);
   const localName = filename || basename(under);
   if (under.startsWith("rules/")) {
-    return join3("skills/engineering-workflow/resources/rules", localName);
+    return join3("skills/core/engineering-foundation/resources/rules", localName);
   }
   if (under.startsWith("skills/")) {
-    return join3("skills/engineering-workflow", dir.replace(/^skills\//, ""), localName);
+    return join3("skills/engineering-foundation", dir.replace(/^skills\//, ""), localName);
   }
-  return join3("skills/engineering-workflow/resources/blueprint", under);
+  return join3("skills/core/engineering-foundation/resources/blueprint", under);
 }
 async function fetchWikiItems(client2, manifest) {
   const tree = await client2.getKnowledgeTree(SPACE_SLUG);
@@ -5144,13 +5144,13 @@ function wikiNodeToLocalPath(slugPath, _node) {
   const top = slugPath[0];
   const rest = slugPath.slice(1).join("/");
   if (slugPath.length === 1 && (top === "index" || top === "log")) {
-    return join3("skills/engineering-workflow/resources", top === "index" ? "INDEX.md" : "Log.md");
+    return join3("skills/core/engineering-foundation/resources", top === "index" ? "INDEX.md" : "Log.md");
   }
   if (top === "blueprint") return void 0;
   if (top === "guides" || top === "workflow" || top === "rules") {
-    return join3("skills/engineering-workflow/resources", top, rest + ".md");
+    return join3("skills/core/engineering-foundation/resources", top, rest + ".md");
   }
-  return join3("skills/engineering-workflow/resources", slugPath.join("/"));
+  return join3("skills/core/engineering-foundation/resources", slugPath.join("/"));
 }
 function flattenTreeNodes(nodes, parentSlugPath = []) {
   const out = [];

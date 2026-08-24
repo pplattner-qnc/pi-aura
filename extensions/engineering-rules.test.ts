@@ -77,7 +77,7 @@ console.log("parseFrontmatter: ok");
 {
   const dir = mkdtempSync(join(tmpdir(), "eng-rules-test-"));
   try {
-    const rulesDir = join(dir, "skills", "engineering-workflow", "resources", "rules");
+    const rulesDir = join(dir, "skills", "core", "engineering-foundation", "resources", "rules");
     mkdirSync(rulesDir, { recursive: true });
     writeFileSync(join(rulesDir, "general-code-quality.mdc"),
       "---\nalwaysApply: true\n---\nBe excellent.\n");
@@ -95,7 +95,7 @@ console.log("parseFrontmatter: ok");
       entries: {
         "<tracker-aura-uuid>": {
           wikiPathOrUuid: "<tracker-aura-uuid>",
-          localPath: "skills/engineering-workflow/resources/rules/tracker-aura.mdc",
+          localPath: "skills/core/engineering-foundation/resources/rules/tracker-aura.mdc",
           sourceSha256: "sha256:x",
           auraChecksumOrVersion: "1",
           auraUpdatedAt: "",
@@ -128,7 +128,7 @@ console.log("loadRules + tracker-aura skip (manifest-driven): ok");
 {
   const dir = mkdtempSync(join(tmpdir(), "eng-rules-test-nomanifest-"));
   try {
-    const rulesDir = join(dir, "skills", "engineering-workflow", "resources", "rules");
+    const rulesDir = join(dir, "skills", "core", "engineering-foundation", "resources", "rules");
     mkdirSync(rulesDir, { recursive: true });
     writeFileSync(join(rulesDir, "tracker-aura.mdc"),
       "---\nalwaysApply: true\n---\nWould be loaded without a manifest.\n");
@@ -161,15 +161,15 @@ console.log("loadRules absent dir: ok");
 {
   const rules: Rule[] = [
     {
-      name: "general-code-quality", path: "/x", relPath: "skills/engineering-workflow/resources/rules/general-code-quality.mdc",
+      name: "general-code-quality", path: "/x", relPath: "skills/core/engineering-foundation/resources/rules/general-code-quality.mdc",
       attach: "always", globs: [], body: "Be excellent.", full: "",
     },
     {
-      name: "general-markdown-format", path: "/x", relPath: "skills/engineering-workflow/resources/rules/general-markdown-format.mdc",
+      name: "general-markdown-format", path: "/x", relPath: "skills/core/engineering-foundation/resources/rules/general-markdown-format.mdc",
       attach: "glob", globs: ["**/*.md"], body: "Format markdown.", full: "",
     },
     {
-      name: "tracker-jira", path: "/x", relPath: "skills/engineering-workflow/resources/rules/tracker-jira.mdc",
+      name: "tracker-jira", path: "/x", relPath: "skills/core/engineering-foundation/resources/rules/tracker-jira.mdc",
       attach: "manual", globs: [], body: "Manual rule.", full: "",
     },
   ];
@@ -222,11 +222,11 @@ console.log("extractRuleToken (@ deferral): ok");
 {
   const rules: Rule[] = [
     {
-      name: "tracker-jira", path: "/x", relPath: "skills/engineering-workflow/resources/rules/tracker-jira.mdc",
+      name: "tracker-jira", path: "/x", relPath: "skills/core/engineering-foundation/resources/rules/tracker-jira.mdc",
       attach: "manual", globs: [], body: "Use Jira for tracking.", full: "",
     },
     {
-      name: "general-code-quality", path: "/x", relPath: "skills/engineering-workflow/resources/rules/general-code-quality.mdc",
+      name: "general-code-quality", path: "/x", relPath: "skills/core/engineering-foundation/resources/rules/general-code-quality.mdc",
       attach: "always", globs: [], body: "Be excellent.", full: "",
     },
   ];

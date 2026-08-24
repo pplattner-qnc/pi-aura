@@ -106,7 +106,7 @@ console.log("hasSuffix: ok");
       {
         key: "<tracker-aura-uuid>",
         source: "wiki-doc",
-        localPath: "skills/engineering-workflow/resources/rules/tracker-aura.mdc",
+        localPath: "skills/core/engineering-foundation/resources/rules/tracker-aura.mdc",
         remoteSha256: "sha256:aura",
         auraChecksumOrVersion: "1",
         auraUpdatedAt: "2026-01-01T00:00:00.000Z",
@@ -116,7 +116,7 @@ console.log("hasSuffix: ok");
       {
         key: "<general-code-quality-uuid>",
         source: "wiki-doc",
-        localPath: "skills/engineering-workflow/resources/rules/general-code-quality.mdc",
+        localPath: "skills/core/engineering-foundation/resources/rules/general-code-quality.mdc",
         remoteSha256: "sha256:quality",
         auraChecksumOrVersion: "1",
         auraUpdatedAt: "2026-01-01T00:00:00.000Z",
@@ -165,7 +165,7 @@ console.log("consumeIgnoreTombstones (manifest-driven ignore): ok");
       {
         key: "some-rule-uuid",
         source: "wiki-doc",
-        localPath: "skills/engineering-workflow/resources/rules/some-rule.mdc",
+        localPath: "skills/core/engineering-foundation/resources/rules/some-rule.mdc",
       },
     ];
     const consumed = consumeIgnoreTombstones([tombstone], items, dir);
@@ -195,12 +195,12 @@ console.log("tombstone empty-reason default: ok");
       {
         key: "tracker-md-uuid",
         source: "wiki-doc",
-        localPath: "skills/engineering-workflow/resources/rules/tracker.md", // .md, not .mdc
+        localPath: "skills/core/engineering-foundation/resources/rules/tracker.md", // .md, not .mdc
       },
       {
         key: "tracker-aura-uuid",
         source: "wiki-doc",
-        localPath: "skills/engineering-workflow/resources/rules/tracker-aura.mdc", // different stem
+        localPath: "skills/core/engineering-foundation/resources/rules/tracker-aura.mdc", // different stem
       },
     ];
     const consumed = consumeIgnoreTombstones([tombstone], items, dir);

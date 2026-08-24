@@ -2,7 +2,7 @@
  * Engineering Rules Extension
  *
  * Reads the 15 included `.mdc` Cursor rule files from
- * `skills/engineering-workflow/resources/rules/` and dispatches each by its
+ * `skills/core/engineering-foundation/resources/rules/` and dispatches each by its
  * frontmatter attach mode, provides a universal `@mention` overlay for all
  * 15, and lists the non-auto-loaded rules in the system prompt every turn.
  *
@@ -95,7 +95,7 @@ interface AutocompleteProvider {
 /** Directory holding the 15 included `.mdc` rule files (relative to the
  *  project root). The rules are deposited by the `engineering-sync` skill's
  *  seeding run; until then the dir is empty/absent and the extension no-ops. */
-const RULES_DIR = "skills/engineering-workflow/resources/rules";
+const RULES_DIR = "skills/core/engineering-foundation/resources/rules";
 
 /** Path to the drift manifest (relative to the project root), which carries
  *  the `ignored: true` flags the sync utility writes for rules like
@@ -251,7 +251,7 @@ function loadIgnoredRuleNames(cwd: string): Set<string> {
     if (entry.ignored !== true) continue;
     const lp = entry.localPath ?? "";
     // localPath is repo-relative, e.g.
-    // `skills/engineering-workflow/resources/rules/tracker-aura.mdc`.
+    // `skills/core/engineering-foundation/resources/rules/tracker-aura.mdc`.
     const filename = lp.split("/").pop() ?? "";
     if (filename.endsWith(".mdc")) {
       ignored.add(filename.slice(0, -4));

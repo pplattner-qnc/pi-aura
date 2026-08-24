@@ -1,9 +1,9 @@
 ---
-name: engineering-workflow
+name: engineering-foundation
 description: The anwalt.de engineering canon — development workflow (idea → merge), developer guides (LLM selection, coding conventions, PR & review, deployment), the AI-readiness standard, the house rules, and the blueprint skills. Use when the user asks about engineering process, PR/review conventions, deployment via Bitbucket Pipelines, the task lifecycle, AI-readiness, or any rule referenced from the engineering-foundation wiki space. Loads the relevant resource file from resources/ on demand.
 ---
 
-# Engineering Workflow
+# Engineering Foundation
 
 This skill surfaces the **engineering-foundation canon** — how we build software at
 anwalt.de — from a local mirror under `resources/`. The mirror is kept fresh against
@@ -27,7 +27,7 @@ All paths are relative to this skill directory.
 | **AI foundation file map** — plain-language map of every steering file/folder | `resources/guides/ai-foundation-file-map.md` |
 | **Blueprint manifest** — every building block with install target, checksum, version | `resources/blueprint/manifest.yaml` |
 | **House rules** (Cursor `.mdc`) — the 15 included rules (tracker-aura ignored) | `resources/rules/*.mdc` |
-| **Blueprint skills** (pi-adapted) — the 14 task-lifecycle + ai-setup/sync skills | `<name>/SKILL.md` |
+| **Blueprint skills** (pi-adapted) — the 14 task-lifecycle + ai-setup/sync skills | `../../engineering-foundation/<name>/SKILL.md` |
 
 ## How to use it
 
@@ -64,9 +64,14 @@ adapter) — do not load or surface it.
 
 ## Blueprint skills are pi-adapted
 
-The 14 `SKILL.md` files under `<name>/SKILL.md` are invokable pi sub-skills
-discovered recursively under `skills/engineering-workflow/`. They are the
-pi-adapted versions of the anwalt.de house skills. The sync skill authored
+The 14 `SKILL.md` files under `skills/engineering-foundation/<name>/SKILL.md`
+are invokable pi sub-skills discovered recursively under
+`skills/engineering-foundation/`. They live in a separate top-level directory
+from this index skill (not nested here) because pi treats a directory with a
+root `SKILL.md` as a skill root and does not recurse into it — keeping the
+index here and the sub-skills under `skills/engineering-foundation/` is what
+makes both discoverable. They are the pi-adapted versions of the anwalt.de
+house skills. The sync skill authored
 the adaptation from the wiki's Cursor/IDE-flavoured source — rewriting the
 Cursor-specific edges (`AskQuestion` → `ask_user_question`, `SwitchMode` →
 dropped, `CreatePlan` → dropped, `AGENTS.md` key lookups → read the target

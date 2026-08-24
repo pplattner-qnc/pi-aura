@@ -1,6 +1,6 @@
 ---
 name: engineering-sync
-description: PACKAGE-AUTHOR-ONLY maintenance tool (not an end-user skill). Keeps the engineering-foundation mirror under skills/engineering-workflow/resources/ fresh against the Aura wiki via a three-way reconciliation flow (fetch stages OLD_REMOTE/NEW_REMOTE/CURRENT files; finish gates and updates the drift manifest). Use only when maintaining the mirror; end users should use the engineering-workflow skill instead.
+description: PACKAGE-AUTHOR-ONLY maintenance tool (not an end-user skill). Keeps the engineering-foundation mirror under skills/core/engineering-foundation/resources/ fresh against the Aura wiki via a three-way reconciliation flow (fetch stages OLD_REMOTE/NEW_REMOTE/CURRENT files; finish gates and updates the drift manifest). Use only when maintaining the mirror; end users should use the engineering-foundation skill instead.
 ---
 
 # engineering-sync (package-author-only)
@@ -8,7 +8,7 @@ description: PACKAGE-AUTHOR-ONLY maintenance tool (not an end-user skill). Keeps
 **This is a maintenance tool for whoever maintains the `pi-aura` package, not
 an end-user skill.** It is repo-local (`.pi/skills/`) on purpose — it does not
 ship to consumers. If you are an end user of `pi-aura`, you want the
-`engineering-workflow` skill, not this one.
+`engineering-foundation` skill, not this one.
 
 ## What it does
 
@@ -78,7 +78,7 @@ changed item it writes three-way files **in-place** (visible in `git status`):
 - **Delete** (removed on wiki) — auto-deletes the local `c.md` (git history
   preserves recoverability; skips the three-way flow). The manifest entry is
   marked for removal.
-- **Authored files** (e.g. `skills/engineering-workflow/SKILL.md`, the
+- **Authored files** (e.g. `skills/core/engineering-foundation/SKILL.md`, the
   router) — no wiki body to sha256 against; instead, when the wiki's
   *structure* changes (a guide added/removed/renamed), `fetch` writes a
   `SKILL.NEW_REMOTE.md` structure digest + `SKILL.CURRENT.md` snapshot so you
@@ -118,7 +118,7 @@ three-way files and don't trigger the refusal.
    `adaptedSha256` when the local sha equals the remote sha (verbatim copy);
    it sets `adaptedSha256` when they differ (an adapted file).
 4. **Authored router** — on the first seeding, bootstraps a manifest entry
-   for `skills/engineering-workflow/SKILL.md` with the wiki's current
+   for `skills/core/engineering-foundation/SKILL.md` with the wiki's current
    structure signature (so later `fetch` runs can detect structural drift).
 5. **Save** `.pi/engineering-foundation.json`; **delete** the fetch report.
 
@@ -151,14 +151,14 @@ of wiki item → repo path). The wiki-dir → repo-dir mapping `fetch` uses:
 
 | Wiki source | Repo destination |
 |---|---|
-| `blueprint/manifest.yaml` | `skills/engineering-workflow/resources/blueprint/manifest.yaml` |
-| `blueprint/skills/<name>/SKILL.md` (+ companion `.ts`) | `skills/engineering-workflow/<name>/SKILL.md` (+ the `.ts`) |
-| `blueprint/rules/<name>.mdc` | `skills/engineering-workflow/resources/rules/<name>.mdc` (flat, one dir) |
-| `index` (top-level doc) | `skills/engineering-workflow/resources/INDEX.md` |
-| `log` (top-level doc) | `skills/engineering-workflow/resources/Log.md` |
-| `guides/<slug>` | `skills/engineering-workflow/resources/guides/<slug>.md` |
-| `workflow/<slug>` | `skills/engineering-workflow/resources/workflow/<slug>.md` |
-| `skills/engineering-workflow/SKILL.md` (authored router) | untouched on first seed; diff staged next to it on a structural sync |
+| `blueprint/manifest.yaml` | `skills/core/engineering-foundation/resources/blueprint/manifest.yaml` |
+| `blueprint/skills/<name>/SKILL.md` (+ companion `.ts`) | `skills/engineering-foundation/<name>/SKILL.md` (+ the `.ts`) |
+| `blueprint/rules/<name>.mdc` | `skills/core/engineering-foundation/resources/rules/<name>.mdc` (flat, one dir) |
+| `index` (top-level doc) | `skills/core/engineering-foundation/resources/INDEX.md` |
+| `log` (top-level doc) | `skills/core/engineering-foundation/resources/Log.md` |
+| `guides/<slug>` | `skills/core/engineering-foundation/resources/guides/<slug>.md` |
+| `workflow/<slug>` | `skills/core/engineering-foundation/resources/workflow/<slug>.md` |
+| `skills/core/engineering-foundation/SKILL.md` (authored router) | untouched on first seed; diff staged next to it on a structural sync |
 
 Blueprint files are keyed by their blueprint path; wiki documents are keyed
 by node uuid but placed by their full slug path. Anything else `fetch` staged
@@ -297,7 +297,7 @@ reconciliation:
    `c.md`/`c.mdc` from it).
 2. Write a tombstone file next to it named `<stem>.IGNORE` (no extension),
    whose content is the ignore reason. For `tracker-aura.mdc` the tombstone is
-   `skills/engineering-workflow/resources/rules/tracker-aura.IGNORE`.
+   `skills/core/engineering-foundation/resources/rules/tracker-aura.IGNORE`.
 3. Run `finish`. It consumes the tombstone: records `ignored: true` +
    `ignoreReason` in the manifest for that item, and deletes both the
    tombstone and the paired `NEW_REMOTE` file.
@@ -343,7 +343,7 @@ wiki canonical identity (blueprint path or knowledge-node uuid):
   "entries": {
     "blueprint/skills/ai-setup/skill.md": {
       "wikiPathOrUuid": "blueprint/skills/ai-setup/skill.md",
-      "localPath": "skills/engineering-workflow/ai-setup/SKILL.md",
+      "localPath": "skills/engineering-foundation/ai-setup/SKILL.md",
       "sourceSha256": "sha256:...",
       "auraChecksumOrVersion": "sha256:...",
       "auraUpdatedAt": "<provenance commit sha>",
@@ -351,7 +351,7 @@ wiki canonical identity (blueprint path or knowledge-node uuid):
     },
     "<node-uuid>": {
       "wikiPathOrUuid": "<node-uuid>",
-      "localPath": "skills/engineering-workflow/resources/guides/developer-guides.md",
+      "localPath": "skills/core/engineering-foundation/resources/guides/developer-guides.md",
       "sourceSha256": "sha256:...",
       "auraChecksumOrVersion": "3",
       "auraUpdatedAt": "2026-08-21T...",
@@ -360,7 +360,7 @@ wiki canonical identity (blueprint path or knowledge-node uuid):
     },
     "<tracker-aura-uuid>": {
       "wikiPathOrUuid": "<tracker-aura-uuid>",
-      "localPath": "skills/engineering-workflow/resources/rules/tracker-aura.mdc",
+      "localPath": "skills/core/engineering-foundation/resources/rules/tracker-aura.mdc",
       "sourceSha256": "sha256:...",
       "auraChecksumOrVersion": "1",
       "auraUpdatedAt": "2026-08-21T...",
@@ -424,8 +424,8 @@ table says rules go to `resources/rules/`. Fix it:
 
 ```bash
 node .pi/skills/engineering-sync/dist/engineering-sync.mjs mv \
-  skills/engineering-workflow/resources/blueprint/rules/foo.mdc \
-  skills/engineering-workflow/resources/rules/foo.mdc
+  skills/core/engineering-foundation/resources/blueprint/rules/foo.mdc \
+  skills/core/engineering-foundation/resources/rules/foo.mdc
 ```
 
 ## Auth
