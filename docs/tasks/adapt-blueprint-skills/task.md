@@ -4,9 +4,13 @@ type: feature
 slug: adapt-blueprint-skills
 title: First-pass pi-adaptation of the 14 engineering-foundation blueprint skills
 map: engineering-foundation-sync
-status: ready
-blocked_by: [engineering-workflow-skill, seed-engineering-mirror]
-slices: []
+status: active
+blocked_by:
+- engineering-workflow-skill
+- seed-engineering-mirror
+slices:
+- edge-fixes
+- move-to-top-level
 ---
 
 # First-pass pi-adaptation of the 14 blueprint skills
