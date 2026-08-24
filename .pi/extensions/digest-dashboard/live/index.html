@@ -1,0 +1,37 @@
+<!doctype html>
+<!--
+  Dev entry for the digest-dashboard SPA, served by `npm run live`.
+  It mounts the same Digest.svelte component the production build compiles.
+  A tiny fetch shim stubs /api/digest with the fixture JSON and swallows
+  POST /api/state so the UI can be iterated without the detached server.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Digest Dashboard — Live</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      (function () {
+        var origFetch = window.fetch;
+        window.fetch = function (url, opts) {
+          if (url === "/api/digest" && (!opts || !opts.method || opts.method === "GET")) {
+            return origFetch("/live/digest.json").then(function (res) {
+              return res.json().then(function (data) {
+                return { ok: true, json: function () { return Promise.resolve(data); } };
+              });
+            });
+          }
+          if (url === "/api/state" && opts && opts.method === "POST") {
+            console.log("[live] POST /api/state", opts.body);
+            return Promise.resolve({ ok: true, json: function () { return Promise.resolve({ ok: true }); } });
+          }
+          return origFetch(url, opts);
+        };
+      })();
+    </script>
+    <script type="module" src="/.pi/extensions/digest-dashboard/main.ts"></script>
+  </body>
+</html>

@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "vite build && node esbuild.config.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "live": "vite"
   }
 }

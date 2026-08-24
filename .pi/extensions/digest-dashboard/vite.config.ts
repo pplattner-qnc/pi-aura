@@ -9,6 +9,7 @@ export default defineConfig({
       formats: ["iife"],
       name: "Digest",
       fileName: () => "app.js",
+      cssFileName: "app",
     },
     outDir: "dist",
     emptyOutDir: false,
