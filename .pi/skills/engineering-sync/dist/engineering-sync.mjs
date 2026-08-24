@@ -5106,7 +5106,10 @@ function blueprintPathToLocal(bpPath, filename) {
   if (under.startsWith("rules/")) {
     return join3("skills/engineering-workflow/resources/rules", localName);
   }
-  return join3("skills/engineering-workflow/resources/blueprint", dir, localName);
+  if (under.startsWith("skills/")) {
+    return join3("skills/engineering-workflow", dir.replace(/^skills\//, ""), localName);
+  }
+  return join3("skills/engineering-workflow/resources/blueprint", under);
 }
 async function fetchWikiItems(client2, manifest) {
   const tree = await client2.getKnowledgeTree(SPACE_SLUG);
