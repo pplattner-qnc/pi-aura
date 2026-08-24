@@ -221,6 +221,40 @@ still done for reference/logging), drive the interactive dashboard.
 
 The digest does not mark notifications as read automatically.
 
+### Agent-side writes (set the lock + ack/clear)
+
+The dashboard mechanism does not provide helper subcommands for these two
+writes, so use the `node -e` one-liners below. Both edit `~/.pi/aura/digest.json`
+and/or `~/.pi/aura/state.json`; because the dashboard server `fs.watch`es these
+files, each write emits an SSE and the page hot-reloads automatically. Set the
+lock **before** acting; write the ack + clear the lock **after** acting.
+
+#### Set the in-flight lock (before acting)
+
+```bash
+node -e 'const p=require("fs"),os=require("os"),Path=require("path");const f=Path.join(os.homedir(),".pi","aura","digest.json");const d=JSON.parse(p.readFileSync(f,"utf8"));d.followup.currentlyWorkingOn="<KEY>";p.writeFileSync(f,JSON.stringify(d,null,2));'
+```
+
+Replace `<KEY>` with the action's key path, e.g. `overdue/AURA-42`
+(`<section>/<key>`). This makes the page show a spinner on that button and
+disables the sibling action buttons.
+
+#### Write the ack + clear the lock (after acting)
+
+```bash
+node -e 'const p=require("fs"),os=require("os"),Path=require("path");const sf=Path.join(os.homedir(),".pi","aura","state.json");const df=Path.join(os.homedir(),".pi","aura","digest.json");const s=JSON.parse(p.readFileSync(sf,"utf8"));s.events.push({id:Date.now(),ts:new Date().toISOString(),dir:"agent→page",type:"ack",payload:{event_id:<CLICK_ID>,status:"done"}});p.writeFileSync(sf,JSON.stringify(s,null,2));const d=JSON.parse(p.readFileSync(df,"utf8"));d.followup.currentlyWorkingOn=null;p.writeFileSync(df,JSON.stringify(d,null,2));'
+```
+
+Replace `<CLICK_ID>` with the `id` of the `action_click` event the agent
+received (from the custom message's `details`, or the event's `id`). This
+appends the ack to `state.json` and clears `followup.currentlyWorkingOn` in
+`digest.json`, so the page re-enables the buttons.
+
+Note: these one-liners assume `~/.pi/aura/digest.json` and
+`~/.pi/aura/state.json` already exist (written by `fetch` and
+`digest-dashboard-start`). If a file is missing, re-run the dashboard or fetch
+rather than creating it by hand.
+
 ### Clean close
 
 - Emit a one-line verdict from the digest, e.g.:
