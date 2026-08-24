@@ -2,16 +2,16 @@
 kind: map
 slug: engineering-foundation-sync
 title: Mirror the engineering-foundation wiki space into pi-aura as a first-class engineering canon
-status: active
+status: done
 tasks:
-  - blueprint-skills-and-sync-design
-  - cursor-rules-incorporation
-  - move-skills-to-core
-  - engineering-workflow-skill
-  - engineering-sync-skill
-  - seed-engineering-mirror
-  - adapt-blueprint-skills
-  - engineering-rules-extension
+- blueprint-skills-and-sync-design
+- cursor-rules-incorporation
+- move-skills-to-core
+- engineering-workflow-skill
+- engineering-sync-skill
+- seed-engineering-mirror
+- adapt-blueprint-skills
+- engineering-rules-extension
 ---
 
 # engineering-foundation-sync
