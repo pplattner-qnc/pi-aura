@@ -4077,7 +4077,7 @@
           };
           var alternate_1 = ($$anchor3) => {
             var ul_1 = root_11();
-            each(ul_1, 21, () => get(digest).attention.overdue, (item) => item.key, ($$anchor4, item) => {
+            each(ul_1, 21, () => get(digest).attention.overdue, index, ($$anchor4, item) => {
               var li_1 = root_10();
               var span_2 = child(li_1);
               var text_5 = child(span_2);
@@ -4104,7 +4104,7 @@
           };
           var alternate_2 = ($$anchor3) => {
             var ul_2 = root_11();
-            each(ul_2, 21, () => get(digest).attention.waiting_on_you, (item) => item.key, ($$anchor4, item) => {
+            each(ul_2, 21, () => get(digest).attention.waiting_on_you, index, ($$anchor4, item) => {
               var li_2 = root_10();
               var span_3 = child(li_2);
               var text_7 = child(span_3);
@@ -4131,7 +4131,7 @@
           };
           var alternate_3 = ($$anchor3) => {
             var ul_3 = root_11();
-            each(ul_3, 21, () => get(digest).attention.waiting_on_others, (item) => item.key, ($$anchor4, item) => {
+            each(ul_3, 21, () => get(digest).attention.waiting_on_others, index, ($$anchor4, item) => {
               var li_3 = root_10();
               var span_4 = child(li_3);
               var text_9 = child(span_4);
