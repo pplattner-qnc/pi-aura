@@ -4,13 +4,13 @@ type: feature
 slug: adapt-blueprint-skills
 title: First-pass pi-adaptation of the 14 engineering-foundation blueprint skills
 map: engineering-foundation-sync
-status: active
+status: done
 blocked_by:
 - engineering-workflow-skill
 - seed-engineering-mirror
 slices:
 - edge-fixes: done
-- move-to-top-level
+- move-to-top-level: done
 ---
 
 # First-pass pi-adaptation of the 14 blueprint skills
@@ -97,6 +97,18 @@ the substantive body is otherwise carried verbatim.
 - Verified: `grep -rin "Q&A module\|Q&A tool\|Q&A call\|Cursor's Question\|Cursor window\|Editor Window"` returns nothing; `grep -rin "AskQuestion\|SwitchMode\|CreatePlan"` returns nothing (both pre-existing and post-edit). All 14 `description` frontmatters start with "anwalt.de engineering-workflow skill.". `.cursor/rules/anwaltde/universal/<rule>.mdc` refs untouched (27 occurrences across 7 skills). `ai-setup/SKILL.md`, `pr-review/SKILL.md`, `task-slice/SKILL.md` "Do NOT touch" items intact.
 - The deviation report (`deviation-reports/edge-fixes.md`) claimed "no implementation was applied" — that was stale: it predates commit `2f8341e` which applied the `task-implement` edits. The final `git diff main...HEAD` shows exactly the 8 edge rewrites and nothing else.
 - Slice doc archived to `slices/archive/1-edge-fixes.md`.
+
+### Slice 2 — move-to-top-level (landed)
+
+- Moved all 14 `SKILL.md` + 4 `task-untangle` `.ts` companions from `resources/blueprint/skills/<name>/` to top-level `skills/engineering-workflow/<name>/` (design Q6 layout) via `git mv` (100% rename, bytes preserved — `sha256sum` verified identical before/after). The now-empty `resources/blueprint/skills/` directory tree was removed (14 `.gitkeep` files deleted); `resources/blueprint/manifest.yaml` stays.
+- Drift manifest (`.pi/engineering-foundation.json`): all 18 blueprint-skill `localPath` entries (14 `SKILL.md` + 4 `.ts`) updated from `skills/engineering-workflow/resources/blueprint/skills/...` to `skills/engineering-workflow/<name>/...`. Zero entries remain at the old path; each `localPath` file exists on disk. Hash fields (`sourceSha256`, `adaptedSha256`, `auraChecksumOrVersion`, `auraUpdatedAt`) untouched.
+- Sync utility (`scripts/src/engineering-sync.ts`): `blueprintPathToLocal` gained an `under.startsWith("skills/")` branch mapping to top-level `skills/engineering-workflow/<name>/<file>`; rules branch and manifest fall-through unchanged. Dist rebuilt (`engineering-sync.mjs`).
+- Router (`skills/engineering-workflow/SKILL.md`): table row path + "Blueprint skills are pi-adapted" section reframed as invokable pi sub-skills discovered recursively; adaptation description kept verbatim.
+- Sync skill (`.pi/skills/engineering-sync/SKILL.md`): wiki-dir→repo-dir table + verification-checklist paths + manifest example JSON updated to top-level paths. Zero remaining `resources/blueprint/skills` references in any source/prose file.
+- Verification: `find ... -name SKILL.md -not -path "*/resources/*"` → exactly 15 (router + 14 sub-skills); `task-untangle/` has `SKILL.md bundle.ts check-bundle.ts serve-plans.ts views.ts`; `cd scripts && npm run typecheck` green; `node ...engineering-sync.mjs status` → 44 entries, no unresolved three-way files; `cd packages/shared && npm test` → 30 pass / 0 fail.
+- Pre-existing (not caused by this slice): `node --experimental-strip-types scripts/src/engineering-sync.test.ts` fails with `ERR_MODULE_NOT_FOUND` for `packages/shared/src/hey-api-aura-client.js` — identical failure on the seed commit and on the task branch before the slice. The `tracker-aura.mdc` rule file referenced in the manifest also does not exist on disk (pre-existing on the task branch, not a rules file this slice touches).
+- Deviation report: `deviation-reports/move-to-top-level.md`.
+- Slice doc archived to `slices/archive/2-move-to-top-level.md`.
 
 ## Notes
 

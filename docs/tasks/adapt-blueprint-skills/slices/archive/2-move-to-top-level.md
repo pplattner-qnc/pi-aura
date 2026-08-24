@@ -2,8 +2,8 @@
 kind: slice
 slug: move-to-top-level
 size: m
-status: ready
-blocked_by: ["edge-fixes"]
+status: done
+blocked_by: []
 ---
 
 # Slice 2 — move to design-Q6 top-level layout + router + sync manifest + sync utility

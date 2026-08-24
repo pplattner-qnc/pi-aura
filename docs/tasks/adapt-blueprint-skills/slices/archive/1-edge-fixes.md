@@ -2,7 +2,7 @@
 kind: slice
 slug: edge-fixes
 size: s
-status: ready
+status: done
 blocked_by: []
 ---
 
