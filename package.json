@@ -1,6 +1,6 @@
 {
   "name": "pi-aura",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Aura integration for pi — skills, agents, and workflows for the Aura project management platform",
   "keywords": ["pi-package"],
   "pi": {
