@@ -125,7 +125,7 @@ describe("Digest dashboard rendering", () => {
     ]);
     const { target } = await mountWithDigest(digest);
 
-    const buttons = target.querySelectorAll("button.digest-action");
+    const buttons = target.querySelectorAll("button[data-action-key]");
     expect(buttons).toHaveLength(3);
     const labels = [...buttons].map((b) => b.textContent?.trim());
     expect(labels).toContain("Advance AURA-1");
@@ -135,9 +135,9 @@ describe("Digest dashboard rendering", () => {
 
   it("renders an empty Actions section and no action buttons when actions is empty", async () => {
     const { target } = await mountWithDigest(baseDigest([]));
-    expect(target.textContent).toContain("Actions");
-    expect(target.textContent).toContain("No actions");
-    expect(target.querySelectorAll("button.digest-action")).toHaveLength(0);
+    expect(target.textContent).toContain("Today's priorities");
+    expect(target.textContent).toContain("No suggestions.");
+    expect(target.querySelectorAll("button[data-action-key]")).toHaveLength(0);
   });
 
   it("renders an error state when /api/digest returns 500", async () => {
@@ -147,7 +147,7 @@ describe("Digest dashboard rendering", () => {
     await new Promise((r) => setTimeout(r, 60));
 
     expect(target.textContent).toContain("Error");
-    expect(target.querySelectorAll("button.digest-action")).toHaveLength(0);
+    expect(target.querySelectorAll("button[data-action-key]")).toHaveLength(0);
   });
 
   it("renders an error state when /api/digest returns 404", async () => {
@@ -169,7 +169,7 @@ describe("Digest dashboard rendering", () => {
     );
     const { target } = await mountWithDigest(digest);
 
-    const buttons = [...target.querySelectorAll<HTMLButtonElement>("button.digest-action")];
+    const buttons = [...target.querySelectorAll<HTMLButtonElement>("button[data-action-key]")];
     const active = buttons.find((b) => b.dataset.actionKey === "overdue/AURA-42");
     const other = buttons.find((b) => b.dataset.actionKey === "waiting_on_you/AURA-7");
 
@@ -189,7 +189,7 @@ describe("Digest dashboard rendering", () => {
     );
     const { target } = await mountWithDigest(digest);
 
-    const buttons = [...target.querySelectorAll<HTMLButtonElement>("button.digest-action")];
+    const buttons = [...target.querySelectorAll<HTMLButtonElement>("button[data-action-key]")];
     expect(buttons).toHaveLength(1);
     expect(buttons[0].disabled).toBe(false);
     expect(buttons[0].querySelector(".spinner")).toBeNull();
@@ -199,9 +199,9 @@ describe("Digest dashboard rendering", () => {
     const digest = baseDigest([{ section: "overdue", key: "bad", action: "advance" } as unknown as DigestAction]);
     const { target } = await mountWithDigest(digest);
 
-    expect(target.querySelectorAll("button.digest-action")).toHaveLength(0);
-    expect(target.textContent).toContain("Actions");
-    expect(target.textContent).toContain("No actions");
+    expect(target.querySelectorAll("button[data-action-key]")).toHaveLength(0);
+    expect(target.textContent).toContain("Today's priorities");
+    expect(target.textContent).toContain("No suggestions.");
     expect(consoleWarnMock).toHaveBeenCalled();
   });
 });
@@ -212,7 +212,7 @@ describe("Digest dashboard interactions", () => {
     const digest = baseDigest([theAction]);
     const { target } = await mountWithDigest(digest);
 
-    const btn = target.querySelector<HTMLButtonElement>("button.digest-action")!;
+    const btn = target.querySelector<HTMLButtonElement>("button[data-action-key]")!;
     btn.click();
     await new Promise((r) => setTimeout(r, 20));
 
