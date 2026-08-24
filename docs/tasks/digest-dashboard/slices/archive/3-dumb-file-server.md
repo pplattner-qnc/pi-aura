@@ -6,6 +6,7 @@ task: ../task.md
 mode: afk
 size: m
 blocked_by: [svelte-dashboard-client]
+status: done
 ---
 
 ## End-to-end behavior
