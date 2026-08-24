@@ -4,6 +4,7 @@ slug: routing-table-and-clean-close-docs
 title: Add the Routing table section + Clean close terminal; replace the [ASK] block
 task: ../task.md
 mode: hitl
+status: done
 size: s
 blocked_by: [agent-ack-and-followup-writer]
 ---

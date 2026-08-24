@@ -4,6 +4,7 @@ slug: agent-ack-and-followup-writer
 title: Document the exact agent-side ack (state.json) + followup.currentlyWorkingOn clear (digest.json) writes
 task: ../task.md
 mode: hitl
+status: done
 size: s
 blocked_by: [interactive-flow-step]
 ---
