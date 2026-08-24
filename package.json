@@ -2,25 +2,40 @@
   "name": "pi-aura",
   "version": "0.4.2",
   "description": "Aura integration for pi — skills, agents, and workflows for the Aura project management platform",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "pi": {
     "extensions": [
       "./extensions/aura-skill-instruction.ts",
       "./extensions/aura-secrets.ts",
-      "./extensions/engineering-rules.ts"
+      "./extensions/engineering-rules.ts",
+      "./.pi/extensions/digest-dashboard/index.ts"
     ],
-    "skills": ["./skills"],
+    "skills": [
+      "./skills"
+    ],
     "subagents": {
-      "agents": ["./agents"]
+      "agents": [
+        "./agents"
+      ]
     }
   },
   "workspaces": [
     "scripts",
     "packages/shared"
   ],
-  "dependencies": {},
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "typebox": "*"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
+    "@types/node": "^26.2.0",
+    "happy-dom": "^20.11.6",
+    "svelte": "^5.56.10",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.11"
   }
 }
