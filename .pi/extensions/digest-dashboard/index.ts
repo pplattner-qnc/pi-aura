@@ -287,6 +287,37 @@ export async function startDashboard(
   return { ok: true, message, url: serverUrl.url };
 }
 
+const DIGEST_TOOLS = [
+  "digest-dashboard-start",
+  "digest-dashboard-stop",
+  "digest-fetch",
+  "digest-save",
+] as const;
+
+export async function digestCommandHandler(
+  pi: ExtensionAPI,
+  _args: string,
+  ctx: ExtensionCommandContext,
+): Promise<void> {
+  try {
+    const activeTools = pi.getActiveTools();
+    const merged = [...new Set([...activeTools, ...DIGEST_TOOLS])];
+    pi.setActiveTools(merged);
+
+    const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+    const skillPath = path.resolve(moduleDir, "../../../skills/core/aura-digest/SKILL.md");
+    const skillBody = readFileSync(skillPath, "utf-8");
+
+    pi.sendMessage(
+      { customType: "aura-digest-skill", content: skillBody, display: false },
+      { triggerTurn: true },
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    ctx.ui.notify(`Failed to inject aura-digest skill: ${message}`, "error");
+  }
+}
+
 async function startHandler(ctx: ExtensionCommandContext): Promise<void> {
   // The default export captures the ExtensionAPI in closure; command handlers
   // receive the same API instance via the registered handler, so we pass it
@@ -329,6 +360,13 @@ export default function (pi: ExtensionAPI): void {
         content: [{ type: "text", text: result.message }],
         details: result.url ? { url: result.url } : { url: "" },
       };
+    },
+  });
+
+  pi.registerCommand("digest", {
+    description: "Activate the Aura digest tools and inject the aura-digest skill.",
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      await digestCommandHandler(pi, args, ctx);
     },
   });
 
