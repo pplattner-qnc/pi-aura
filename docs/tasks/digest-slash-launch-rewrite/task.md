@@ -197,3 +197,24 @@ Keep `registerTool` for start/stop (now inactive-by-default). Final e2e.
   One minor type divergence — `details: { dir?: string }` (optional on the
   error path only) — is a TypeScript typing relaxation, not a behavioral
   deviation.
+
+### Slice 3: skill-non-model-invokable-and-skill-injection (landed)
+
+- `skills/core/aura-digest/SKILL.md` (+1 line): added
+  `disable-model-invocation: true` to the frontmatter. The skill description
+  and body were left untouched (slice 4 owns the body rewrite). Node/js-yaml
+  parse check confirmed the frontmatter is valid and the key is present with
+  value `true`.
+- Verification: full vitest suite green (52 tests / 9 files); typecheck
+  clean. No runnable slice test (pi-runtime behavior, HITL verification).
+- **Owed HITL (zero idle context check):** in a fresh pi session, confirm (a)
+  the `aura-digest` skill description is NOT present in the agent system
+  prompt and no `digest-*`/`digest-dashboard-*` tool descriptions appear in
+  the active tool set (zero idle context), and (b) `/digest` still injects +
+  runs the skill despite it being hidden from the system prompt (the slice 1
+  injection bypasses the system-prompt description). This is a pi-runtime
+  behavior that cannot be verified by automated tests; it is owed by the
+  parent orchestrator in a fresh pi session. The "zero idle context" outcome
+  depends on slice 1 (`slash-command-and-tool-activation`) having landed
+  (this slice's `blocked_by` prerequisite).
+- Divergence: none — the change matches the arch spec and slice doc exactly.

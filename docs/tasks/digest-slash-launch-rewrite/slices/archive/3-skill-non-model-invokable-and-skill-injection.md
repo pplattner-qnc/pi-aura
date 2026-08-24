@@ -5,7 +5,7 @@ title: Set aura-digest disable-model-invocation: true + confirm zero idle contex
 task: ../task.md
 mode: hitl
 size: s
-status: todo
+status: done
 blocked_by: [digest-fetch-and-save-tools]
 ---
 
