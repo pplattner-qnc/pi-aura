@@ -235,16 +235,6 @@ export async function teardownDashboard(
   return { ok: true, message: "Digest dashboard stopped." };
 }
 
-function parseSubcommand(args: string): string {
-  return args.trim().split(/\s+/)[0] ?? "";
-}
-
-async function stopHandler(ctx: ExtensionCommandContext): Promise<void> {
-  const { statePath, serverUrlPath } = defaultAuraPaths();
-  const result = await teardownDashboard(statePath, serverUrlPath);
-  ctx.ui.notify(result.message, result.ok ? "info" : "error");
-}
-
 export async function startDashboard(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext | ExtensionContext,
@@ -256,7 +246,7 @@ export async function startDashboard(
   if (state.pid !== null && isProcessAlive(state.pid)) {
     return {
       ok: false,
-      message: "Digest dashboard already running. Use /digest-dashboard stop first.",
+      message: "Digest dashboard already running. Use the digest-dashboard-stop tool first.",
     };
   }
 
@@ -369,24 +359,7 @@ export async function digestCommandHandler(
   }
 }
 
-async function startHandler(ctx: ExtensionCommandContext): Promise<void> {
-  // The default export captures the ExtensionAPI in closure; command handlers
-  // receive the same API instance via the registered handler, so we pass it
-  // explicitly to keep startDashboard testable.
-  // rule: tdd-worker closure capture — startDashboard needs the API; the
-  // command handler uses the module-level `pi` binding defined below.
-  if (!extensionApi) {
-    ctx.ui.notify("Extension not initialized.", "error");
-    return;
-  }
-  await startDashboard(extensionApi, ctx);
-}
-
-let extensionApi: ExtensionAPI | undefined;
-
 export default function (pi: ExtensionAPI): void {
-  extensionApi = pi;
-
   pi.registerTool({
     name: "digest-dashboard-start",
     label: "Start Digest Dashboard",
@@ -495,20 +468,6 @@ export default function (pi: ExtensionAPI): void {
         content: [{ type: "text", text: `digest-save: saved last digest from ${params.dir}` }],
         details: {},
       };
-    },
-  });
-
-  pi.registerCommand("digest-dashboard", {
-    description: "Aura digest interactive dashboard",
-    handler: async (args: string, ctx: ExtensionCommandContext) => {
-      const subcommand = parseSubcommand(args);
-      if (subcommand === "stop") {
-        await stopHandler(ctx);
-      } else if (subcommand === "start") {
-        await startHandler(ctx);
-      } else {
-        ctx.ui.notify("Usage: /digest-dashboard start|stop", "warning");
-      }
     },
   });
 
