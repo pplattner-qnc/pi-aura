@@ -1,2 +1,2 @@
 task: digest-dashboard
-slice: dumb-file-server
+slice: teardown-subcommand

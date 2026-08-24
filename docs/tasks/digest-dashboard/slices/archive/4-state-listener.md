@@ -6,6 +6,7 @@ task: ../task.md
 mode: afk
 size: m
 blocked_by: [dumb-file-server]
+status: done
 ---
 
 ## End-to-end behavior
