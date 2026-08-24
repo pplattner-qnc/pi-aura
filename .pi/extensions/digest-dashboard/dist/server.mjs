@@ -1,7 +1,7 @@
 // server.ts
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2, mkdirSync as mkdirSync2 } from "node:fs";
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2, mkdirSync as mkdirSync2, rmSync } from "node:fs";
 import { watch } from "node:fs";
 import path2 from "node:path";
 import { exec } from "node:child_process";
@@ -251,12 +251,34 @@ var modulePath = fileURLToPath(import.meta.url);
 var invokedPath = process.argv[1];
 if (invokedPath && path2.resolve(invokedPath) === path2.resolve(modulePath)) {
   const defaults = defaultAuraPaths();
+  const serverUrlPath = process.env.DASHBOARD_SERVER_URL_PATH ?? defaults.serverUrlPath;
+  const statePath = process.env.DASHBOARD_STATE_PATH ?? defaults.statePath;
+  let shuttingDown = false;
+  const cleanup = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    for (const f of [serverUrlPath, statePath]) {
+      try {
+        if (existsSync2(f)) rmSync(f, { force: true });
+      } catch {
+      }
+    }
+  };
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    process.on(sig, () => {
+      cleanup();
+      process.exit(0);
+    });
+  }
+  process.on("exit", cleanup);
+  process.on("beforeExit", cleanup);
   startServer({
     dashboardPath: process.env.DASHBOARD_DIGEST_PATH ?? defaults.dashboardPath,
-    statePath: process.env.DASHBOARD_STATE_PATH ?? defaults.statePath,
-    serverUrlPath: process.env.DASHBOARD_SERVER_URL_PATH ?? defaults.serverUrlPath
+    statePath,
+    serverUrlPath
   }).catch((err) => {
     console.error("Failed to start digest-dashboard server:", err);
+    cleanup();
     process.exit(1);
   });
 }
