@@ -2,7 +2,7 @@
 kind: map
 slug: aura-digest-slash-launch
 title: Re-launch the Aura digest as a slash-gated, tool-driven flow with zero idle context + fix the real-data render bug
-status: active
+status: done
 tasks: "[{slug: digest-real-data-render-bug, blocked_by: [], done: true}, {slug: digest-slash-launch-rewrite, blocked_by: [digest-real-data-render-bug], done: true}]"
 ---
 
