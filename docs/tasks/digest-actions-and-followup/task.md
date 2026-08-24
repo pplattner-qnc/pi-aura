@@ -146,3 +146,13 @@ the temp-dir digest's `actions[]`/`followup`.
 - 8 unit tests in `build-actions.test.ts` cover ranking order, stale-drop, over-commitment flag, warnings run_setup, empty digest, and >6 truncation.
 - Verify output: typecheck, build, 8 slice unit tests, shared pkg suite (30), engineering-sync (5), extensions all green. No lint blocker.
 - Deviation: `buildActions` lives in `build-actions.ts` rather than `aura-digest.ts` — modularity improvement, identical export, no user attention needed.
+
+### Slice 2: followup-working-on (landed)
+
+- Added `DigestFollowup` type (`{ currentlyWorkingOn: string | null }`) and `followup: DigestFollowup` field to `Digest` in `types.ts`.
+- `fetch` sets `digest.followup = { currentlyWorkingOn: null }` inline in the digest literal; field is always present (never `undefined`).
+- `build-actions.test.ts` fixture updated to include `followup: { currentlyWorkingOn: null }` so slice-1 tests stay type-safe with the extended `Digest`.
+- New unit test `followup-working-on.test.ts` (57 lines) asserts the null default on a `minimalDigest` fixture.
+- `dist/aura-digest.mjs` regenerated bundle included in the commit (tracked build artifact per repo convention).
+- Verify output: typecheck, build, followup-working-on.test.ts, build-actions.test.ts regression, packages/shared suite (30/30) all green.
+- Deviation: advisory note — test verifies the type contract (field exists, defaults to null) on a static fixture, not the runtime wiring of `fetch`; the wiring is a one-liner visible in the diff and exercised indirectly by future `fetch` integration tests. Non-blocking.

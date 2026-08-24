@@ -6,6 +6,7 @@ task: ../task.md
 mode: afk
 size: s
 blocked_by: [actions-routing-table]
+status: done
 ---
 
 ## End-to-end behavior
