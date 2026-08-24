@@ -1,2 +1,2 @@
 task: digest-dashboard
-slice: teardown-subcommand
+slice: wire-extension-entry

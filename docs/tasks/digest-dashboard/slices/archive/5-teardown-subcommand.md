@@ -6,6 +6,7 @@ task: ../task.md
 mode: afk
 size: s
 blocked_by: [state-listener]
+status: done
 ---
 
 ## End-to-end behavior
