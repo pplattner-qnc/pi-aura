@@ -127,6 +127,14 @@ describe("/digest command", () => {
     expect(digestCommand!.def.description).toBeTruthy();
   });
 
+  it("does not register the old digest-dashboard command", () => {
+    const { pi, registerCommandCalls } = createFakePi();
+    installExtension(pi);
+
+    const oldCommand = registerCommandCalls.find((c) => c.name === "digest-dashboard");
+    expect(oldCommand).toBeUndefined();
+  });
+
   it("activates all four digest tools", async () => {
     const { pi, activeTools, registerCommandCalls } = createFakePi(["some-other-tool"]);
     installExtension(pi);
