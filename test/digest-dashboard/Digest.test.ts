@@ -133,9 +133,10 @@ describe("Digest dashboard rendering", () => {
     expect(labels).toContain("Flag capacity");
   });
 
-  it("shows the all-clear banner and no action buttons when actions is empty", async () => {
+  it("renders an empty Actions section and no action buttons when actions is empty", async () => {
     const { target } = await mountWithDigest(baseDigest([]));
-    expect(target.textContent).toContain("You're all caught up");
+    expect(target.textContent).toContain("Actions");
+    expect(target.textContent).toContain("No actions");
     expect(target.querySelectorAll("button.digest-action")).toHaveLength(0);
   });
 
@@ -199,7 +200,8 @@ describe("Digest dashboard rendering", () => {
     const { target } = await mountWithDigest(digest);
 
     expect(target.querySelectorAll("button.digest-action")).toHaveLength(0);
-    expect(target.textContent).toContain("You're all caught up");
+    expect(target.textContent).toContain("Actions");
+    expect(target.textContent).toContain("No actions");
     expect(consoleWarnMock).toHaveBeenCalled();
   });
 });
