@@ -3,7 +3,7 @@ kind: map
 slug: aura-digest-slash-launch
 title: Re-launch the Aura digest as a slash-gated, tool-driven flow with zero idle context + fix the real-data render bug
 status: active
-tasks: "[{slug: digest-real-data-render-bug, blocked_by: [], done: false}, {slug: digest-slash-launch-rewrite, blocked_by: [digest-real-data-render-bug], done: false}]"
+tasks: "[{slug: digest-real-data-render-bug, blocked_by: [], done: true}, {slug: digest-slash-launch-rewrite, blocked_by: [digest-real-data-render-bug], done: true}]"
 ---
 
 ## Destination
@@ -140,11 +140,16 @@ task — the back-and-forth *was* the grilling:
 
 1. `digest-real-data-render-bug` (bug) — reproduce the stuck-on-"Loading…"
    bug with real Aura data, confirm/fix the `started`-guard, restore real-data
-   rendering. `blocked_by: []` (blocker; goes first).
+   rendering. `blocked_by: []` (blocker; goes first). **DONE.** Root cause was
+   a Svelte 5 `each_key_duplicate` crash (duplicate `AURA-742` key in real
+   `waiting_on_others`), NOT the suspected `$effect` race; fixed by index-keying
+   the read-only attention lists.
 
 2. `digest-slash-launch-rewrite` (feature) — the slash-gated entry +
-   tool-ification (D1–D5). `blocked_by: [digest-real-data-render-bug]` (the
-   rewrite reuses the SPA; no point tool-ifying a dashboard that doesn't
-   render).
+   tool-ification (D1–D5). `blocked_by: [digest-real-data-render-bug]`. **DONE.**
+   5 slices + a stop-tool-registration fix (the `digest-dashboard-stop` tool
+   was referenced in `DIGEST_TOOLS`/SKILL.md but never registered — found
+   mid-e2e and fixed). Real-browser e2e confirmed the dashboard renders real
+   data + the click → state.json → agent-handoff path.
 
 Wayfinder wires `blocked_by` after all slugs exist.
