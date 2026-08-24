@@ -329,11 +329,14 @@ async function fetchBlueprintItems(client: AuraClient, manifest: Manifest): Prom
  *  `blueprint/skills/ai-setup/skill.md`; the verbatim filename is `SKILL.md`.
  *  We write the verbatim filename in the local tree.
  *
- *  Rules are an exception to the `resources/blueprint/` layout: per the map
- *  decision, all 15 included rules live in one flat directory
- *  `resources/rules/` (the `engineering-rules` extension reads from there),
- *  not under `resources/blueprint/rules/`. Blueprint skills and other files
- *  stay under `resources/blueprint/`. */
+ *  Layout exceptions:
+ *  - Rules -> `resources/rules/` (flat, one directory; see map decision
+ *    Q-cursor).
+ *  - Blueprint skills -> top-level `skills/engineering-workflow/<name>/`
+ *    (design Q6), so pi discovers them as invokable sub-skills.
+ *  - The blueprint manifest -> `resources/blueprint/manifest.yaml` (reference
+ *    material, not a skill).
+ *  - Other blueprint files stay under `resources/blueprint/`. */
 function blueprintPathToLocal(bpPath: string, filename: string): string {
   // Strip the leading `blueprint/`; the local tree mirrors under
   // resources/blueprint/.
@@ -344,7 +347,12 @@ function blueprintPathToLocal(bpPath: string, filename: string): string {
   if (under.startsWith("rules/")) {
     return join("skills/engineering-workflow/resources/rules", localName);
   }
-  return join("skills/engineering-workflow/resources/blueprint", dir, localName);
+  // Blueprint skills -> top-level invokable sub-skills (design Q6).
+  if (under.startsWith("skills/")) {
+    return join("skills/engineering-workflow", dir.replace(/^skills\//, ""), localName);
+  }
+  // Blueprint manifest + any other reference material stays under resources/blueprint/.
+  return join("skills/engineering-workflow/resources/blueprint", under);
 }
 
 /** Fetch the wiki tree and return a unified item per DOCUMENT/FILE node we
