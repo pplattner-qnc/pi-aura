@@ -41,6 +41,7 @@ import type {
 import { buildAtlassianClient, fetchTaskDevLinks } from "./devlinks.js";
 import { loadSettings } from "./settings.js";
 import { buildActions } from "./build-actions.js";
+import { writeDashboardDigest } from "./write-dashboard-digest.js";
 import type {
   ArtifactToVerify,
   ArtifactVerification,
@@ -139,6 +140,8 @@ const USAGE = `Usage:
 
 /** Path to the persistent last-digest store. */
 const LAST_DIGEST_PATH = join(homedir(), ".pi", "aura", "last-digest.json");
+/** Path to the live dashboard digest file (SPA data source). */
+const DASHBOARD_DIGEST_PATH = join(homedir(), ".pi", "aura", "digest.json");
 const LAST_DIGEST_SCHEMA_VERSION = 1;
 
 // ===========================================================================
@@ -583,6 +586,16 @@ async function fetchAction(): Promise<void> {
   writeFileSync(rawPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
   writeFileSync(digestPath, JSON.stringify(digest, null, 2) + "\n", "utf8");
   writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+
+  // Write the full corrected digest to the stable dashboard path.
+  // Failure is non-fatal: the temp-dir digest is the source of truth for
+  // render/save/diff, and the dashboard file is a best-effort SPA data source.
+  try {
+    writeDashboardDigest(digest, DASHBOARD_DIGEST_PATH);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    warnings.push(`Could not write dashboard digest to ${DASHBOARD_DIGEST_PATH}: ${message}`);
+  }
 
   // stdout: a single machine-parseable line. stderr: human progress.
   console.log(`output directory: ${outDir}/`);
