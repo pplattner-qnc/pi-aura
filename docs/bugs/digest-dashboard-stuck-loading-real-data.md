@@ -3,8 +3,32 @@ kind: bug
 slug: digest-dashboard-stuck-loading-real-data
 title: Digest dashboard stuck on "Loading…" with real Aura data (unverified fix on main)
 map: aura-digest-slash-launch
-status: ready
+status: fixed
+fix_commit: cece11dba8b073dc835b613d0a7ef1703c5154fa
 ---
+
+## Root cause
+
+The real `~/.pi/aura/digest.json` contains a **duplicate task key** in
+`attention.waiting_on_others` (`AURA-742` appears twice). `Digest.svelte`
+rendered those lists with Svelte 5 keyed `{#each … (item.key)}` blocks, which
+throw `each_key_duplicate` on duplicate keys. The throw aborted the render
+update so `.digest` never appeared and `loading` never flipped to `false`.
+The small `live/digest.json` fixture had no duplicate keys, so it rendered
+fine and masked the bug. The `started`-guard fix on main (commit `e6b42fe`)
+targeted a suspected `$effect`/SSE race — the wrong cause.
+
+## Fix summary
+
+Switched the three read-only attention-list `{#each}` blocks in
+`Digest.svelte` from `(item.key)` to index-based keys `(i)` (overdue,
+waiting_on_you, waiting_on_others — 6 lines). These lists need no identity
+reconciliation. Other keyed blocks (queue, reviews, reviews_owed,
+corrections) were left keyed since those feeds aren't the duplicate-key
+source. Added `test/digest-dashboard/real-data-load.test.ts` with a
+realistic large fixture (including the duplicate `AURA-742`) + a 50ms fetch
+delay; confirmed via a real-browser e2e against real data. Full suite: 43
+tests green.
 
 ## Observed behavior
 
