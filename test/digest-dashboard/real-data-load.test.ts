@@ -195,8 +195,8 @@ describe("Digest real-data load regression", () => {
 
     await waitFor(
       () => {
-        expect(document.querySelector(".digest")).toBeTruthy();
-        expect(document.querySelector(".max-w-5xl")).toBeTruthy();
+        expect(document.querySelector(".max-w-7xl")).toBeTruthy();
+        expect(document.querySelector(".h-screen.overflow-hidden")).toBeTruthy();
         expect(document.body.textContent).not.toContain("Loading digest…");
       },
       { timeout: 2000 },
