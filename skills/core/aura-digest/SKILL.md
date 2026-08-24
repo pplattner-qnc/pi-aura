@@ -109,8 +109,9 @@ do not continue the pipeline.
   suggested actions.
 
 Then update the parsed `digest` object in place:
-1. Fill `summary` — 2-3 sentence situation based on `getBoardBriefing` (in
-   `raw.json`) + the verification findings.
+1. Fill `summary` — 2-3 sentence situation based on `getBoardBriefing` in
+   `<dir>/raw.json` (where `<dir>` is `details.dir` from `digest-fetch`) + the
+   verification findings.
 2. Update each `reviews` entry with the current `version`, `decided_count`,
    `total_required`, and `decisions` from the matching
    `verifications[].current`. Build the decisions list from `open_reviews`
