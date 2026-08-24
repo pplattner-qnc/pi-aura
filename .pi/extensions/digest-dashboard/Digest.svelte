@@ -183,7 +183,7 @@
             <p class="empty">Nothing overdue</p>
           {:else}
             <ul>
-              {#each digest.attention.overdue as item (item.key)}
+              {#each digest.attention.overdue as item, i (i)}
                 <li><span class="key">{item.key}</span> {item.title}</li>
               {/each}
             </ul>
@@ -195,7 +195,7 @@
             <p class="empty">Nothing waiting on you</p>
           {:else}
             <ul>
-              {#each digest.attention.waiting_on_you as item (item.key)}
+              {#each digest.attention.waiting_on_you as item, i (i)}
                 <li><span class="key">{item.key}</span> {item.title}</li>
               {/each}
             </ul>
@@ -207,7 +207,7 @@
             <p class="empty">Nothing waiting on others</p>
           {:else}
             <ul>
-              {#each digest.attention.waiting_on_others as item (item.key)}
+              {#each digest.attention.waiting_on_others as item, i (i)}
                 <li><span class="key">{item.key}</span> {item.title}</li>
               {/each}
             </ul>
