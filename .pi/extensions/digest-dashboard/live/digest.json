@@ -1,0 +1,77 @@
+{
+  "date": "2024-08-24",
+  "summary": "Dev fixture for the digest dashboard live preview.",
+  "attention": {
+    "overdue": [
+      { "key": "AURA-42", "title": "Fix login flow (3d overdue)", "days": 3 }
+    ],
+    "waiting_on_you": [
+      { "key": "AURA-7", "title": "Unblock review for auth refactor" }
+    ],
+    "waiting_on_others": [],
+    "notifications": {
+      "since_last_run": [
+        "AURA-42 was marked overdue"
+      ],
+      "older_unread": []
+    }
+  },
+  "queue": [
+    {
+      "rank": 1,
+      "key": "AURA-42",
+      "title": "Fix login flow",
+      "status": "In Progress",
+      "role": "Implementer",
+      "capacity_pct": 50,
+      "hours": 4
+    },
+    {
+      "rank": 2,
+      "key": "AURA-7",
+      "title": "Auth refactor review",
+      "status": "Waiting",
+      "role": "Reviewer",
+      "capacity_pct": 25,
+      "hours": 2
+    }
+  ],
+  "capacity": {
+    "base_pct": 80,
+    "committed_pct": 75,
+    "free_pct": 5,
+    "utilization_pct": 94,
+    "over": false,
+    "total_hours": 6
+  },
+  "reviews": [],
+  "reviews_owed": [],
+  "corrections": [],
+  "warnings": [],
+  "actions": [
+    {
+      "section": "overdue",
+      "key": "AURA-42",
+      "action": "advance",
+      "label": "Advance AURA-42 — Fix login flow (3d)",
+      "instruction": "Advance AURA-42: fix the login flow regression.",
+      "aura_use_case": "task-management"
+    },
+    {
+      "section": "waiting_on_you",
+      "key": "AURA-7",
+      "action": "review",
+      "label": "Review AURA-7 — Auth refactor",
+      "instruction": "Review AURA-7: complete the auth refactor review.",
+      "aura_use_case": "artifact-management"
+    }
+  ],
+  "followup": {
+    "currentlyWorkingOn": "overdue/AURA-42"
+  },
+  "meta": {
+    "generated_at": "2024-08-24T08:00:00.000Z",
+    "raw_path": "/tmp/raw.json",
+    "report_path": "/tmp/report.json"
+  }
+}
