@@ -84,6 +84,34 @@ export interface DigestCorrection {
   note: string;
 }
 
+export interface DevLinkPullRequest {
+  provider: string;
+  id: string;
+  title: string;
+  state: string;
+  url: string;
+  source_branch?: string;
+  destination_branch?: string;
+  author?: string;
+  found_via: string;
+}
+
+export interface DevLinkBranch {
+  provider: string;
+  repo: string;
+  name: string;
+  last_commit?: string;
+  found_via: string;
+}
+
+export interface TaskDevLinks {
+  task_key: string;
+  jira_keys: string[];
+  pull_requests: DevLinkPullRequest[];
+  branches: DevLinkBranch[];
+  errors: string[];
+}
+
 export interface Digest {
   date: string; // YYYY-MM-DD
   summary: string | null;
@@ -93,6 +121,7 @@ export interface Digest {
   reviews: DigestReview[];
   reviews_owed: DigestReviewOwed[];
   corrections: DigestCorrection[];
+  dev_links?: TaskDevLinks[];
   warnings: string[];
   actions: DigestAction[];
   followup: DigestFollowup;
