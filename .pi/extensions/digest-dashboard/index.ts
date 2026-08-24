@@ -39,6 +39,22 @@ const startToolParameters = Type.Object({
 
 type StartToolParams = Static<typeof startToolParameters>;
 
+const fetchToolParameters = Type.Object({});
+
+type FetchToolParams = Static<typeof fetchToolParameters>;
+
+const saveToolParameters = Type.Object({
+  dir: Type.String({
+    description: "The output directory returned by digest-fetch (details.dir).",
+  }),
+});
+
+type SaveToolParams = Static<typeof saveToolParameters>;
+
+const stopToolParameters = Type.Object({});
+
+type StopToolParams = Static<typeof stopToolParameters>;
+
 // Current session cwd, used by command argument completions. Updated on session_start.
 let sessionCwd: string | undefined;
 
@@ -63,6 +79,45 @@ function defaultAuraPaths(): {
 function resolveServerEntryPath(): string {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(moduleDir, "dist", "server.mjs");
+}
+
+function resolveAuraDigestScriptPath(): string {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(moduleDir, "../../../skills/core/aura-digest/dist/aura-digest.mjs");
+}
+
+interface SpawnResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+async function runAuraDigest(args: string[]): Promise<SpawnResult> {
+  const scriptPath = resolveAuraDigestScriptPath();
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf-8");
+    });
+
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf-8");
+    });
+
+    child.on("close", (exitCode) => {
+      resolve({ exitCode, stdout, stderr });
+    });
+
+    child.on("error", (err: Error) => {
+      resolve({ exitCode: 1, stdout, stderr: `${stderr}${err.message}` });
+    });
+  });
 }
 
 async function waitForServerUrl(
@@ -184,16 +239,6 @@ export async function teardownDashboard(
   return { ok: true, message: "Digest dashboard stopped." };
 }
 
-function parseSubcommand(args: string): string {
-  return args.trim().split(/\s+/)[0] ?? "";
-}
-
-async function stopHandler(ctx: ExtensionCommandContext): Promise<void> {
-  const { statePath, serverUrlPath } = defaultAuraPaths();
-  const result = await teardownDashboard(statePath, serverUrlPath);
-  ctx.ui.notify(result.message, result.ok ? "info" : "error");
-}
-
 export async function startDashboard(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext | ExtensionContext,
@@ -205,7 +250,7 @@ export async function startDashboard(
   if (state.pid !== null && isProcessAlive(state.pid)) {
     return {
       ok: false,
-      message: "Digest dashboard already running. Use /digest-dashboard stop first.",
+      message: "Digest dashboard already running. Use the digest-dashboard-stop tool first.",
     };
   }
 
@@ -287,24 +332,38 @@ export async function startDashboard(
   return { ok: true, message, url: serverUrl.url };
 }
 
-async function startHandler(ctx: ExtensionCommandContext): Promise<void> {
-  // The default export captures the ExtensionAPI in closure; command handlers
-  // receive the same API instance via the registered handler, so we pass it
-  // explicitly to keep startDashboard testable.
-  // rule: tdd-worker closure capture — startDashboard needs the API; the
-  // command handler uses the module-level `pi` binding defined below.
-  if (!extensionApi) {
-    ctx.ui.notify("Extension not initialized.", "error");
-    return;
+const DIGEST_TOOLS: readonly string[] = [
+  "digest-dashboard-start",
+  "digest-dashboard-stop",
+  "digest-fetch",
+  "digest-save",
+];
+
+export async function digestCommandHandler(
+  pi: ExtensionAPI,
+  _args: string,
+  ctx: ExtensionCommandContext,
+): Promise<void> {
+  try {
+    const activeTools = pi.getActiveTools();
+    const merged = [...new Set([...activeTools, ...DIGEST_TOOLS])];
+    pi.setActiveTools(merged);
+
+    const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+    const skillPath = path.resolve(moduleDir, "../../../skills/core/aura-digest/SKILL.md");
+    const skillBody = readFileSync(skillPath, "utf-8");
+
+    pi.sendMessage(
+      { customType: "aura-digest-skill", content: skillBody, display: false },
+      { triggerTurn: true },
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    ctx.ui.notify(`Failed to inject aura-digest skill: ${message}`, "error");
   }
-  await startDashboard(extensionApi, ctx);
 }
 
-let extensionApi: ExtensionAPI | undefined;
-
 export default function (pi: ExtensionAPI): void {
-  extensionApi = pi;
-
   pi.registerTool({
     name: "digest-dashboard-start",
     label: "Start Digest Dashboard",
@@ -332,22 +391,122 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("digest-dashboard", {
-    description: "Aura digest interactive dashboard",
-    handler: async (args: string, ctx: ExtensionCommandContext) => {
-      const subcommand = parseSubcommand(args);
-      if (subcommand === "stop") {
-        await stopHandler(ctx);
-      } else if (subcommand === "start") {
-        await startHandler(ctx);
-      } else {
-        ctx.ui.notify("Usage: /digest-dashboard start|stop", "warning");
+  pi.registerTool({
+    name: "digest-dashboard-stop",
+    label: "Stop Digest Dashboard",
+    description:
+      "Stop the Aura digest dashboard server and clean up its state files. Use this for a clean close at the end of a digest session.",
+    parameters: stopToolParameters,
+    async execute(
+      _toolCallId: string,
+      _params: StopToolParams,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+    ): Promise<AgentToolResult<Record<string, never>>> {
+      const { statePath, serverUrlPath } = defaultAuraPaths();
+      const result = await teardownDashboard(statePath, serverUrlPath);
+      return {
+        content: [{ type: "text", text: result.message }],
+        details: {},
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "digest-fetch",
+    label: "Fetch Aura digest",
+    description:
+      "Fetch today's Aura digest data. Returns the digest and report JSON plus the output directory. Also writes ~/.pi/aura/digest.json for the dashboard.",
+    parameters: fetchToolParameters,
+    async execute(
+      _toolCallId: string,
+      _params: FetchToolParams,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+    ): Promise<AgentToolResult<{ dir?: string }>> {
+      const result = await runAuraDigest(["fetch"]);
+      if (result.exitCode !== 0) {
+        const errorText = result.stderr.trim() || `digest-fetch exited with code ${result.exitCode}`;
+        return {
+          content: [{ type: "text", text: `digest-fetch failed: ${errorText}` }],
+          details: {},
+        };
       }
+
+      const match = result.stdout.match(/output directory:\s*(.+?)\/?\s*$/m);
+      if (!match) {
+        return {
+          content: [{ type: "text", text: "digest-fetch failed: could not parse output directory from script stdout" }],
+          details: {},
+        };
+      }
+
+      const dir = path.normalize(match[1]);
+      const digestPath = path.join(dir, "digest.json");
+      const reportPath = path.join(dir, "report.json");
+
+      try {
+        const digest = JSON.parse(readFileSync(digestPath, "utf-8")) as unknown;
+        const report = JSON.parse(readFileSync(reportPath, "utf-8")) as unknown;
+        const dashboardPath = defaultAuraPaths().dashboardPath;
+        if (!existsSync(dashboardPath)) {
+          return {
+            content: [{ type: "text", text: `digest-fetch failed: dashboard digest not written to ${dashboardPath}` }],
+            details: {},
+          };
+        }
+        return {
+          content: [{ type: "text", text: JSON.stringify({ digest, report }) }],
+          details: { dir },
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text", text: `digest-fetch failed: ${message}` }],
+          details: {},
+        };
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "digest-save",
+    label: "Save Aura digest",
+    description:
+      "Save the digest from the given directory as the last presented digest (~/.pi/aura/last-digest.json). Pass the directory returned by digest-fetch.",
+    parameters: saveToolParameters,
+    async execute(
+      _toolCallId: string,
+      params: SaveToolParams,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+    ): Promise<AgentToolResult<Record<string, never>>> {
+      const result = await runAuraDigest(["save", params.dir]);
+      if (result.exitCode !== 0) {
+        const errorText = result.stderr.trim() || `digest-save exited with code ${result.exitCode}`;
+        return {
+          content: [{ type: "text", text: `digest-save failed: ${errorText}` }],
+          details: {},
+        };
+      }
+      return {
+        content: [{ type: "text", text: `digest-save: saved last digest from ${params.dir}` }],
+        details: {},
+      };
+    },
+  });
+
+  pi.registerCommand("digest", {
+    description: "Activate the Aura digest tools and inject the aura-digest skill.",
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      await digestCommandHandler(pi, args, ctx);
     },
   });
 
   pi.on("session_start", (_event: unknown, ctx: ExtensionContext) => {
     sessionCwd = ctx.cwd;
+    const initial = pi.getActiveTools().filter((n) => !DIGEST_TOOLS.includes(n));
+    pi.setActiveTools([...new Set([...initial])]);
   });
 
   pi.on("session_shutdown", async () => {

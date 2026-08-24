@@ -248,8 +248,9 @@ describe("digest-dashboard-start tool", () => {
     const { pi, registerToolCalls } = createFakePi();
     installExtension(pi);
 
-    expect(registerToolCalls).toHaveLength(1);
-    const toolDef = registerToolCalls[0] as {
+    const toolDef = registerToolCalls.find(
+      (call) => (call as { name: string }).name === "digest-dashboard-start",
+    ) as {
       name: string;
       execute: (
         toolCallId: string,
@@ -259,7 +260,7 @@ describe("digest-dashboard-start tool", () => {
         ctx: ExtensionCommandContext,
       ) => Promise<unknown>;
     };
-    expect(toolDef.name).toBe("digest-dashboard-start");
+    expect(toolDef).toBeDefined();
 
     const notifyCalls: NotifyCall[] = [];
     const ctx = createCtx(notifyCalls);
