@@ -301,3 +301,27 @@ Keep `registerTool` for start/stop (now inactive-by-default). Final e2e.
   `digest-dashboard-start` → real-data render → click → agent acts
   via `aura` → ack + clear → hot-reload → `digest-dashboard-stop`
   clean close).
+
+### Fix: register digest-dashboard-stop tool (landed)
+
+- Closes the pre-existing residual finding flagged by the slice 5 verify
+  worker: `digest-dashboard-stop` was named in `DIGEST_TOOLS` and
+  referenced in the SKILL.md flow, but never had a `pi.registerTool` call
+  — only 3 tools were registered (`digest-dashboard-start`,
+  `digest-fetch`, `digest-save`).
+- `.pi/extensions/digest-dashboard/index.ts` (+25 lines): added the 4th
+  `pi.registerTool` call for `digest-dashboard-stop` immediately after
+  `digest-dashboard-start` (order matches `DIGEST_TOOLS`). It takes no
+  parameters (`Type.Object({})`), delegates to the existing
+  `teardownDashboard(statePath, serverUrlPath)` helper, and returns an
+  `AgentToolResult` with the teardown message in `content` and empty
+  `details`. No `promptSnippet`/`promptGuidelines` — inactive by default
+  via the existing `DIGEST_TOOLS` + `session_start` filter.
+- `test/digest-dashboard/stop-tool.test.ts` (110 lines, 2 new tests):
+  asserts the tool is registered by name, has no
+  `promptSnippet`/`promptGuidelines`, and its `execute` delegates to
+  `teardownDashboard` (sets up temp state/server-url files, calls
+  `execute`, verifies the returned message and that state files are
+  removed).
+- Verification: full vitest suite green (60 tests / 11 files);
+  typecheck clean. No divergence from the fix description.
