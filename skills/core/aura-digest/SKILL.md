@@ -7,10 +7,13 @@ description: Morning routine — fetches your Aura briefing, attention items, pr
 
 Inline, script-driven pipeline. One deterministic Node script (`aura-digest.mjs`) with
 six subcommands — `fetch`, `render`, `cleanup`, `save`, `diff`, `last` —
-handles all data gathering, formatting, temp-file cleanup, and the persistent
-last-digest store. The orchestrator (you) does the judgment work — filling the
-situation summary, surfacing corrections, and ranking suggested actions —
-between `fetch` and `render`.
+handles data gathering, formatting, temp-file cleanup, and the persistent
+last-digest store. The interactive dashboard is managed separately via the
+`digest-dashboard-start` tool (params `{ openBrowser?: true }`) or the
+`/digest-dashboard start|stop` commands, and reads `~/.pi/aura/digest.json`
++ `~/.pi/aura/state.json`. The orchestrator (you) does the judgment work —
+filling the situation summary, surfacing corrections, and ranking suggested
+actions — between `fetch` and `render`.
 
 ```
  ┌────────────────────┐  raw.json    ┌──────────────┐  digest.json   ┌────────────────────┐
@@ -38,6 +41,10 @@ between `fetch` and `render`.
                                    │  cleanup           │
                                    └────────────────────┘
 ```
+
+The interactive dashboard reads `~/.pi/aura/digest.json` (actions + followup)
+and `~/.pi/aura/state.json` (ack events), and is started/stopped via the
+`digest-dashboard-start` tool or `/digest-dashboard start|stop`.
 
 ---
 
@@ -158,35 +165,139 @@ node <skill-dir>/dist/aura-digest.mjs render "$OUT" out.md    # markdown to a fi
 `render` reads `<dir>/digest.json` and renders the final digest markdown. Pass
 a second arg to write to a file instead of stdout.
 
-## Step 4: Present, save, and act
+## Step 4: Start the dashboard, then wait for clicks
 
-Present the rendered digest. The digest does not mark notifications as read automatically. Then:
+After fetch → augment (Steps 1–2) and rendering the markdown digest (Step 3,
+still done for reference/logging), drive the interactive dashboard.
 
-- **Save the presented digest** as the last-digest store (so the next run can
-  diff against it):
+1. **Save** the corrected digest as the last-digest store (unchanged):
+   ```bash
+   node <skill-dir>/dist/aura-digest.mjs save "$OUT"
+   ```
+2. **The dashboard digest is already written** — `fetch` writes
+   `~/.pi/aura/digest.json` (including `actions[]` + `followup`) automatically.
+   No extra step.
+3. **Clean up the temp directory** (unchanged):
+   ```bash
+   node <skill-dir>/dist/aura-digest.mjs cleanup "$OUT"
+   ```
+4. **Start the dashboard** — prefer the `digest-dashboard-start` tool, or the
+   `/digest-dashboard start` command:
+   - Tool: `digest-dashboard-start` (params: `{ openBrowser?: true }`) →
+     returns `{ ok, message, url }`.
+   - Command: `/digest-dashboard start`.
+
+   This spawns the detached server, opens the browser to the rendered digest
+   with action buttons, and starts the in-process listener. The page
+   hot-reloads when the agent writes `~/.pi/aura/digest.json` or
+   `~/.pi/aura/state.json`.
+5. **Wait for a click.** Do not poll or prompt. The listener forwards a
+   `page→agent` `action_click` event as a custom message
+   (`customType: "aura-digest-event"`, `triggerTurn: true`) that wakes a new
+   turn. The message's `content` is `action.instruction`; `details` is the full
+   action object (`{ section, key, action, label, instruction, aura_use_case }`).
+6. **On a forwarded click — act on exactly one action:**
+   - **Load the `aura` skill** (the handoff rule in "Scope and handoff" below).
+   - **Route on `action.aura_use_case`** to the matching use case:
+     `task-management` / `artifact-management` / `capacity-planning` /
+     `aura-digest` (for `run_setup`). Use `action.instruction` as the
+     human-readable form of what to do.
+   - **Set the in-flight lock** before acting: write
+     `followup.currentlyWorkingOn` in `~/.pi/aura/digest.json` to the action's
+     key (e.g. `"overdue/AURA-42"`) so the page shows the spinner and disables
+     sibling buttons. The exact command is documented in the next section.
+   - **Act** via the `aura` skill: look up the task, post/resolve, comment,
+     etc., following its conventions (`is_ai_generated`, `mcp*` variants,
+     `recordTaskProgress`).
+   - **Write an `ack` event** to `~/.pi/aura/state.json` and **clear**
+     `followup.currentlyWorkingOn` in `~/.pi/aura/digest.json` so the page
+     hot-reloads the buttons back to enabled. The exact command is documented
+     in the next section.
+   - **Report** the outcome concisely.
+7. **Return to step 5** (wait for the next click), unless:
+   - The user says "stop" / "done" / "that's all" → run the clean close below.
+   - `actions[]` is empty (nothing actionable from the start) → run the clean
+     close immediately after starting.
+
+The digest does not mark notifications as read automatically.
+
+### Agent-side writes (set the lock + ack/clear)
+
+The dashboard mechanism does not provide helper subcommands for these two
+writes, so use the `node -e` one-liners below. Both edit `~/.pi/aura/digest.json`
+and/or `~/.pi/aura/state.json`; because the dashboard server `fs.watch`es these
+files, each write emits an SSE and the page hot-reloads automatically. Set the
+lock **before** acting; write the ack + clear the lock **after** acting.
+
+#### Set the in-flight lock (before acting)
+
+```bash
+node -e 'const p=require("fs"),os=require("os"),Path=require("path");const f=Path.join(os.homedir(),".pi","aura","digest.json");const d=JSON.parse(p.readFileSync(f,"utf8"));d.followup.currentlyWorkingOn="<KEY>";p.writeFileSync(f,JSON.stringify(d,null,2));'
+```
+
+Replace `<KEY>` with the action's key path, e.g. `overdue/AURA-42`
+(`<section>/<key>`). This makes the page show a spinner on that button and
+disables the sibling action buttons.
+
+#### Write the ack + clear the lock (after acting)
+
+```bash
+node -e 'const p=require("fs"),os=require("os"),Path=require("path");const sf=Path.join(os.homedir(),".pi","aura","state.json");const df=Path.join(os.homedir(),".pi","aura","digest.json");const s=JSON.parse(p.readFileSync(sf,"utf8"));s.events.push({id:Date.now(),ts:new Date().toISOString(),dir:"agent→page",type:"ack",payload:{event_id:<CLICK_ID>,status:"done"}});p.writeFileSync(sf,JSON.stringify(s,null,2));const d=JSON.parse(p.readFileSync(df,"utf8"));d.followup.currentlyWorkingOn=null;p.writeFileSync(df,JSON.stringify(d,null,2));'
+```
+
+Replace `<CLICK_ID>` with the `id` of the `action_click` event the agent
+received (from the custom message's `details`, or the event's `id`). This
+appends the ack to `state.json` and clears `followup.currentlyWorkingOn` in
+`digest.json`, so the page re-enables the buttons.
+
+Note: these one-liners assume `~/.pi/aura/digest.json` and
+`~/.pi/aura/state.json` already exist (written by `fetch` and
+`digest-dashboard-start`). If a file is missing, re-run the dashboard or fetch
+rather than creating it by hand.
+
+### Clean close
+
+- Emit a one-line verdict from the digest, e.g.:
+  `"Nothing needs you right now — N tasks committed, capacity X%, no reviews owed."`
+  Fill `N` from `queue.length`, `X` from `capacity.committed_pct`, and the
+  reviews count from `reviews_owed.length`.
+- Stop the dashboard:
   ```bash
-  node <skill-dir>/dist/aura-digest.mjs save "$OUT"
+  /digest-dashboard stop
   ```
-- **Clean up the temp directory** — it was only transport:
-  ```bash
-  node <skill-dir>/dist/aura-digest.mjs cleanup "$OUT"
-  ```
+  This kills the detached server PID and deletes `state.json` +
+  `server-url.json`; the listener observes the deletion and exits.
+- **Stop** — no dangling prompt. Do not re-prompt.
 
-`save` writes `~/.pi/aura/last-digest.json` with the digest, `presented_at`
-(now), `fetched_at`, and a `schema_version`. Call it *after* presenting and
-*before* cleanup.
+---
+
+## Routing table
+
+This table is a **reference** for which dashboard action routes to which
+`aura` use case. The source of truth is `buildActions` in
+`scripts/src/build-actions.ts`; keep this table in sync with it.
+
+| Section | `action` | `aura_use_case` | Notes |
+|---|---|---|---|
+| 🔴 Overdue | `advance` | `task-management` | max 3 |
+| 🟡 Waiting on you | `unblock` | `task-management` | max 3 |
+| Reviews I owe (current) | `review` | `artifact-management` | review-decision flow is REST/UI; route via artifact-management |
+| Capacity >100% | `flag_capacity` | `capacity-planning` | 1 |
+| Corrections (stale) | — | — | informational, no button |
+| ⚠️ Warnings | `run_setup` | `aura-digest` | 1, only if warnings |
+| Active queue | `advance` | `task-management` | fill to max 6 |
 
 ---
 
 ## Scope and handoff
 
 **This skill covers only the fetch + digest + verification + notification
-cleanup.** The moment you move on to any further Aura work — looking up
-tasks, posting or editing comments, reading or editing artifacts, capacity
-changes, wiki work, code search, signals, etc. — **load the `aura` skill** and
-follow its conventions for the remainder of the session. Do not call
-`aura-mcp-dev` tools ad-hoc from this skill; route that work through the `aura`
-skill instead.
+cleanup.** The moment a forwarded click (Step 4 step 6) asks you to act on an
+item — looking up tasks, posting or editing comments, reading or editing
+artifacts, capacity changes, wiki work, code search, signals, etc. — **load
+the `aura` skill** and follow its conventions for the remainder of the session.
+Do not call `aura-mcp-dev` tools ad-hoc from this skill; route that work
+through the `aura` skill instead. The teardown is `/digest-dashboard stop`.
 
 Key conventions the `aura` skill enforces (so you don't silently miss them):
 - Set `is_ai_generated: true` on AI-authored comments.
@@ -194,12 +305,8 @@ Key conventions the `aura` skill enforces (so you don't silently miss them):
 - Prefer `mcp*` tool variants (`mcpGetArtifact`, `mcpUnifiedSearch`, …).
 - Log activity with `recordTaskProgress` when you act on a task.
 
-**[ASK]** only if there are actionable items:
-
-- Anything overdue or waiting on you → "These need your attention. Want to tackle any now?"
-- Reviews pending → "You have N reviews waiting. Start any?"
-- Over-committed → "You're at X% commitment — adjust or flag to manager?"
-- Otherwise → "Ready to go?"
+Interaction is via the dashboard's action buttons (Step 4); teardown is
+`/digest-dashboard stop`.
 
 ---
 
