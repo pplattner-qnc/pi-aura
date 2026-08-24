@@ -30,6 +30,7 @@
     "typebox": "*"
   },
   "devDependencies": {
+    "@fontsource/bricolage-grotesque": "^5.3.0",
     "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.2.0",

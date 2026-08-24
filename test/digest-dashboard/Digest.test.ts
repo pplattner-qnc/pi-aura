@@ -135,7 +135,7 @@ describe("Digest dashboard rendering", () => {
 
   it("renders an empty Actions section and no action buttons when actions is empty", async () => {
     const { target } = await mountWithDigest(baseDigest([]));
-    expect(target.textContent).toContain("Today's priorities");
+    expect(target.textContent).toContain("Suggested actions");
     expect(target.textContent).toContain("No suggestions.");
     expect(target.querySelectorAll("button[data-action-key]")).toHaveLength(0);
   });
@@ -200,9 +200,59 @@ describe("Digest dashboard rendering", () => {
     const { target } = await mountWithDigest(digest);
 
     expect(target.querySelectorAll("button[data-action-key]")).toHaveLength(0);
-    expect(target.textContent).toContain("Today's priorities");
+    expect(target.textContent).toContain("Suggested actions");
     expect(target.textContent).toContain("No suggestions.");
     expect(consoleWarnMock).toHaveBeenCalled();
+  });
+
+  it("defaults to the Suggested actions tab so buttons render immediately", async () => {
+    const digest = baseDigest([action({ key: "AURA-1", label: "Advance AURA-1" })]);
+    const { target } = await mountWithDigest(digest);
+
+    const tabs = [...target.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const actionsTab = tabs.find((t) => t.textContent?.trim() === "Suggested actions");
+    expect(actionsTab).toBeDefined();
+    expect(actionsTab!.classList.contains("tab-active")).toBe(true);
+    expect(target.querySelectorAll("button[data-action-key]")).toHaveLength(1);
+  });
+
+  it("switches tab panels when tab buttons are clicked", async () => {
+    const digest = baseDigest([action({ key: "AURA-1", label: "Advance AURA-1" })]);
+    const { target } = await mountWithDigest(digest);
+
+    const tabs = [...target.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const capacityTab = tabs.find((t) => t.textContent?.trim() === "Capacity");
+    const actionsTab = tabs.find((t) => t.textContent?.trim() === "Suggested actions");
+    expect(capacityTab).toBeDefined();
+
+    capacityTab!.click();
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(capacityTab!.classList.contains("tab-active")).toBe(true);
+    expect(actionsTab!.classList.contains("tab-active")).toBe(false);
+    expect(target.querySelectorAll("button[data-action-key]")).toHaveLength(0);
+    expect(target.textContent).toContain("Base");
+    expect(target.textContent).toContain("Committed");
+  });
+
+  it("renders dismissible warning toasts in the bottom-right", async () => {
+    const digest = { ...baseDigest([]), warnings: ["First warning", "Second warning"] };
+    const { target } = await mountWithDigest(digest);
+
+    const toasts = target.querySelectorAll('.alert-warning');
+    expect(toasts).toHaveLength(2);
+    expect(target.textContent).toContain("First warning");
+    expect(target.textContent).toContain("Second warning");
+
+    const dismissButtons = target.querySelectorAll<HTMLButtonElement>('button[aria-label="Dismiss warning"]');
+    expect(dismissButtons).toHaveLength(2);
+    dismissButtons[0].click();
+    await new Promise((r) => setTimeout(r, 20));
+
+    const remainingToasts = target.querySelectorAll('.alert-warning');
+    expect(remainingToasts).toHaveLength(1);
+    expect(target.textContent).not.toContain("First warning");
+    expect(target.textContent).toContain("Second warning");
   });
 });
 
