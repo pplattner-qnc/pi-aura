@@ -246,7 +246,7 @@ export async function startDashboard(
   if (state.pid !== null && isProcessAlive(state.pid)) {
     return {
       ok: false,
-      message: "Digest dashboard already running. Use /digest-dashboard stop first.",
+      message: "Digest dashboard already running. Use the digest-dashboard-stop tool first.",
     };
   }
 
