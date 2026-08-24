@@ -27,7 +27,7 @@ All paths are relative to this skill directory.
 | **AI foundation file map** — plain-language map of every steering file/folder | `resources/guides/ai-foundation-file-map.md` |
 | **Blueprint manifest** — every building block with install target, checksum, version | `resources/blueprint/manifest.yaml` |
 | **House rules** (Cursor `.mdc`) — the 15 included rules (tracker-aura ignored) | `resources/rules/*.mdc` |
-| **Blueprint skills** (pi-adapted) — the 14 task-lifecycle + ai-setup/sync skills | `resources/blueprint/skills/<name>/SKILL.md` |
+| **Blueprint skills** (pi-adapted) — the 14 task-lifecycle + ai-setup/sync skills | `<name>/SKILL.md` |
 
 ## How to use it
 
@@ -64,7 +64,8 @@ adapter) — do not load or surface it.
 
 ## Blueprint skills are pi-adapted
 
-The 14 `SKILL.md` files under `resources/blueprint/skills/<name>/` are the
+The 14 `SKILL.md` files under `<name>/SKILL.md` are invokable pi sub-skills
+discovered recursively under `skills/engineering-workflow/`. They are the
 pi-adapted versions of the anwalt.de house skills. The sync skill authored
 the adaptation from the wiki's Cursor/IDE-flavoured source — rewriting the
 Cursor-specific edges (`AskQuestion` → `ask_user_question`, `SwitchMode` →
