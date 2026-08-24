@@ -10,6 +10,7 @@ import path from "node:path";
 import { exec } from "node:child_process";
 import { platform } from "node:process";
 import { fileURLToPath } from "node:url";
+import os from "node:os";
 import { appendEvent } from "./state.ts";
 import type { StateEvent } from "./state.ts";
 
@@ -106,6 +107,15 @@ export function openBrowser(url: string): void {
       console.error("openBrowser failed:", err.message);
     }
   });
+}
+
+function defaultAuraPaths(): { dashboardPath: string; statePath: string; serverUrlPath: string } {
+  const auraDir = path.join(os.homedir(), ".pi", "aura");
+  return {
+    dashboardPath: path.join(auraDir, "digest.json"),
+    statePath: path.join(auraDir, "state.json"),
+    serverUrlPath: path.join(auraDir, "server-url.json"),
+  };
 }
 
 export async function startServer(opts: StartServerOptions): Promise<DigestServer> {
@@ -238,5 +248,21 @@ export async function startServer(opts: StartServerOptions): Promise<DigestServe
     });
 
     server.on("error", reject);
+  });
+}
+
+// When this module is run directly (as the detached server entry), start the
+// server using ~/.pi/aura paths or env overrides.
+const modulePath = fileURLToPath(import.meta.url);
+const invokedPath = process.argv[1];
+if (invokedPath && path.resolve(invokedPath) === path.resolve(modulePath)) {
+  const defaults = defaultAuraPaths();
+  startServer({
+    dashboardPath: process.env.DASHBOARD_DIGEST_PATH ?? defaults.dashboardPath,
+    statePath: process.env.DASHBOARD_STATE_PATH ?? defaults.statePath,
+    serverUrlPath: process.env.DASHBOARD_SERVER_URL_PATH ?? defaults.serverUrlPath,
+  }).catch((err) => {
+    console.error("Failed to start digest-dashboard server:", err);
+    process.exit(1);
   });
 }

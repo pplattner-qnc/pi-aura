@@ -7,6 +7,7 @@ import path2 from "node:path";
 import { exec } from "node:child_process";
 import { platform } from "node:process";
 import { fileURLToPath } from "node:url";
+import os from "node:os";
 
 // state.ts
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -109,6 +110,14 @@ function openBrowser(url) {
       console.error("openBrowser failed:", err.message);
     }
   });
+}
+function defaultAuraPaths() {
+  const auraDir = path2.join(os.homedir(), ".pi", "aura");
+  return {
+    dashboardPath: path2.join(auraDir, "digest.json"),
+    statePath: path2.join(auraDir, "state.json"),
+    serverUrlPath: path2.join(auraDir, "server-url.json")
+  };
 }
 async function startServer(opts) {
   const watchers = [];
@@ -222,6 +231,19 @@ async function startServer(opts) {
       resolve({ port, url, server, done });
     });
     server.on("error", reject);
+  });
+}
+var modulePath = fileURLToPath(import.meta.url);
+var invokedPath = process.argv[1];
+if (invokedPath && path2.resolve(invokedPath) === path2.resolve(modulePath)) {
+  const defaults = defaultAuraPaths();
+  startServer({
+    dashboardPath: process.env.DASHBOARD_DIGEST_PATH ?? defaults.dashboardPath,
+    statePath: process.env.DASHBOARD_STATE_PATH ?? defaults.statePath,
+    serverUrlPath: process.env.DASHBOARD_SERVER_URL_PATH ?? defaults.serverUrlPath
+  }).catch((err) => {
+    console.error("Failed to start digest-dashboard server:", err);
+    process.exit(1);
   });
 }
 export {
