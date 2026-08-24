@@ -7,3 +7,13 @@
 @theme {
   --font-sans: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
 }
+
+/* Single-screen shell: constrain the html/body/#app chain so the dashboard's
+   h-screen overflow-hidden root actually pins to the viewport. */
+html, body, #app {
+  height: 100%;
+}
+body {
+  margin: 0;
+  overflow: hidden;
+}
