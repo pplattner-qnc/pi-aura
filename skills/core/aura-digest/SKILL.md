@@ -6,6 +6,11 @@ disable-model-invocation: true
 
 # Aura — Digest
 
+**Run the digest now.** Start at Step 1 (Fetch) immediately and drive the
+whole pipeline through to the dashboard — do not ask the user for
+confirmation, do not summarize the plan first. This skill was invoked
+explicitly (via `/digest`), so the user already wants the flow to run.
+
 Inline, tool-driven pipeline. The heavy lifting still happens in the compiled
 `aura-digest.mjs` script, but this skill drives the flow through typed tools:
 `digest-fetch` → augment → `digest-save` → `digest-dashboard-start` → wait for
