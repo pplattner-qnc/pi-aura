@@ -9,7 +9,7 @@ blocked_by:
 - engineering-workflow-skill
 - seed-engineering-mirror
 slices:
-- edge-fixes
+- edge-fixes: done
 - move-to-top-level
 ---
 
@@ -86,6 +86,17 @@ the substantive body is otherwise carried verbatim.
   `skills/engineering-workflow/resources/blueprint/skills/<name>/SKILL.md`
   is the source of truth; future changes flow through the three-way
   reconciliation (the agent is the mergetool), not a deterministic adapter.
+
+## Implementation notes
+
+### Slice 1 — edge-fixes (landed)
+
+- All 8 specified Cursor-edge edits applied across two files:
+  - `skills/engineering-workflow/resources/blueprint/skills/task-refine/SKILL.md` — 6 "Q&A module"/"Q&A tool"/"Q&A call"/"Cursor's Question" mentions → `ask_user_question`; the "Cursor's 'open and recently viewed files'" editor-context example → IDE-generic phrasing.
+  - `skills/engineering-workflow/resources/blueprint/skills/task-implement/SKILL.md` — 2 "Editor Window … Cursor window" mentions → "their editor".
+- Verified: `grep -rin "Q&A module\|Q&A tool\|Q&A call\|Cursor's Question\|Cursor window\|Editor Window"` returns nothing; `grep -rin "AskQuestion\|SwitchMode\|CreatePlan"` returns nothing (both pre-existing and post-edit). All 14 `description` frontmatters start with "anwalt.de engineering-workflow skill.". `.cursor/rules/anwaltde/universal/<rule>.mdc` refs untouched (27 occurrences across 7 skills). `ai-setup/SKILL.md`, `pr-review/SKILL.md`, `task-slice/SKILL.md` "Do NOT touch" items intact.
+- The deviation report (`deviation-reports/edge-fixes.md`) claimed "no implementation was applied" — that was stale: it predates commit `2f8341e` which applied the `task-implement` edits. The final `git diff main...HEAD` shows exactly the 8 edge rewrites and nothing else.
+- Slice doc archived to `slices/archive/1-edge-fixes.md`.
 
 ## Notes
 
