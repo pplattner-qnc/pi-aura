@@ -116,6 +116,8 @@
   }
   const EACH_ITEM_REACTIVE = 1;
   const EACH_INDEX_REACTIVE = 1 << 1;
+  const EACH_IS_CONTROLLED = 1 << 2;
+  const EACH_IS_ANIMATED = 1 << 3;
   const EACH_ITEM_IMMUTABLE = 1 << 4;
   const TEMPLATE_FRAGMENT = 1;
   const TEMPLATE_USE_IMPORT_NODE = 1 << 1;
@@ -3389,7 +3391,8 @@
   function each(node, flags2, get_collection, get_key, render_fn, fallback_fn = null) {
     var anchor = node;
     var items = /* @__PURE__ */ new Map();
-    {
+    var is_controlled = (flags2 & EACH_IS_CONTROLLED) !== 0;
+    if (is_controlled) {
       var parent_node = (
         /** @type {Element} */
         node
@@ -3509,17 +3512,31 @@
     return effect;
   }
   function reconcile(state2, array, anchor, flags2, get_key) {
+    var is_animated = (flags2 & EACH_IS_ANIMATED) !== 0;
     var length = array.length;
     var items = state2.items;
     var current = skip_to_branch(state2.effect.first);
     var seen;
     var prev = null;
+    var to_animate;
     var matched = [];
     var stashed = [];
     var value;
     var key;
     var effect;
     var i;
+    if (is_animated) {
+      for (i = 0; i < length; i += 1) {
+        value = array[i];
+        key = get_key(value, i);
+        effect = /** @type {EachItem} */
+        items.get(key).e;
+        if ((effect.f & EFFECT_OFFSCREEN) === 0) {
+          effect.nodes?.a?.measure();
+          (to_animate ??= /* @__PURE__ */ new Set()).add(effect);
+        }
+      }
+    }
     for (i = 0; i < length; i += 1) {
       value = array[i];
       key = get_key(value, i);
@@ -3533,6 +3550,10 @@
       }
       if ((effect.f & INERT) !== 0) {
         resume_effect(effect);
+        if (is_animated) {
+          effect.nodes?.a?.unfix();
+          (to_animate ??= /* @__PURE__ */ new Set()).delete(effect);
+        }
       }
       if ((effect.f & EFFECT_OFFSCREEN) !== 0) {
         effect.f ^= EFFECT_OFFSCREEN;
@@ -3632,9 +3653,25 @@
       }
       var destroy_length = to_destroy.length;
       if (destroy_length > 0) {
-        var controlled_anchor = length === 0 ? anchor : null;
+        var controlled_anchor = (flags2 & EACH_IS_CONTROLLED) !== 0 && length === 0 ? anchor : null;
+        if (is_animated) {
+          for (i = 0; i < destroy_length; i += 1) {
+            to_destroy[i].nodes?.a?.measure();
+          }
+          for (i = 0; i < destroy_length; i += 1) {
+            to_destroy[i].nodes?.a?.fix();
+          }
+        }
         pause_effects(state2, to_destroy, controlled_anchor);
       }
+    }
+    if (is_animated) {
+      queue_micro_task(() => {
+        if (to_animate === void 0) return;
+        for (effect of to_animate) {
+          effect.nodes?.a?.apply();
+        }
+      });
     }
   }
   function create_item(items, anchor, value, key, index2, render_fn, flags2, get_collection) {
@@ -3729,6 +3766,9 @@
     }
     return classname === "" ? null : classname;
   }
+  function to_style(value, styles) {
+    return value == null ? null : String(value);
+  }
   function set_class(dom, is_html, value, hash, prev_classes, next_classes) {
     var prev = (
       /** @type {any} */
@@ -3753,6 +3793,24 @@
       }
     }
     return next_classes;
+  }
+  function set_style(dom, value, prev_styles, next_styles) {
+    var prev = (
+      /** @type {any} */
+      dom[STYLE_CACHE]
+    );
+    if (prev !== value) {
+      var next_style_attr = to_style(value);
+      {
+        if (next_style_attr == null) {
+          dom.removeAttribute("style");
+        } else {
+          dom.style.cssText = next_style_attr;
+        }
+      }
+      dom[STYLE_CACHE] = value;
+    }
+    return next_styles;
   }
   const IS_CUSTOM_ELEMENT = /* @__PURE__ */ Symbol("is custom element");
   const IS_HTML = /* @__PURE__ */ Symbol("is html");
@@ -3805,30 +3863,38 @@
   if (typeof window !== "undefined") {
     ((window.__svelte ??= {}).v ??= /* @__PURE__ */ new Set()).add(PUBLIC_VERSION);
   }
-  var root = /* @__PURE__ */ from_html(`<p class="loading svelte-1vx924o">Loading digest…</p>`);
-  var root_1 = /* @__PURE__ */ from_html(`<p class="error svelte-1vx924o"> </p>`);
+  var root = /* @__PURE__ */ from_html(`<p class="loading svelte-1vx924o" role="status" aria-live="polite">Loading digest…</p>`);
+  var root_1 = /* @__PURE__ */ from_html(`<p class="error svelte-1vx924o" role="alert"> </p>`);
   var root_2 = /* @__PURE__ */ from_html(`<p class="summary svelte-1vx924o"> </p>`);
-  var root_3 = /* @__PURE__ */ from_html(`<p class="empty svelte-1vx924o">None</p>`);
-  var root_4 = /* @__PURE__ */ from_html(`<li class="svelte-1vx924o"><span class="key svelte-1vx924o"> </span> </li>`);
-  var root_5 = /* @__PURE__ */ from_html(`<ul class="svelte-1vx924o"></ul>`);
-  var root_6 = /* @__PURE__ */ from_html(`<li class="svelte-1vx924o"> </li>`);
-  var root_7 = /* @__PURE__ */ from_html(`<p class="subhead svelte-1vx924o">Since last run</p> <ul class="svelte-1vx924o"></ul>`, 1);
-  var root_8 = /* @__PURE__ */ from_html(`<p class="subhead svelte-1vx924o">Older unread</p> <ul class="svelte-1vx924o"></ul>`, 1);
-  var root_9 = /* @__PURE__ */ from_html(`<!> <!>`, 1);
-  var root_10 = /* @__PURE__ */ from_html(`<p class="empty svelte-1vx924o">No queued items.</p>`);
-  var root_11 = /* @__PURE__ */ from_html(`<tr><td class="svelte-1vx924o"> </td><td class="key svelte-1vx924o"> </td><td class="svelte-1vx924o"> </td><td class="svelte-1vx924o"> </td><td class="svelte-1vx924o"> </td><td class="svelte-1vx924o"> </td><td class="svelte-1vx924o"> </td></tr>`);
-  var root_12 = /* @__PURE__ */ from_html(`<table class="svelte-1vx924o"><thead><tr><th class="svelte-1vx924o">Rank</th><th class="svelte-1vx924o">Key</th><th class="svelte-1vx924o">Title</th><th class="svelte-1vx924o">Status</th><th class="svelte-1vx924o">Role</th><th class="svelte-1vx924o">Capacity</th><th class="svelte-1vx924o">Hours</th></tr></thead><tbody></tbody></table>`);
-  var root_13 = /* @__PURE__ */ from_html(`<span class="over svelte-1vx924o">(over-committed)</span>`);
-  var root_14 = /* @__PURE__ */ from_html(`<p class="empty svelte-1vx924o">None.</p>`);
-  var root_15 = /* @__PURE__ */ from_html(`<span class="deadline svelte-1vx924o"> </span>`);
-  var root_16 = /* @__PURE__ */ from_html(`<li class="svelte-1vx924o"><span class="key svelte-1vx924o"> </span> <!></li>`);
-  var root_17 = /* @__PURE__ */ from_html(`<span class="badge svelte-1vx924o">stale</span>`);
-  var root_18 = /* @__PURE__ */ from_html(`<li><span class="key svelte-1vx924o"> </span> <!> <span class="note svelte-1vx924o"> </span></li>`);
-  var root_19 = /* @__PURE__ */ from_html(`<p class="empty svelte-1vx924o">No actions</p>`);
-  var root_20 = /* @__PURE__ */ from_html(`<span class="spinner svelte-1vx924o" aria-hidden="true"></span>`);
-  var root_21 = /* @__PURE__ */ from_html(`<li class="svelte-1vx924o"><button type="button"><!> <span class="label svelte-1vx924o"> </span></button></li>`);
-  var root_22 = /* @__PURE__ */ from_html(`<ul class="action-list svelte-1vx924o"></ul>`);
-  var root_23 = /* @__PURE__ */ from_html(`<div class="digest svelte-1vx924o"><header class="svelte-1vx924o"><h1 class="svelte-1vx924o"> </h1> <!></header> <section class="attention svelte-1vx924o"><h2 class="svelte-1vx924o">Attention</h2> <div class="attention-grid svelte-1vx924o"><div><h3 class="svelte-1vx924o">Overdue</h3> <!></div> <div><h3 class="svelte-1vx924o">Waiting on you</h3> <!></div> <div><h3 class="svelte-1vx924o">Waiting on others</h3> <!></div> <div><h3 class="svelte-1vx924o">Notifications</h3> <!></div></div></section> <section class="queue svelte-1vx924o"><h2 class="svelte-1vx924o">Queue</h2> <!></section> <section class="capacity svelte-1vx924o"><h2 class="svelte-1vx924o">Capacity</h2> <p> <!></p></section> <section class="reviews svelte-1vx924o"><h2 class="svelte-1vx924o">Reviews in flight</h2> <!></section> <section class="reviews-owed svelte-1vx924o"><h2 class="svelte-1vx924o">Reviews owed</h2> <!></section> <section class="corrections svelte-1vx924o"><h2 class="svelte-1vx924o">Corrections</h2> <!></section> <section class="warnings svelte-1vx924o"><h2 class="svelte-1vx924o">Warnings</h2> <!></section> <section class="actions svelte-1vx924o"><h2 class="svelte-1vx924o">Actions</h2> <!></section></div>`);
+  var root_3 = /* @__PURE__ */ from_html(`<p class="all-clear svelte-1vx924o" role="status">You're all caught up — nothing needs you right now.</p>`);
+  var root_4 = /* @__PURE__ */ from_html(`<span class="spinner svelte-1vx924o" aria-hidden="true"></span> <span class="label svelte-1vx924o"> </span> <span class="active-tag svelte-1vx924o">Working…</span>`, 1);
+  var root_5 = /* @__PURE__ */ from_html(`<span class="label svelte-1vx924o"> </span>`);
+  var root_6 = /* @__PURE__ */ from_html(`<li class="svelte-1vx924o"><button type="button"><!></button></li>`);
+  var root_7 = /* @__PURE__ */ from_html(`<p class="action-caption svelte-1vx924o">Other actions are paused while this one runs in pi.</p>`);
+  var root_8 = /* @__PURE__ */ from_html(`<section class="actions hero svelte-1vx924o"><h2 class="svelte-1vx924o">Today's priorities</h2> <ul class="action-list svelte-1vx924o"></ul> <!></section>`);
+  var root_9 = /* @__PURE__ */ from_html(`<p class="empty svelte-1vx924o">Nothing overdue</p>`);
+  var root_10 = /* @__PURE__ */ from_html(`<li class="svelte-1vx924o"><span class="key svelte-1vx924o"> </span> </li>`);
+  var root_11 = /* @__PURE__ */ from_html(`<ul class="svelte-1vx924o"></ul>`);
+  var root_12 = /* @__PURE__ */ from_html(`<p class="empty svelte-1vx924o">Nothing waiting on you</p>`);
+  var root_13 = /* @__PURE__ */ from_html(`<p class="empty svelte-1vx924o">Nothing waiting on others</p>`);
+  var root_14 = /* @__PURE__ */ from_html(`<p class="empty svelte-1vx924o">No notifications</p>`);
+  var root_15 = /* @__PURE__ */ from_html(`<li class="svelte-1vx924o"> </li>`);
+  var root_16 = /* @__PURE__ */ from_html(`<p class="subhead svelte-1vx924o">Since last run</p> <ul class="svelte-1vx924o"></ul>`, 1);
+  var root_17 = /* @__PURE__ */ from_html(`<p class="subhead svelte-1vx924o">Older unread</p> <ul class="svelte-1vx924o"></ul>`, 1);
+  var root_18 = /* @__PURE__ */ from_html(`<!> <!>`, 1);
+  var root_19 = /* @__PURE__ */ from_html(`<p class="empty svelte-1vx924o">No items in queue</p>`);
+  var root_20 = /* @__PURE__ */ from_html(`<tr><td class="svelte-1vx924o"> </td><td class="key svelte-1vx924o"> </td><td class="svelte-1vx924o"> </td><td class="svelte-1vx924o"> </td><td class="col-role svelte-1vx924o"> </td><td class="col-cap svelte-1vx924o"> </td><td class="col-hours svelte-1vx924o"> </td></tr>`);
+  var root_21 = /* @__PURE__ */ from_html(`<div class="table-wrap svelte-1vx924o"><table class="svelte-1vx924o"><caption class="visually-hidden svelte-1vx924o">Today's committed queue</caption><thead><tr><th scope="col" class="svelte-1vx924o">Rank</th><th scope="col" class="svelte-1vx924o">Key</th><th scope="col" class="svelte-1vx924o">Title</th><th scope="col" class="svelte-1vx924o">Status</th><th scope="col" class="col-role svelte-1vx924o">Role</th><th scope="col" class="col-cap svelte-1vx924o">Capacity</th><th scope="col" class="col-hours svelte-1vx924o">Hours</th></tr></thead><tbody></tbody></table></div>`);
+  var root_22 = /* @__PURE__ */ from_html(`<span class="over-badge svelte-1vx924o">Over-committed</span>`);
+  var root_23 = /* @__PURE__ */ from_html(`<p class="empty svelte-1vx924o">No reviews in flight</p>`);
+  var root_24 = /* @__PURE__ */ from_html(`<p class="empty svelte-1vx924o">No reviews pending</p>`);
+  var root_25 = /* @__PURE__ */ from_html(`<span class="deadline svelte-1vx924o"> </span>`);
+  var root_26 = /* @__PURE__ */ from_html(`<li class="svelte-1vx924o"><span class="key svelte-1vx924o"> </span> <!></li>`);
+  var root_27 = /* @__PURE__ */ from_html(`<p class="empty svelte-1vx924o">No corrections needed</p>`);
+  var root_28 = /* @__PURE__ */ from_html(`<span class="badge svelte-1vx924o">stale</span>`);
+  var root_29 = /* @__PURE__ */ from_html(`<li><span class="key svelte-1vx924o"> </span> <!> <span class="note svelte-1vx924o"> </span></li>`);
+  var root_30 = /* @__PURE__ */ from_html(`<p class="empty svelte-1vx924o">No warnings</p>`);
+  var root_31 = /* @__PURE__ */ from_html(`<div class="digest svelte-1vx924o"><header class="svelte-1vx924o"><h1 class="svelte-1vx924o"> </h1> <!></header> <!> <!> <section class="attention hero svelte-1vx924o"><h2 class="svelte-1vx924o">Attention</h2> <div class="attention-grid svelte-1vx924o"><div><h3 class="svelte-1vx924o">Overdue</h3> <!></div> <div><h3 class="svelte-1vx924o">Waiting on you</h3> <!></div> <div><h3 class="svelte-1vx924o">Waiting on others</h3> <!></div> <div><h3 class="svelte-1vx924o">Notifications</h3> <!></div></div></section> <section class="queue svelte-1vx924o"><h2 class="svelte-1vx924o">Queue</h2> <!></section> <section class="capacity svelte-1vx924o"><h2 class="svelte-1vx924o">Capacity</h2> <div><div class="util-bar svelte-1vx924o" aria-hidden="true"><div class="util-fill svelte-1vx924o"></div></div> <dl class="metrics svelte-1vx924o"><div class="svelte-1vx924o"><dt class="svelte-1vx924o">Base</dt><dd class="svelte-1vx924o"> </dd></div> <div class="svelte-1vx924o"><dt class="svelte-1vx924o">Committed</dt><dd class="svelte-1vx924o"> </dd></div> <div class="svelte-1vx924o"><dt class="svelte-1vx924o">Free</dt><dd class="svelte-1vx924o"> </dd></div> <div class="svelte-1vx924o"><dt class="svelte-1vx924o">Utilization</dt><dd class="svelte-1vx924o"> </dd></div> <div class="svelte-1vx924o"><dt class="svelte-1vx924o">Hours</dt><dd class="svelte-1vx924o"> </dd></div></dl> <!></div></section> <section class="reviews svelte-1vx924o"><h2 class="svelte-1vx924o">Reviews in flight</h2> <!></section> <section class="reviews-owed svelte-1vx924o"><h2 class="svelte-1vx924o">Reviews owed</h2> <!></section> <section class="corrections secondary svelte-1vx924o"><h2 class="svelte-1vx924o">Corrections</h2> <!></section> <section class="warnings secondary svelte-1vx924o"><h2 class="svelte-1vx924o">Warnings</h2> <!></section></div>`);
   function Digest($$anchor, $$props) {
     push($$props, true);
     let digest = /* @__PURE__ */ state(null);
@@ -3884,6 +3950,7 @@
     let followup = /* @__PURE__ */ user_derived(() => get(digest)?.followup ?? { currentlyWorkingOn: null });
     let workingKey = /* @__PURE__ */ user_derived(() => get(followup).currentlyWorkingOn);
     let hasWorkingMatch = /* @__PURE__ */ user_derived(() => get(filteredActions).some((a) => actionKey(a) === get(workingKey)));
+    let allClear = /* @__PURE__ */ user_derived(() => !!get(digest) && get(filteredActions).length === 0 && get(digest).attention.overdue.length + get(digest).attention.waiting_on_you.length + get(digest).attention.waiting_on_others.length === 0 && get(digest).queue.length === 0 && get(digest).reviews_owed.length === 0 && get(digest).warnings.length === 0);
     user_effect(() => {
       loadDigest();
     });
@@ -3909,8 +3976,8 @@
         template_effect(() => set_text(text, `Error: ${get(error) ?? ""}`));
         append($$anchor2, p_1);
       };
-      var consequent_19 = ($$anchor2) => {
-        var div = root_23();
+      var consequent_21 = ($$anchor2) => {
+        var div = root_31();
         var header = child(div);
         var h1 = child(header);
         var text_1 = child(h1);
@@ -3926,49 +3993,92 @@
             if (get(digest).summary) $$render(consequent_2);
           });
         }
-        var section = sibling(header, 2);
-        var div_1 = sibling(child(section), 2);
-        var div_2 = child(div_1);
-        var node_2 = sibling(child(div_2), 2);
+        var node_2 = sibling(header, 2);
         {
           var consequent_3 = ($$anchor3) => {
             var p_3 = root_3();
             append($$anchor3, p_3);
           };
-          var alternate = ($$anchor3) => {
-            var ul = root_5();
-            each(ul, 21, () => get(digest).attention.overdue, (item) => item.key, ($$anchor4, item) => {
-              var li = root_4();
-              var span = child(li);
-              var text_3 = child(span);
-              var text_4 = sibling(span);
-              template_effect(() => {
-                set_text(text_3, get(item).key);
-                set_text(text_4, ` ${get(item).title ?? ""}`);
-              });
-              append($$anchor4, li);
-            });
-            append($$anchor3, ul);
-          };
           if_block(node_2, ($$render) => {
-            if (get(digest).attention.overdue.length === 0) $$render(consequent_3);
-            else $$render(alternate, -1);
+            if (get(allClear)) $$render(consequent_3);
           });
         }
-        var div_3 = sibling(div_2, 2);
-        var node_3 = sibling(child(div_3), 2);
+        var node_3 = sibling(node_2, 2);
         {
-          var consequent_4 = ($$anchor3) => {
-            var p_4 = root_3();
-            append($$anchor3, p_4);
+          var consequent_6 = ($$anchor3) => {
+            var section = root_8();
+            var ul = sibling(child(section), 2);
+            each(ul, 23, () => get(filteredActions), (action) => actionKey(action), ($$anchor4, action, i) => {
+              const key = /* @__PURE__ */ user_derived(() => actionKey(get(action)));
+              const active = /* @__PURE__ */ user_derived(() => get(key) === get(followup).currentlyWorkingOn);
+              var li = root_6();
+              var button = child(li);
+              let classes;
+              var node_4 = child(button);
+              {
+                var consequent_4 = ($$anchor5) => {
+                  var fragment_1 = root_4();
+                  var span = sibling(first_child(fragment_1), 2);
+                  var text_3 = child(span);
+                  template_effect(() => set_text(text_3, get(action).label));
+                  append($$anchor5, fragment_1);
+                };
+                var alternate = ($$anchor5) => {
+                  var span_1 = root_5();
+                  var text_4 = child(span_1);
+                  template_effect(() => set_text(text_4, get(action).label));
+                  append($$anchor5, span_1);
+                };
+                if_block(node_4, ($$render) => {
+                  if (get(active)) $$render(consequent_4);
+                  else $$render(alternate, -1);
+                });
+              }
+              template_effect(() => {
+                classes = set_class(button, 1, "digest-action svelte-1vx924o", null, classes, {
+                  active: get(active),
+                  primary: get(i) === 0 && !get(hasWorkingMatch)
+                });
+                set_attribute(button, "data-action-key", get(key));
+                set_attribute(button, "aria-disabled", get(hasWorkingMatch) && !get(active) ? "true" : void 0);
+                set_attribute(button, "title", get(active) ? "continue in pi" : void 0);
+                button.disabled = get(hasWorkingMatch) && !get(active);
+              });
+              delegated("click", button, () => postAction(get(action)));
+              append($$anchor4, li);
+            });
+            var node_5 = sibling(ul, 2);
+            {
+              var consequent_5 = ($$anchor4) => {
+                var p_4 = root_7();
+                append($$anchor4, p_4);
+              };
+              if_block(node_5, ($$render) => {
+                if (get(hasWorkingMatch)) $$render(consequent_5);
+              });
+            }
+            append($$anchor3, section);
+          };
+          if_block(node_3, ($$render) => {
+            if (get(filteredActions).length > 0) $$render(consequent_6);
+          });
+        }
+        var section_1 = sibling(node_3, 2);
+        var div_1 = sibling(child(section_1), 2);
+        var div_2 = child(div_1);
+        var node_6 = sibling(child(div_2), 2);
+        {
+          var consequent_7 = ($$anchor3) => {
+            var p_5 = root_9();
+            append($$anchor3, p_5);
           };
           var alternate_1 = ($$anchor3) => {
-            var ul_1 = root_5();
-            each(ul_1, 21, () => get(digest).attention.waiting_on_you, (item) => item.key, ($$anchor4, item) => {
-              var li_1 = root_4();
-              var span_1 = child(li_1);
-              var text_5 = child(span_1);
-              var text_6 = sibling(span_1);
+            var ul_1 = root_11();
+            each(ul_1, 21, () => get(digest).attention.overdue, (item) => item.key, ($$anchor4, item) => {
+              var li_1 = root_10();
+              var span_2 = child(li_1);
+              var text_5 = child(span_2);
+              var text_6 = sibling(span_2);
               template_effect(() => {
                 set_text(text_5, get(item).key);
                 set_text(text_6, ` ${get(item).title ?? ""}`);
@@ -3977,25 +4087,25 @@
             });
             append($$anchor3, ul_1);
           };
-          if_block(node_3, ($$render) => {
-            if (get(digest).attention.waiting_on_you.length === 0) $$render(consequent_4);
+          if_block(node_6, ($$render) => {
+            if (get(digest).attention.overdue.length === 0) $$render(consequent_7);
             else $$render(alternate_1, -1);
           });
         }
-        var div_4 = sibling(div_3, 2);
-        var node_4 = sibling(child(div_4), 2);
+        var div_3 = sibling(div_2, 2);
+        var node_7 = sibling(child(div_3), 2);
         {
-          var consequent_5 = ($$anchor3) => {
-            var p_5 = root_3();
-            append($$anchor3, p_5);
+          var consequent_8 = ($$anchor3) => {
+            var p_6 = root_12();
+            append($$anchor3, p_6);
           };
           var alternate_2 = ($$anchor3) => {
-            var ul_2 = root_5();
-            each(ul_2, 21, () => get(digest).attention.waiting_on_others, (item) => item.key, ($$anchor4, item) => {
-              var li_2 = root_4();
-              var span_2 = child(li_2);
-              var text_7 = child(span_2);
-              var text_8 = sibling(span_2);
+            var ul_2 = root_11();
+            each(ul_2, 21, () => get(digest).attention.waiting_on_you, (item) => item.key, ($$anchor4, item) => {
+              var li_2 = root_10();
+              var span_3 = child(li_2);
+              var text_7 = child(span_3);
+              var text_8 = sibling(span_3);
               template_effect(() => {
                 set_text(text_7, get(item).key);
                 set_text(text_8, ` ${get(item).title ?? ""}`);
@@ -4004,303 +4114,310 @@
             });
             append($$anchor3, ul_2);
           };
-          if_block(node_4, ($$render) => {
-            if (get(digest).attention.waiting_on_others.length === 0) $$render(consequent_5);
+          if_block(node_7, ($$render) => {
+            if (get(digest).attention.waiting_on_you.length === 0) $$render(consequent_8);
             else $$render(alternate_2, -1);
           });
         }
-        var div_5 = sibling(div_4, 2);
-        var node_5 = sibling(child(div_5), 2);
+        var div_4 = sibling(div_3, 2);
+        var node_8 = sibling(child(div_4), 2);
         {
-          var consequent_6 = ($$anchor3) => {
-            var p_6 = root_3();
-            append($$anchor3, p_6);
+          var consequent_9 = ($$anchor3) => {
+            var p_7 = root_13();
+            append($$anchor3, p_7);
           };
           var alternate_3 = ($$anchor3) => {
-            var fragment_1 = root_9();
-            var node_6 = first_child(fragment_1);
-            {
-              var consequent_7 = ($$anchor4) => {
-                var fragment_2 = root_7();
-                var ul_3 = sibling(first_child(fragment_2), 2);
-                each(ul_3, 21, () => get(digest).attention.notifications.since_last_run, index, ($$anchor5, note) => {
-                  var li_3 = root_6();
-                  var text_9 = child(li_3);
-                  template_effect(() => set_text(text_9, get(note)));
-                  append($$anchor5, li_3);
-                });
-                append($$anchor4, fragment_2);
-              };
-              if_block(node_6, ($$render) => {
-                if (get(digest).attention.notifications.since_last_run.length > 0) $$render(consequent_7);
+            var ul_3 = root_11();
+            each(ul_3, 21, () => get(digest).attention.waiting_on_others, (item) => item.key, ($$anchor4, item) => {
+              var li_3 = root_10();
+              var span_4 = child(li_3);
+              var text_9 = child(span_4);
+              var text_10 = sibling(span_4);
+              template_effect(() => {
+                set_text(text_9, get(item).key);
+                set_text(text_10, ` ${get(item).title ?? ""}`);
               });
-            }
-            var node_7 = sibling(node_6, 2);
+              append($$anchor4, li_3);
+            });
+            append($$anchor3, ul_3);
+          };
+          if_block(node_8, ($$render) => {
+            if (get(digest).attention.waiting_on_others.length === 0) $$render(consequent_9);
+            else $$render(alternate_3, -1);
+          });
+        }
+        var div_5 = sibling(div_4, 2);
+        var node_9 = sibling(child(div_5), 2);
+        {
+          var consequent_10 = ($$anchor3) => {
+            var p_8 = root_14();
+            append($$anchor3, p_8);
+          };
+          var alternate_4 = ($$anchor3) => {
+            var fragment_2 = root_18();
+            var node_10 = first_child(fragment_2);
             {
-              var consequent_8 = ($$anchor4) => {
-                var fragment_3 = root_8();
+              var consequent_11 = ($$anchor4) => {
+                var fragment_3 = root_16();
                 var ul_4 = sibling(first_child(fragment_3), 2);
-                each(ul_4, 21, () => get(digest).attention.notifications.older_unread, index, ($$anchor5, note) => {
-                  var li_4 = root_6();
-                  var text_10 = child(li_4);
-                  template_effect(() => set_text(text_10, get(note)));
+                each(ul_4, 21, () => get(digest).attention.notifications.since_last_run, index, ($$anchor5, note) => {
+                  var li_4 = root_15();
+                  var text_11 = child(li_4);
+                  template_effect(() => set_text(text_11, get(note)));
                   append($$anchor5, li_4);
                 });
                 append($$anchor4, fragment_3);
               };
-              if_block(node_7, ($$render) => {
-                if (get(digest).attention.notifications.older_unread.length > 0) $$render(consequent_8);
+              if_block(node_10, ($$render) => {
+                if (get(digest).attention.notifications.since_last_run.length > 0) $$render(consequent_11);
               });
             }
-            append($$anchor3, fragment_1);
+            var node_11 = sibling(node_10, 2);
+            {
+              var consequent_12 = ($$anchor4) => {
+                var fragment_4 = root_17();
+                var ul_5 = sibling(first_child(fragment_4), 2);
+                each(ul_5, 21, () => get(digest).attention.notifications.older_unread, index, ($$anchor5, note) => {
+                  var li_5 = root_15();
+                  var text_12 = child(li_5);
+                  template_effect(() => set_text(text_12, get(note)));
+                  append($$anchor5, li_5);
+                });
+                append($$anchor4, fragment_4);
+              };
+              if_block(node_11, ($$render) => {
+                if (get(digest).attention.notifications.older_unread.length > 0) $$render(consequent_12);
+              });
+            }
+            append($$anchor3, fragment_2);
           };
-          if_block(node_5, ($$render) => {
-            if (get(digest).attention.notifications.since_last_run.length === 0 && get(digest).attention.notifications.older_unread.length === 0) $$render(consequent_6);
-            else $$render(alternate_3, -1);
+          if_block(node_9, ($$render) => {
+            if (get(digest).attention.notifications.since_last_run.length === 0 && get(digest).attention.notifications.older_unread.length === 0) $$render(consequent_10);
+            else $$render(alternate_4, -1);
           });
         }
-        var section_1 = sibling(section, 2);
-        var node_8 = sibling(child(section_1), 2);
+        var section_2 = sibling(section_1, 2);
+        var node_12 = sibling(child(section_2), 2);
         {
-          var consequent_9 = ($$anchor3) => {
-            var p_7 = root_10();
-            append($$anchor3, p_7);
+          var consequent_13 = ($$anchor3) => {
+            var p_9 = root_19();
+            append($$anchor3, p_9);
           };
-          var alternate_4 = ($$anchor3) => {
-            var table = root_12();
-            var tbody = sibling(child(table));
+          var alternate_5 = ($$anchor3) => {
+            var div_6 = root_21();
+            var table = child(div_6);
+            var tbody = sibling(child(table), 2);
             each(tbody, 21, () => get(digest).queue, (row) => row.key, ($$anchor4, row) => {
-              var tr = root_11();
+              var tr = root_20();
               var td = child(tr);
-              var text_11 = child(td);
+              var text_13 = child(td);
               var td_1 = sibling(td);
-              var text_12 = child(td_1);
+              var text_14 = child(td_1);
               var td_2 = sibling(td_1);
-              var text_13 = child(td_2);
+              var text_15 = child(td_2);
               var td_3 = sibling(td_2);
-              var text_14 = child(td_3);
+              var text_16 = child(td_3);
               var td_4 = sibling(td_3);
-              var text_15 = child(td_4);
+              var text_17 = child(td_4);
               var td_5 = sibling(td_4);
-              var text_16 = child(td_5);
+              var text_18 = child(td_5);
               var td_6 = sibling(td_5);
-              var text_17 = child(td_6);
+              var text_19 = child(td_6);
               template_effect(
                 ($0) => {
-                  set_text(text_11, get(row).rank);
-                  set_text(text_12, get(row).key);
-                  set_text(text_13, get(row).title);
-                  set_text(text_14, get(row).status);
-                  set_text(text_15, get(row).role);
-                  set_text(text_16, $0);
-                  set_text(text_17, get(row).hours ?? "—");
+                  set_text(text_13, get(row).rank);
+                  set_text(text_14, get(row).key);
+                  set_text(text_15, get(row).title);
+                  set_text(text_16, get(row).status);
+                  set_text(text_17, get(row).role);
+                  set_text(text_18, $0);
+                  set_text(text_19, get(row).hours ?? "—");
                 },
                 [() => fmtPct(get(row).capacity_pct)]
               );
               append($$anchor4, tr);
             });
-            append($$anchor3, table);
+            append($$anchor3, div_6);
           };
-          if_block(node_8, ($$render) => {
-            if (get(digest).queue.length === 0) $$render(consequent_9);
-            else $$render(alternate_4, -1);
-          });
-        }
-        var section_2 = sibling(section_1, 2);
-        var p_8 = sibling(child(section_2), 2);
-        var text_18 = child(p_8);
-        var node_9 = sibling(text_18);
-        {
-          var consequent_10 = ($$anchor3) => {
-            var span_3 = root_13();
-            append($$anchor3, span_3);
-          };
-          if_block(node_9, ($$render) => {
-            if (get(digest).capacity.over) $$render(consequent_10);
-          });
-        }
-        var section_3 = sibling(section_2, 2);
-        var node_10 = sibling(child(section_3), 2);
-        {
-          var consequent_11 = ($$anchor3) => {
-            var p_9 = root_14();
-            append($$anchor3, p_9);
-          };
-          var alternate_5 = ($$anchor3) => {
-            var ul_5 = root_5();
-            each(ul_5, 21, () => get(digest).reviews, (review) => review.artifact_id, ($$anchor4, review) => {
-              var li_5 = root_4();
-              var span_4 = child(li_5);
-              var text_19 = child(span_4);
-              var text_20 = sibling(span_4);
-              template_effect(() => {
-                set_text(text_19, get(review).artifact_id);
-                set_text(text_20, ` ${get(review).title ?? ""} (v${get(review).version ?? ""})
-              — ${get(review).decided_count ?? ""}/${get(review).total_required ?? ""} decided`);
-              });
-              append($$anchor4, li_5);
-            });
-            append($$anchor3, ul_5);
-          };
-          if_block(node_10, ($$render) => {
-            if (get(digest).reviews.length === 0) $$render(consequent_11);
+          if_block(node_12, ($$render) => {
+            if (get(digest).queue.length === 0) $$render(consequent_13);
             else $$render(alternate_5, -1);
           });
         }
-        var section_4 = sibling(section_3, 2);
-        var node_11 = sibling(child(section_4), 2);
+        var section_3 = sibling(section_2, 2);
+        var div_7 = sibling(child(section_3), 2);
+        let classes_1;
+        var div_8 = child(div_7);
+        var div_9 = child(div_8);
+        var dl = sibling(div_8, 2);
+        var div_10 = child(dl);
+        var dd = sibling(child(div_10));
+        var text_20 = child(dd);
+        var div_11 = sibling(div_10, 2);
+        var dd_1 = sibling(child(div_11));
+        var text_21 = child(dd_1);
+        var div_12 = sibling(div_11, 2);
+        var dd_2 = sibling(child(div_12));
+        var text_22 = child(dd_2);
+        var div_13 = sibling(div_12, 2);
+        var dd_3 = sibling(child(div_13));
+        var text_23 = child(dd_3);
+        var div_14 = sibling(div_13, 2);
+        var dd_4 = sibling(child(div_14));
+        var text_24 = child(dd_4);
+        var node_13 = sibling(dl, 2);
         {
-          var consequent_12 = ($$anchor3) => {
-            var p_10 = root_14();
+          var consequent_14 = ($$anchor3) => {
+            var span_5 = root_22();
+            append($$anchor3, span_5);
+          };
+          if_block(node_13, ($$render) => {
+            if (get(digest).capacity.over) $$render(consequent_14);
+          });
+        }
+        var section_4 = sibling(section_3, 2);
+        var node_14 = sibling(child(section_4), 2);
+        {
+          var consequent_15 = ($$anchor3) => {
+            var p_10 = root_23();
             append($$anchor3, p_10);
           };
           var alternate_6 = ($$anchor3) => {
-            var ul_6 = root_5();
-            each(ul_6, 21, () => get(digest).reviews_owed, (review) => review.artifact_id, ($$anchor4, review) => {
-              var li_6 = root_16();
-              var span_5 = child(li_6);
-              var text_21 = child(span_5);
-              var text_22 = sibling(span_5);
-              var node_12 = sibling(text_22);
-              {
-                var consequent_13 = ($$anchor5) => {
-                  var span_6 = root_15();
-                  var text_23 = child(span_6);
-                  template_effect(() => set_text(text_23, `due ${get(review).deadline ?? ""}`));
-                  append($$anchor5, span_6);
-                };
-                if_block(node_12, ($$render) => {
-                  if (get(review).deadline) $$render(consequent_13);
-                });
-              }
+            var ul_6 = root_11();
+            each(ul_6, 21, () => get(digest).reviews, (review) => review.artifact_id, ($$anchor4, review) => {
+              var li_6 = root_10();
+              var span_6 = child(li_6);
+              var text_25 = child(span_6);
+              var text_26 = sibling(span_6);
               template_effect(() => {
-                set_text(text_21, get(review).artifact_id);
-                set_text(text_22, ` ${get(review).title ?? ""} `);
+                set_text(text_25, get(review).artifact_id);
+                set_text(text_26, ` ${get(review).title ?? ""} (v${get(review).version ?? ""})
+              — ${get(review).decided_count ?? ""}/${get(review).total_required ?? ""} decided`);
               });
               append($$anchor4, li_6);
             });
             append($$anchor3, ul_6);
           };
-          if_block(node_11, ($$render) => {
-            if (get(digest).reviews_owed.length === 0) $$render(consequent_12);
+          if_block(node_14, ($$render) => {
+            if (get(digest).reviews.length === 0) $$render(consequent_15);
             else $$render(alternate_6, -1);
           });
         }
         var section_5 = sibling(section_4, 2);
-        var node_13 = sibling(child(section_5), 2);
+        var node_15 = sibling(child(section_5), 2);
         {
-          var consequent_14 = ($$anchor3) => {
-            var p_11 = root_14();
+          var consequent_16 = ($$anchor3) => {
+            var p_11 = root_24();
             append($$anchor3, p_11);
           };
           var alternate_7 = ($$anchor3) => {
-            var ul_7 = root_5();
-            each(ul_7, 21, () => get(digest).corrections, (correction) => correction.artifact_id, ($$anchor4, correction) => {
-              var li_7 = root_18();
+            var ul_7 = root_11();
+            each(ul_7, 21, () => get(digest).reviews_owed, (review) => review.artifact_id, ($$anchor4, review) => {
+              var li_7 = root_26();
               var span_7 = child(li_7);
-              var text_24 = child(span_7);
-              var text_25 = sibling(span_7);
-              var node_14 = sibling(text_25);
+              var text_27 = child(span_7);
+              var text_28 = sibling(span_7);
+              var node_16 = sibling(text_28);
               {
-                var consequent_15 = ($$anchor5) => {
-                  var span_8 = root_17();
+                var consequent_17 = ($$anchor5) => {
+                  var span_8 = root_25();
+                  var text_29 = child(span_8);
+                  template_effect(() => set_text(text_29, `due ${get(review).deadline ?? ""}`));
                   append($$anchor5, span_8);
                 };
-                if_block(node_14, ($$render) => {
-                  if (get(correction).stale) $$render(consequent_15);
+                if_block(node_16, ($$render) => {
+                  if (get(review).deadline) $$render(consequent_17);
                 });
               }
-              var span_9 = sibling(node_14, 2);
-              var text_26 = child(span_9);
               template_effect(() => {
-                set_class(li_7, 1, clsx(get(correction).stale ? "stale" : ""), "svelte-1vx924o");
-                set_text(text_24, get(correction).artifact_id);
-                set_text(text_25, ` ${get(correction).title ?? ""} `);
-                set_text(text_26, get(correction).note);
+                set_text(text_27, get(review).artifact_id);
+                set_text(text_28, ` ${get(review).title ?? ""} `);
               });
               append($$anchor4, li_7);
             });
             append($$anchor3, ul_7);
           };
-          if_block(node_13, ($$render) => {
-            if (get(digest).corrections.length === 0) $$render(consequent_14);
+          if_block(node_15, ($$render) => {
+            if (get(digest).reviews_owed.length === 0) $$render(consequent_16);
             else $$render(alternate_7, -1);
           });
         }
         var section_6 = sibling(section_5, 2);
-        var node_15 = sibling(child(section_6), 2);
+        var node_17 = sibling(child(section_6), 2);
         {
-          var consequent_16 = ($$anchor3) => {
-            var p_12 = root_14();
+          var consequent_18 = ($$anchor3) => {
+            var p_12 = root_27();
             append($$anchor3, p_12);
           };
           var alternate_8 = ($$anchor3) => {
-            var ul_8 = root_5();
-            each(ul_8, 21, () => get(digest).warnings, index, ($$anchor4, warning) => {
-              var li_8 = root_6();
-              var text_27 = child(li_8);
-              template_effect(() => set_text(text_27, get(warning)));
+            var ul_8 = root_11();
+            each(ul_8, 21, () => get(digest).corrections, (correction) => correction.artifact_id, ($$anchor4, correction) => {
+              var li_8 = root_29();
+              var span_9 = child(li_8);
+              var text_30 = child(span_9);
+              var text_31 = sibling(span_9);
+              var node_18 = sibling(text_31);
+              {
+                var consequent_19 = ($$anchor5) => {
+                  var span_10 = root_28();
+                  append($$anchor5, span_10);
+                };
+                if_block(node_18, ($$render) => {
+                  if (get(correction).stale) $$render(consequent_19);
+                });
+              }
+              var span_11 = sibling(node_18, 2);
+              var text_32 = child(span_11);
+              template_effect(() => {
+                set_class(li_8, 1, clsx(get(correction).stale ? "stale" : ""), "svelte-1vx924o");
+                set_text(text_30, get(correction).artifact_id);
+                set_text(text_31, ` ${get(correction).title ?? ""} `);
+                set_text(text_32, get(correction).note);
+              });
               append($$anchor4, li_8);
             });
             append($$anchor3, ul_8);
           };
-          if_block(node_15, ($$render) => {
-            if (get(digest).warnings.length === 0) $$render(consequent_16);
+          if_block(node_17, ($$render) => {
+            if (get(digest).corrections.length === 0) $$render(consequent_18);
             else $$render(alternate_8, -1);
           });
         }
         var section_7 = sibling(section_6, 2);
-        var node_16 = sibling(child(section_7), 2);
+        var node_19 = sibling(child(section_7), 2);
         {
-          var consequent_17 = ($$anchor3) => {
-            var p_13 = root_19();
+          var consequent_20 = ($$anchor3) => {
+            var p_13 = root_30();
             append($$anchor3, p_13);
           };
           var alternate_9 = ($$anchor3) => {
-            var ul_9 = root_22();
-            each(ul_9, 21, () => get(filteredActions), (action) => actionKey(action), ($$anchor4, action) => {
-              const key = /* @__PURE__ */ user_derived(() => actionKey(get(action)));
-              const active = /* @__PURE__ */ user_derived(() => get(key) === get(followup).currentlyWorkingOn);
-              var li_9 = root_21();
-              var button = child(li_9);
-              let classes;
-              var node_17 = child(button);
-              {
-                var consequent_18 = ($$anchor5) => {
-                  var span_10 = root_20();
-                  append($$anchor5, span_10);
-                };
-                if_block(node_17, ($$render) => {
-                  if (get(active)) $$render(consequent_18);
-                });
-              }
-              var span_11 = sibling(node_17, 2);
-              var text_28 = child(span_11);
-              template_effect(() => {
-                classes = set_class(button, 1, "digest-action svelte-1vx924o", null, classes, { active: get(active) });
-                set_attribute(button, "data-action-key", get(key));
-                set_attribute(button, "title", get(active) ? "continue in pi" : void 0);
-                button.disabled = get(hasWorkingMatch) && !get(active);
-                set_text(text_28, get(action).label);
-              });
-              delegated("click", button, () => postAction(get(action)));
+            var ul_9 = root_11();
+            each(ul_9, 21, () => get(digest).warnings, index, ($$anchor4, warning) => {
+              var li_9 = root_15();
+              var text_33 = child(li_9);
+              template_effect(() => set_text(text_33, get(warning)));
               append($$anchor4, li_9);
             });
             append($$anchor3, ul_9);
           };
-          if_block(node_16, ($$render) => {
-            if (get(filteredActions).length === 0) $$render(consequent_17);
+          if_block(node_19, ($$render) => {
+            if (get(digest).warnings.length === 0) $$render(consequent_20);
             else $$render(alternate_9, -1);
           });
         }
         template_effect(
-          ($0, $1, $2, $3) => {
+          ($0, $1, $2, $3, $4) => {
             set_text(text_1, `Digest — ${get(digest).date ?? ""}`);
-            set_text(text_18, `Base ${$0 ?? ""} · Committed ${$1 ?? ""}
-        · Free ${$2 ?? ""} · Utilization ${$3 ?? ""}
-        · ${get(digest).capacity.total_hours ?? ""}h `);
+            classes_1 = set_class(div_7, 1, "capacity-row svelte-1vx924o", null, classes_1, { over: get(digest).capacity.over });
+            set_style(div_9, `width: ${$0 ?? ""}%`);
+            set_text(text_20, $1);
+            set_text(text_21, $2);
+            set_text(text_22, $3);
+            set_text(text_23, $4);
+            set_text(text_24, `${get(digest).capacity.total_hours ?? ""}h`);
           },
           [
+            () => Math.min(100, get(digest).capacity.utilization_pct),
             () => fmtPct(get(digest).capacity.base_pct),
             () => fmtPct(get(digest).capacity.committed_pct),
             () => fmtPct(get(digest).capacity.free_pct),
@@ -4312,7 +4429,7 @@
       if_block(node, ($$render) => {
         if (get(loading)) $$render(consequent);
         else if (get(error)) $$render(consequent_1, 1);
-        else if (get(digest)) $$render(consequent_19, 2);
+        else if (get(digest)) $$render(consequent_21, 2);
       });
     }
     append($$anchor, fragment);
