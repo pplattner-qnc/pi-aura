@@ -1839,10 +1839,6 @@
     margin-inline: auto;
   }
 
-  .mt-1 {
-    margin-top: var(--spacing);
-  }
-
   .mt-2 {
     margin-top: calc(var(--spacing) * 2);
   }
@@ -1928,20 +1924,12 @@
     min-height: 180px;
   }
 
-  .min-h-screen {
-    min-height: 100vh;
-  }
-
   .w-4 {
     width: calc(var(--spacing) * 4);
   }
 
   .w-full {
     width: 100%;
-  }
-
-  .max-w-5xl {
-    max-width: var(--container-5xl);
   }
 
   .max-w-7xl {
@@ -1966,14 +1954,6 @@
 
   .transform {
     transform: var(--tw-rotate-x, ) var(--tw-rotate-y, ) var(--tw-rotate-z, ) var(--tw-skew-x, ) var(--tw-skew-y, );
-  }
-
-  .list-inside {
-    list-style-position: inside;
-  }
-
-  .list-disc {
-    list-style-type: disc;
   }
 
   .grid-cols-1 {
@@ -2030,22 +2010,10 @@
     margin-block-end: calc(calc(var(--spacing) * 2) * calc(1 - var(--tw-space-y-reverse)));
   }
 
-  :where(.space-y-3 > :not(:last-child)) {
-    --tw-space-y-reverse: 0;
-    margin-block-start: calc(calc(var(--spacing) * 3) * var(--tw-space-y-reverse));
-    margin-block-end: calc(calc(var(--spacing) * 3) * calc(1 - var(--tw-space-y-reverse)));
-  }
-
   :where(.space-y-4 > :not(:last-child)) {
     --tw-space-y-reverse: 0;
     margin-block-start: calc(calc(var(--spacing) * 4) * var(--tw-space-y-reverse));
     margin-block-end: calc(calc(var(--spacing) * 4) * calc(1 - var(--tw-space-y-reverse)));
-  }
-
-  :where(.space-y-6 > :not(:last-child)) {
-    --tw-space-y-reverse: 0;
-    margin-block-start: calc(calc(var(--spacing) * 6) * var(--tw-space-y-reverse));
-    margin-block-end: calc(calc(var(--spacing) * 6) * calc(1 - var(--tw-space-y-reverse)));
   }
 
   .overflow-auto {
@@ -2176,11 +2144,6 @@
     font-weight: var(--font-weight-bold);
   }
 
-  .font-medium {
-    --tw-font-weight: var(--font-weight-medium);
-    font-weight: var(--font-weight-medium);
-  }
-
   .font-semibold {
     --tw-font-weight: var(--font-weight-semibold);
     font-weight: var(--font-weight-semibold);
@@ -2194,11 +2157,6 @@
   .tracking-wide {
     --tw-tracking: var(--tracking-wide);
     letter-spacing: var(--tracking-wide);
-  }
-
-  .tracking-widest {
-    --tw-tracking: var(--tracking-widest);
-    letter-spacing: var(--tracking-widest);
   }
 
   .text-base-content, .text-base-content\/50 {
