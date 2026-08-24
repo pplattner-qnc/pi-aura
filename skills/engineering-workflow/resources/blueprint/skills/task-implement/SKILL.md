@@ -56,7 +56,7 @@ Fill both options with the concrete branch name and path from the target repo's 
 
 ### 2b — Verify the plan is in the worktree
 
-After the worktree exists (or the user chose the base branch and you are staying in the current checkout), confirm that the plan file is present at `docs/tasks/active/<KEY>-<slug>/task-<slug>.md` (it should be, since it was committed to the branch). Emit the plan file's **clickable absolute path** so the user can open it in the current Editor Window without a second Cursor window:
+After the worktree exists (or the user chose the base branch and you are staying in the current checkout), confirm that the plan file is present at `docs/tasks/active/<KEY>-<slug>/task-<slug>.md` (it should be, since it was committed to the branch). Emit the plan file's **clickable absolute path** so the user can open it in their editor:
 
 ```
 Plan: <absolute worktree path>/docs/tasks/active/<KEY>-<slug>/task-<slug>.md
@@ -202,7 +202,7 @@ Wait for the answer before proceeding.
 
 ### 2b — Verify the plan is in the worktree
 
-After the parent worktree exists (or the user chose the base branch), confirm that the parent plan file (`docs/tasks/active/<KEY>-<slug>/task-<slug>.md`) and the relevant slice files (`subtasks/*.md`) are present. Emit the plan file's **clickable absolute path** so the user can open it in the current Editor Window:
+After the parent worktree exists (or the user chose the base branch), confirm that the parent plan file (`docs/tasks/active/<KEY>-<slug>/task-<slug>.md`) and the relevant slice files (`subtasks/*.md`) are present. Emit the plan file's **clickable absolute path** so the user can open it in their editor:
 
 ```
 Plan:   <absolute-path>/docs/tasks/active/<KEY>-<slug>/task-<slug>.md
