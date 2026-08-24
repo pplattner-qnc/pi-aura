@@ -104,44 +104,53 @@ describe("teardown-dashboard helper", () => {
 
 describe("digest-dashboard command", () => {
   it("routes 'stop' to the stop handler and notifies success", async () => {
-    const pi = createFakePi();
-    installExtension(pi as unknown as import("@earendil-works/pi-coding-agent").ExtensionAPI);
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), "digest-dashboard-command-stop-"));
+    const originalHome = process.env.HOME;
+    process.env.HOME = tmpDir;
 
-    const [, command] = pi.registerCommand.mock.calls[0];
-    const notifies: Array<{ message: string; severity: string }> = [];
-    const ctx = {
-      ui: {
-        notify: (message: string, severity: string) => {
-          notifies.push({ message, severity });
+    const statePath = path.join(tmpDir, ".pi", "aura", "state.json");
+    const serverUrlPath = path.join(tmpDir, ".pi", "aura", "server-url.json");
+    mkdirSync(path.dirname(statePath), { recursive: true });
+
+    // Spawn a long-running child to act as the live server PID.
+    const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"]);
+    await new Promise<void>((resolve) => child.on("spawn", () => resolve()));
+
+    try {
+      writeFileSync(
+        statePath,
+        JSON.stringify({ pid: child.pid, server_started: Date.now(), events: [] }),
+      );
+      writeFileSync(serverUrlPath, JSON.stringify({ url: "http://127.0.0.1:12345/" }));
+
+      const pi = createFakePi();
+      installExtension(pi as unknown as import("@earendil-works/pi-coding-agent").ExtensionAPI);
+
+      const [, command] = pi.registerCommand.mock.calls[0];
+      const notifies: Array<{ message: string; severity: string }> = [];
+      const ctx = {
+        ui: {
+          notify: (message: string, severity: string) => {
+            notifies.push({ message, severity });
+          },
         },
-      },
-    };
+      };
 
-    await command.handler("stop", ctx);
+      await command.handler("stop", ctx);
 
-    expect(notifies).toContainEqual({ message: "No dashboard running.", severity: "info" });
-  });
-
-  it("leaves 'start' as a stub notify", async () => {
-    const pi = createFakePi();
-    installExtension(pi as unknown as import("@earendil-works/pi-coding-agent").ExtensionAPI);
-
-    const [, command] = pi.registerCommand.mock.calls[0];
-    const notifies: Array<{ message: string; severity: string }> = [];
-    const ctx = {
-      ui: {
-        notify: (message: string, severity: string) => {
-          notifies.push({ message, severity });
-        },
-      },
-    };
-
-    await command.handler("start", ctx);
-
-    expect(notifies).toContainEqual({
-      message: "start: not yet implemented",
-      severity: "info",
-    });
+      expect(notifies).toContainEqual({ message: "Digest dashboard stopped.", severity: "info" });
+      expect(existsSync(statePath)).toBe(false);
+      expect(existsSync(serverUrlPath)).toBe(false);
+    } finally {
+      // Ensure the fake child is gone even if the handler failed to kill it.
+      try {
+        process.kill(child.pid!, "SIGKILL");
+      } catch {
+        // ignore
+      }
+      process.env.HOME = originalHome;
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 
