@@ -70,3 +70,40 @@ re-export with a `.js` extension that the raw-node strip-types loader cannot
 resolve through the workspace package boundary. `tsx` resolves it correctly.
 This is a pre-existing `@pi-aura/shared` module-resolution issue, not a test
 logic failure — all 5 sub-tests pass under `tsx`.
+
+## `scripts/src/{build-actions,followup-working-on,write-dashboard-digest}.test.ts`
+
+Pure-logic unit tests for the digest data half (the `actions[]` routing table,
+the `followup.currentlyWorkingOn` default, the `~/.pi/aura/digest.json`
+write). They import only `./types.ts` + the helper under test — no
+`@pi-aura/shared` boundary — so `node --experimental-strip-types` works
+(the `.js`-extension issue that forces `tsx` for `engineering-sync.test.ts`
+does not apply here).
+
+```bash
+node --experimental-strip-types scripts/src/build-actions.test.ts
+node --experimental-strip-types scripts/src/followup-working-on.test.ts
+node --experimental-strip-types scripts/src/write-dashboard-digest.test.ts
+```
+
+## `.pi/extensions/digest-dashboard/` (vitest)
+
+The interactive digest-dashboard extension (Svelte SPA + dumb file server +
+`state.json` listener + teardown) has a vitest suite at `test/digest-dashboard/`
+(`Digest.test.ts`, `server.test.ts`, `state.test.ts`, `listener.test.ts`,
+`teardown.test.ts`, `start.test.ts`; ~42 tests) using `happy-dom` for the
+component. Config: `vitest.config.ts` at repo root. devDeps (`svelte`, `vite`,
+`@sveltejs/vite-plugin-svelte`, `vitest`, `happy-dom`) are at the root
+`package.json` (the sub-package `package.json` is a marker with no deps;
+Vite resolves via walk-up to root `node_modules`).
+
+```bash
+npx vitest run                              # all digest-dashboard tests
+cd .pi/extensions/digest-dashboard && npm run build    # vite (app.js) + esbuild (server.mjs)
+cd .pi/extensions/digest-dashboard && npm run typecheck
+```
+
+The extension ships only committed `dist/` (`app.js`, `app.css`, `server.mjs`)
+— zero runtime npm deps for end users. `index.ts` + `listener.ts` are loaded
+by pi's jiti at runtime (not bundled); `server.ts` is esbuild-bundled to
+`dist/server.mjs` (the detached entry `spawn` runs).
