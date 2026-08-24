@@ -1,3 +1,2 @@
 task: digest-slash-launch-rewrite
-slice: skill-non-model-invokable-and-skill-injection
-done: true
+slice: rewrite-skill-md-to-tool-flow

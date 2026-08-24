@@ -218,3 +218,40 @@ Keep `registerTool` for start/stop (now inactive-by-default). Final e2e.
   depends on slice 1 (`slash-command-and-tool-activation`) having landed
   (this slice's `blocked_by` prerequisite).
 - Divergence: none — the change matches the arch spec and slice doc exactly.
+
+### Slice 4: rewrite-skill-md-to-tool-flow (landed)
+
+- `skills/core/aura-digest/SKILL.md` (239 lines changed): rewrote the
+  body to drive the digest flow through typed tools instead of bash
+  shell-outs to `aura-digest.mjs`. The new flow is `digest-fetch` →
+  augment (orchestrator judgment: reads `report`, updates `digest`,
+  writes corrected digest back to `<dir>/digest.json`) → `digest-save`
+  → `digest-dashboard-start` → wait for clicks → act via `aura` skill
+  → ack + clear (preserved `node -e` one-liners) → `digest-dashboard-
+  stop`. Frontmatter left exactly as landed by L3
+  (`disable-model-invocation: true`).
+- **Dropped from the skill body:** the `render`, `cleanup`, `diff`,
+  and `last` subcommand sections; the `$OUT` temp-dir plumbing; `sed`
+  stdout parsing; the old `/digest-dashboard stop` close (replaced by
+  the `digest-dashboard-stop` tool).
+- **Kept verbatim:** the routing table, the agent-side `node -e`
+  lock/ack/clear one-liners, the clean-close intent, the `aura`-skill
+  handoff, prerequisites, development notes, and the digest/last-digest
+  contracts.
+- `test/digest-dashboard/skill-md-prose.test.ts` (90 lines, 6 new
+  tests): asserts no bash block shells out to `aura-digest.mjs
+  fetch/render/cleanup/save/diff/last`; the tool-driven flow is present
+  (`digest-fetch`, `digest-save`, `digest-dashboard-start`,
+  `digest-dashboard-stop`, augment/re-rank); the routing table and
+  `node -e` one-liners remain; the old `$OUT` plumbing is gone.
+- Verification: full vitest suite green (58 tests / 10 files);
+  typecheck clean.
+- **Owed HITL e2e:** a reader (agent) following the prose end-to-end
+  against the landed tools in a fresh pi session, plus real-data
+  dashboard click-through. That remains L5's final e2e responsibility;
+  this slice's prose + grep tests are green.
+- Divergence: none. One minor prose clarification added for coherence
+  — Step 2 explicitly tells the orchestrator to use `<dir>/raw.json`
+  (the fetch `details.dir`) when it needs `getBoardBriefing`; the old
+  `$OUT/raw.json` reference is gone (a path-update, not a scope
+  change).

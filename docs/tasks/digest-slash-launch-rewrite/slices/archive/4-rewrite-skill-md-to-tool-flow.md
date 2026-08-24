@@ -6,6 +6,7 @@ task: ../task.md
 mode: hitl
 size: m
 blocked_by: [skill-non-model-invokable-and-skill-injection]
+status: done
 ---
 
 ## End-to-end behavior
