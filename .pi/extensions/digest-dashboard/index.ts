@@ -51,6 +51,10 @@ const saveToolParameters = Type.Object({
 
 type SaveToolParams = Static<typeof saveToolParameters>;
 
+const stopToolParameters = Type.Object({});
+
+type StopToolParams = Static<typeof stopToolParameters>;
+
 // Current session cwd, used by command argument completions. Updated on session_start.
 let sessionCwd: string | undefined;
 
@@ -383,6 +387,27 @@ export default function (pi: ExtensionAPI): void {
       return {
         content: [{ type: "text", text: result.message }],
         details: result.url ? { url: result.url } : { url: "" },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "digest-dashboard-stop",
+    label: "Stop Digest Dashboard",
+    description:
+      "Stop the Aura digest dashboard server and clean up its state files. Use this for a clean close at the end of a digest session.",
+    parameters: stopToolParameters,
+    async execute(
+      _toolCallId: string,
+      _params: StopToolParams,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+    ): Promise<AgentToolResult<Record<string, never>>> {
+      const { statePath, serverUrlPath } = defaultAuraPaths();
+      const result = await teardownDashboard(statePath, serverUrlPath);
+      return {
+        content: [{ type: "text", text: result.message }],
+        details: {},
       };
     },
   });
