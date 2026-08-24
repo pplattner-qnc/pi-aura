@@ -363,13 +363,6 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("digest", {
-    description: "Activate the Aura digest tools and inject the aura-digest skill.",
-    handler: async (args: string, ctx: ExtensionCommandContext) => {
-      await digestCommandHandler(pi, args, ctx);
-    },
-  });
-
   pi.registerCommand("digest-dashboard", {
     description: "Aura digest interactive dashboard",
     handler: async (args: string, ctx: ExtensionCommandContext) => {
@@ -381,6 +374,13 @@ export default function (pi: ExtensionAPI): void {
       } else {
         ctx.ui.notify("Usage: /digest-dashboard start|stop", "warning");
       }
+    },
+  });
+
+  pi.registerCommand("digest", {
+    description: "Activate the Aura digest tools and inject the aura-digest skill.",
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      await digestCommandHandler(pi, args, ctx);
     },
   });
 
