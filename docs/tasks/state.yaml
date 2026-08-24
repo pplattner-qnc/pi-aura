@@ -1,3 +1,2 @@
 task: digest-slash-launch-rewrite
-slice: rewrite-skill-md-to-tool-flow
-done: true
+slice: drop-register-command-keep-tool

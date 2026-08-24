@@ -4,7 +4,7 @@ type: feature
 slug: digest-slash-launch-rewrite
 title: Re-launch the digest as a slash-gated, tool-driven flow with zero idle context
 map: aura-digest-slash-launch
-status: ready
+status: done
 blocked_by: [digest-real-data-render-bug]
 slices: [slash-command-and-tool-activation, digest-fetch-and-save-tools, skill-non-model-invokable-and-skill-injection, rewrite-skill-md-to-tool-flow, drop-register-command-keep-tool]
 ---
@@ -255,3 +255,49 @@ Keep `registerTool` for start/stop (now inactive-by-default). Final e2e.
   (the fetch `details.dir`) when it needs `getBoardBriefing`; the old
   `$OUT/raw.json` reference is gone (a path-update, not a scope
   change).
+
+### Slice 5: drop-register-command-keep-tool (landed — final slice)
+
+- `.pi/extensions/digest-dashboard/index.ts` (−43 lines): removed
+  `pi.registerCommand("digest-dashboard", …)` and its now-dead
+  supporting code — `parseSubcommand`, `startHandler`/`stopHandler`
+  wrappers, and the module-level `extensionApi` closure binding.
+  `/digest` is now the sole slash entry point.
+- Kept: `startDashboard`/`teardownDashboard` helpers (used by
+  `registerTool` execute callbacks and `session_shutdown`),
+  `digestCommandHandler` + `/digest` registration, `DIGEST_TOOLS`
+  const, the `session_start` inactive-by-default filter, and the
+  `registerTool` calls for `digest-dashboard-start`, `digest-fetch`,
+  and `digest-save`.
+- `test/digest-dashboard/slash-command.test.ts`: added assertion
+  that `digest-dashboard` is **not** registered as a command.
+- `test/digest-dashboard/teardown.test.ts`: removed the
+  `digest-dashboard command` describe block that exercised the
+  removed command's stop routing.
+- Updated the "already running" error message to reference the
+  `digest-dashboard-stop` tool instead of the removed
+  `/digest-dashboard stop` slash command.
+- Verification: full vitest suite green (58 tests / 10 files);
+  typecheck clean.
+- **Pre-existing residual finding (carried forward from slice 1,
+  NOT introduced by this slice — flagged by the verify worker):**
+  `digest-dashboard-stop` is not actually registered as a tool —
+  only 3 `pi.registerTool` calls exist (`digest-dashboard-start`,
+  `digest-fetch`, `digest-save`). The name `"digest-dashboard-stop"`
+  appears only in `DIGEST_TOOLS` (line 333) and in the error message
+  (line 249); it has never been registered anywhere in git history.
+  `/digest` activates the name, and the rewritten SKILL.md instructs
+  the agent to call it, but there is no registered definition — so
+  clean close is reachable only via the `session_shutdown` handler
+  (which calls `teardownDashboard` directly). Tests miss this
+  because the mock `pi` asserts on the `DIGEST_TOOLS` name list, not
+  on actual `registerTool` call counts. The parent orchestrator
+  should decide whether to register the stop tool or drop it from
+  `DIGEST_TOOLS`/SKILL.md before the human-in-the-loop e2e.
+- Divergence: none — the diff matches the slice doc and arch spec.
+- **This is the final slice. All five slices are now landed; the
+  task is done pending the owed HITL final e2e** (fresh session →
+  `/digest` → `digest-fetch` → augment → `digest-save` →
+  `digest-dashboard-start` → real-data render → click → agent acts
+  via `aura` → ack + clear → hot-reload → `digest-dashboard-stop`
+  clean close).
