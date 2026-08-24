@@ -1,4 +1,4 @@
-// Unit tests for the /digest slash command (slice 1):
+// Unit tests for the /aura-digest slash command (slice 1):
 // - activates digest tools
 // - injects the aura-digest SKILL.md with triggerTurn
 // - idempotent activation
@@ -109,7 +109,7 @@ describe("session_start filter", () => {
   });
 });
 
-describe("/digest command", () => {
+describe("/aura-digest command", () => {
   beforeEach(() => {
     vi.resetAllMocks();
   });
@@ -118,11 +118,11 @@ describe("/digest command", () => {
     vi.restoreAllMocks();
   });
 
-  it("registers a digest command", () => {
+  it("registers an aura-digest command", () => {
     const { pi, registerCommandCalls } = createFakePi();
     installExtension(pi);
 
-    const digestCommand = registerCommandCalls.find((c) => c.name === "digest");
+    const digestCommand = registerCommandCalls.find((c) => c.name === "aura-digest");
     expect(digestCommand).toBeDefined();
     expect(digestCommand!.def.description).toBeTruthy();
   });
@@ -139,7 +139,7 @@ describe("/digest command", () => {
     const { pi, activeTools, registerCommandCalls } = createFakePi(["some-other-tool"]);
     installExtension(pi);
 
-    const digestCommand = registerCommandCalls.find((c) => c.name === "digest")!;
+    const digestCommand = registerCommandCalls.find((c) => c.name === "aura-digest")!;
     await digestCommand.def.handler("", createCtx());
 
     expect(activeTools).toContain("digest-dashboard-start");
@@ -154,7 +154,7 @@ describe("/digest command", () => {
     const { pi, sent, registerCommandCalls } = createFakePi();
     installExtension(pi);
 
-    const digestCommand = registerCommandCalls.find((c) => c.name === "digest")!;
+    const digestCommand = registerCommandCalls.find((c) => c.name === "aura-digest")!;
     await digestCommand.def.handler("", createCtx());
 
     expect(sent).toHaveLength(1);
@@ -168,7 +168,7 @@ describe("/digest command", () => {
     const { pi, activeTools, registerCommandCalls } = createFakePi();
     installExtension(pi);
 
-    const digestCommand = registerCommandCalls.find((c) => c.name === "digest")!;
+    const digestCommand = registerCommandCalls.find((c) => c.name === "aura-digest")!;
     const ctx = createCtx();
     await digestCommand.def.handler("", ctx);
     await digestCommand.def.handler("", ctx);
@@ -186,7 +186,7 @@ describe("/digest command", () => {
     const { pi, sent, registerCommandCalls, notifyCalls } = createFakePi();
     installExtension(pi);
 
-    const digestCommand = registerCommandCalls.find((c) => c.name === "digest")!;
+    const digestCommand = registerCommandCalls.find((c) => c.name === "aura-digest")!;
     await digestCommand.def.handler("", createCtx(notifyCalls));
 
     expect(sent).toHaveLength(0);

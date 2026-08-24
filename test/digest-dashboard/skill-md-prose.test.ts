@@ -1,4 +1,4 @@
-// Prose verification for the aura-digest SKILL.md rewrite (slice 4):
+// Prose verification for the aura-digest skill body (slice 4):
 // - no bash shell-outs to aura-digest.mjs in the skill body
 // - the tool-driven flow is present and coherent
 
@@ -8,7 +8,7 @@ import path from "node:path";
 
 const SKILL_PATH = path.resolve(
   import.meta.dirname,
-  "../../skills/core/aura-digest/SKILL.md",
+  "../../skills/core/aura-digest/aura-digest.md",
 );
 
 function readSkillBody(): string {
@@ -16,7 +16,7 @@ function readSkillBody(): string {
   const marker = "\n---\n";
   const frontmatterEnd = raw.indexOf(marker, 3);
   if (frontmatterEnd === -1) {
-    throw new Error("Could not find end of SKILL.md frontmatter");
+    throw new Error("Could not find end of skill frontmatter");
   }
   return raw.slice(frontmatterEnd + marker.length);
 }
@@ -31,7 +31,7 @@ function extractBashBlocks(body: string): string[] {
   return blocks;
 }
 
-describe("aura-digest SKILL.md prose", () => {
+describe("aura-digest skill prose", () => {
   const body = readSkillBody();
   const bashBlocks = extractBashBlocks(body);
 

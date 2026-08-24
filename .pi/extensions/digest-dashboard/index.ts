@@ -350,7 +350,7 @@ export async function digestCommandHandler(
     pi.setActiveTools(merged);
 
     const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-    const skillPath = path.resolve(moduleDir, "../../../skills/core/aura-digest/SKILL.md");
+    const skillPath = path.resolve(moduleDir, "../../../skills/core/aura-digest/aura-digest.md");
     const skillBody = readFileSync(skillPath, "utf-8");
 
     pi.sendMessage(
@@ -496,7 +496,7 @@ export default function (pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("digest", {
+  pi.registerCommand("aura-digest", {
     description: "Activate the Aura digest tools and inject the aura-digest skill.",
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       await digestCommandHandler(pi, args, ctx);
