@@ -1,6 +1,7 @@
 ---
 name: aura-digest
 description: Morning routine — fetches your Aura briefing, attention items, priority queue, capacity, and reviews via a deterministic Node script (aura-digest.mjs), verifies review states, then presents a concise digest with a diff against the last run. Use when the user wants to start their day, get an Aura digest, or see what changed since last time.
+disable-model-invocation: true
 ---
 
 # Aura — Digest
