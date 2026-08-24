@@ -36,8 +36,24 @@ export const EMPTY_STATE: StateFile = {
   events: [],
 };
 
+// Serialize read-modify-write operations per state file so concurrent
+// appends within this process do not clobber each other.
+const writeQueues = new Map<string, Promise<unknown>>();
+
 function ensureDir(filePath: string): void {
   mkdirSync(path.dirname(filePath), { recursive: true });
+}
+
+function enqueue<T>(filePath: string, task: () => T | Promise<T>): Promise<T> {
+  const pending = writeQueues.get(filePath) ?? Promise.resolve();
+  const next = pending.then(task, task);
+  writeQueues.set(filePath, next);
+  next.finally(() => {
+    if (writeQueues.get(filePath) === next) {
+      writeQueues.delete(filePath);
+    }
+  });
+  return next as Promise<T>;
 }
 
 export function readState(filePath: string): StateFile {
@@ -53,24 +69,30 @@ export function readState(filePath: string): StateFile {
   };
 }
 
-export function appendEvent(filePath: string, event: StateEvent): void {
-  ensureDir(filePath);
-  const state = existsSync(filePath) ? readState(filePath) : structuredClone(EMPTY_STATE);
-  state.events.push(event);
-  writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+export function appendEvent(filePath: string, event: StateEvent): Promise<void> {
+  return enqueue(filePath, () => {
+    ensureDir(filePath);
+    const state = existsSync(filePath) ? readState(filePath) : structuredClone(EMPTY_STATE);
+    state.events.push(event);
+    writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  });
 }
 
-export function writePid(filePath: string, pid: number, serverStarted: number): void {
-  ensureDir(filePath);
-  const state = existsSync(filePath) ? readState(filePath) : structuredClone(EMPTY_STATE);
-  state.pid = pid;
-  state.server_started = serverStarted;
-  writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+export function writePid(filePath: string, pid: number, serverStarted: number): Promise<void> {
+  return enqueue(filePath, () => {
+    ensureDir(filePath);
+    const state = existsSync(filePath) ? readState(filePath) : structuredClone(EMPTY_STATE);
+    state.pid = pid;
+    state.server_started = serverStarted;
+    writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  });
 }
 
-export function clearPid(filePath: string): void {
-  ensureDir(filePath);
-  const state = existsSync(filePath) ? readState(filePath) : structuredClone(EMPTY_STATE);
-  state.pid = null;
-  writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+export function clearPid(filePath: string): Promise<void> {
+  return enqueue(filePath, () => {
+    ensureDir(filePath);
+    const state = existsSync(filePath) ? readState(filePath) : structuredClone(EMPTY_STATE);
+    state.pid = null;
+    writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  });
 }

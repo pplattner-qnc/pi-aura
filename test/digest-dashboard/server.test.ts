@@ -237,6 +237,37 @@ describe("digest-dashboard server", () => {
     expect(!existsSync(statePath) || JSON.parse(readFileSync(statePath, "utf-8")).events.length === 0).toBe(true);
   });
 
+  it("serializes concurrent POST /api/state appends", async () => {
+    const opts: StartServerOptions = {
+      dashboardPath,
+      statePath,
+      serverUrlPath,
+      openBrowser: false,
+    };
+    server = await startServer(opts);
+
+    const posts = Array.from({ length: 10 }, (_, i) =>
+      request(
+        `${server.url}api/state`,
+        "POST",
+        JSON.stringify({
+          id: i + 1,
+          ts: new Date().toISOString(),
+          dir: "page→agent",
+          type: "action_click",
+          payload: { key: `AURA-${i}` },
+        }),
+      ),
+    );
+
+    await Promise.all(posts);
+
+    const state = JSON.parse(readFileSync(statePath, "utf-8"));
+    expect(state.events).toHaveLength(10);
+    const ids = state.events.map((e: { id: number }) => e.id).sort((a: number, b: number) => a - b);
+    expect(ids).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
   it("preserves pid/server_started when appending an event", async () => {
     const opts: StartServerOptions = {
       dashboardPath,

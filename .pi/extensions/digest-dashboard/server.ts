@@ -188,7 +188,7 @@ export async function startServer(opts: StartServerOptions): Promise<DigestServe
           return;
         }
 
-        appendEvent(opts.statePath, parsed as StateEvent);
+        await appendEvent(opts.statePath, parsed as StateEvent);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true }));
         return;

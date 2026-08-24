@@ -17,8 +17,20 @@ var EMPTY_STATE = {
   server_started: null,
   events: []
 };
+var writeQueues = /* @__PURE__ */ new Map();
 function ensureDir(filePath) {
   mkdirSync(path.dirname(filePath), { recursive: true });
+}
+function enqueue(filePath, task) {
+  const pending = writeQueues.get(filePath) ?? Promise.resolve();
+  const next = pending.then(task, task);
+  writeQueues.set(filePath, next);
+  next.finally(() => {
+    if (writeQueues.get(filePath) === next) {
+      writeQueues.delete(filePath);
+    }
+  });
+  return next;
 }
 function readState(filePath) {
   if (!existsSync(filePath)) {
@@ -33,10 +45,12 @@ function readState(filePath) {
   };
 }
 function appendEvent(filePath, event) {
-  ensureDir(filePath);
-  const state = existsSync(filePath) ? readState(filePath) : structuredClone(EMPTY_STATE);
-  state.events.push(event);
-  writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  return enqueue(filePath, () => {
+    ensureDir(filePath);
+    const state = existsSync(filePath) ? readState(filePath) : structuredClone(EMPTY_STATE);
+    state.events.push(event);
+    writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+  });
 }
 
 // server.ts
@@ -181,7 +195,7 @@ async function startServer(opts) {
           res.end(JSON.stringify({ error: "Invalid JSON" }));
           return;
         }
-        appendEvent(opts.statePath, parsed);
+        await appendEvent(opts.statePath, parsed);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true }));
         return;
