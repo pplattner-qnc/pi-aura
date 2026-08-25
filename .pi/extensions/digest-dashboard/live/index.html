@@ -18,7 +18,10 @@
         var origFetch = window.fetch;
         window.fetch = function (url, opts) {
           if (url === "/api/digest" && (!opts || !opts.method || opts.method === "GET")) {
-            return origFetch("/live/digest.json").then(function (res) {
+            // Resolve the fixture relative to this document so the shim works
+            // whether the dev server root is the app dir or the monorepo root.
+            var here = new URL("./digest.json", document.baseURI).href;
+            return origFetch(here).then(function (res) {
               return res.json().then(function (data) {
                 return { ok: true, json: function () { return Promise.resolve(data); } };
               });

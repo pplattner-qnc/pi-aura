@@ -11,9 +11,39 @@
     "waiting_on_others": [],
     "notifications": {
       "since_last_run": [
-        "AURA-42 was marked overdue"
+        {
+          "line": "2026-08-24 — task.status_changed by Oleart Boada, Marcel: Plai Worker/Scheduler Concept",
+          "type": "task.status_changed",
+          "url": "https://aura.dev-anwalt.de/tasks?task=AURA-1747"
+        },
+        {
+          "line": "2026-08-24 — task.member_added by Oleart Boada, Marcel: Plai Worker/Scheduler Concept",
+          "type": "task.member_added",
+          "url": null
+        },
+        {
+          "line": "2026-08-24 — task.status_changed by Iheanacho, Anne: OTEL metric volume reduction — bring plai-api under the 15k active-series ceiling",
+          "type": "task.status_changed",
+          "url": "https://aura.dev-anwalt.de/tasks?task=AURA-932"
+        },
+        {
+          "line": "2026-08-24 — task.status_changed by Iheanacho, Anne: OTEL metric volume reduction — bring plai-api under the 15k active-series ceiling",
+          "type": "task.status_changed",
+          "url": "https://aura.dev-anwalt.de/tasks?task=AURA-932"
+        }
       ],
-      "older_unread": []
+      "older_unread": [
+        {
+          "line": "2026-08-21 — artifact.review_decided by Oleart Boada, Marcel: OpenTelemetry Standards Rollout — Aura as Source of Truth v7 (APPROVED)",
+          "type": "artifact.review_decided",
+          "url": "https://aura.dev-anwalt.de/artifacts?artifact=c81ddaf0-30a1-41b7-9ab1-7067e77ccf4f"
+        },
+        {
+          "line": "2026-08-21 — comment.mention by Oleart Boada, Marcel",
+          "type": "comment.mention",
+          "url": "https://aura.dev-anwalt.de/artifacts?artifact=0897f297-d8d9-41c2-8dbe-88cfb3a701af&tab=comments&comment=c110cf81-689b-4b21-b67b-b3e63f905db7"
+        }
+      ]
     }
   },
   "queue": [
@@ -48,6 +78,52 @@
   "reviews_owed": [],
   "corrections": [],
   "warnings": [],
+  "dev_links": [
+    {
+      "task_key": "AURA-42",
+      "jira_keys": [],
+      "pull_requests": [
+        {
+          "provider": "bitbucket",
+          "id": "#PR-142",
+          "title": "Fix login flow regression",
+          "state": "OPEN",
+          "url": "https://bitbucket.example/aura/pull-requests/142",
+          "source_branch": "fix/login-flow",
+          "destination_branch": "main",
+          "author": "pplattner",
+          "found_via": "git"
+        }
+      ],
+      "branches": [
+        {
+          "provider": "bitbucket",
+          "repo": "aura",
+          "name": "fix/login-flow",
+          "last_commit": "a1b2c3d",
+          "url": "https://bitbucket.org/anwaltde/aura/src/fix/login-flow/",
+          "found_via": "aura-repository"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "task_key": "AURA-7",
+      "jira_keys": [],
+      "pull_requests": [],
+      "branches": [
+        {
+          "provider": "github",
+          "repo": "openai",
+          "name": "feature/AURA-1061-test-suite-fixes",
+          "last_commit": "9f8e7d6",
+          "url": "https://github.com/QNCGmbH/openai/tree/feature/AURA-1061-test-suite-fixes",
+          "found_via": "aura-repository"
+        }
+      ],
+      "errors": []
+    }
+  ],
   "actions": [
     {
       "section": "overdue",

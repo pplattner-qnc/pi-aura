@@ -286,6 +286,22 @@ export interface Capacity {
 // Tasks
 // ---------------------------------------------------------------------------
 
+/** Provider hosting the repository: LOCAL, BITBUCKET, or GITHUB. */
+export type RepositorySource = "LOCAL" | "BITBUCKET" | "GITHUB";
+
+/** A repository linked to a task, with an optional feature branch.
+ * Mirrors the Aura `TaskRepositoryRef`. `browse_url` is the provider-built
+ * URL to the branch (null for LOCAL repos or when no branch is set). */
+export interface TaskRepositoryRef {
+  id: string;
+  display_name: string;
+  source: RepositorySource;
+  workspace: string;
+  slug: string;
+  branch?: string | null;
+  browse_url?: string | null;
+}
+
 export interface Task {
   id: string;
   human_key: string;
@@ -296,6 +312,12 @@ export interface Task {
   level?: string;
   jira_issues?: { issue_key: string; summary?: string }[];
   children?: { human_key: string; title?: string }[];
+  /** Repositories linked to this task (Aura `TaskRepositoryRef`). */
+  repositories?: TaskRepositoryRef[];
+  /** Repositories linked to ancestor tasks (nearest-first, deduplicated). */
+  inherited_repositories?: TaskRepositoryRef[];
+  /** Suggested feature-branch name (ANW-7785); null only when human_key is missing. */
+  suggested_branch?: string | null;
   [k: string]: unknown;
 }
 

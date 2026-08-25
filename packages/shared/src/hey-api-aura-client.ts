@@ -43,6 +43,7 @@ import type {
   SubmitArtifactDecisionInput,
   Task,
   TaskList,
+  TaskRepositoryRef,
   UpdateArtifactInput,
   UpdateArtifactResult,
   UploadDocument,
@@ -114,6 +115,7 @@ import type {
   TaskList as GTaskList,
   TaskJiraIssueRef as GTaskJiraIssueRef,
   TaskChildRef as GTaskChildRef,
+  TaskRepositoryRef as GTaskRepositoryRef,
   TaskHierarchyRef as GTaskHierarchyRef,
   PriorityBlockerRef as GPriorityBlockerRef,
   PriorityContextRef as GPriorityContextRef,
@@ -782,6 +784,17 @@ function mapTask(d: unknown): Task {
   const g = d as GTaskDetail | GTaskListItem;
   const jira = "jira_issues" in g ? (g.jira_issues ?? []) : [];
   const children = "children" in g ? (g.children ?? []) : [];
+  const repositories = "repositories" in g ? (g.repositories ?? []) : [];
+  const inherited = "inherited_repositories" in g ? (g.inherited_repositories ?? []) : [];
+  const mapRepo = (r: GTaskRepositoryRef): TaskRepositoryRef => ({
+    id: r.id,
+    display_name: r.display_name,
+    source: r.source,
+    workspace: r.workspace,
+    slug: r.slug,
+    branch: r.branch ?? null,
+    browse_url: r.browse_url ?? null,
+  });
   return {
     id: g.id,
     human_key: g.human_key,
@@ -792,6 +805,9 @@ function mapTask(d: unknown): Task {
     level: g.level,
     jira_issues: jira.map((j: GTaskJiraIssueRef) => ({ issue_key: j.issue_key, summary: j.summary })),
     children: children.map((c: GTaskChildRef) => ({ human_key: c.human_key, title: c.title })),
+    repositories: repositories.map(mapRepo),
+    inherited_repositories: inherited.map(mapRepo),
+    suggested_branch: "suggested_branch" in g ? (g.suggested_branch ?? null) : null,
   };
 }
 

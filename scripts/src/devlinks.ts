@@ -149,6 +149,28 @@ export async function fetchTaskDevLinks(
   const branches: DevLinkBranch[] = [];
   const seenPrUrls = new Set<string>();
 
+  // --- Layer 0: Aura task repositories (authoritative) ----------------
+  // Aura's `TaskRepositoryRef` already carries the provider-built branch URL
+  // (`browse_url`) for BITBUCKET/GITHUB repos with a linked feature branch.
+  // Prefer this over the Bitbucket/GitHub search fallbacks below.
+  const seenBranchKeys = new Set<string>();
+  for (const repo of [...(task.repositories ?? []), ...(task.inherited_repositories ?? [])]) {
+    const url = repo.browse_url ?? null;
+    const branchName = repo.branch ?? null;
+    // Only surface branches with a browse URL (linked-without-branch repos have none).
+    if (!url || !branchName) continue;
+    const key = url;
+    if (seenBranchKeys.has(key)) continue;
+    seenBranchKeys.add(key);
+    branches.push({
+      provider: repo.source.toLowerCase(),
+      repo: repo.slug,
+      name: branchName,
+      url,
+      found_via: "aura-repository",
+    });
+  }
+
   // --- Layer 1: Teamwork Graph (primary) --------------------------------
   if (atlassian && jiraKeys.length > 0) {
     try {
