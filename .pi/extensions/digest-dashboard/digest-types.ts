@@ -15,9 +15,18 @@ export interface DigestFollowup {
   currentlyWorkingOn: string | null; // e.g. "overdue/AURA-42"; null when idle
 }
 
+export interface DigestNotificationItem {
+  /** Pre-summarized human-readable line: "YYYY-MM-DD — <type> by <actor>: <target> v<version> (<decision>)". */
+  line: string;
+  /** Raw Aura notification type code (e.g. "task.status_changed") — drives the emoji badge + tooltip label. */
+  type: string;
+  /** Absolute URL to the originating task/artifact/comment in Aura, or null when the notification has no deep-link. */
+  url: string | null;
+}
+
 export interface DigestNotifications {
-  since_last_run: string[];
-  older_unread: string[];
+  since_last_run: DigestNotificationItem[];
+  older_unread: DigestNotificationItem[];
 }
 
 export interface DigestAttentionItem {
@@ -59,7 +68,9 @@ export interface DigestReview {
   title: string;
   version: number;
   reported_decision?: string;
-  decisions: string[];
+  decisions: { user_name: string; decision: string; decided: boolean }[];
+  /** Reviewers assigned to this run who have NOT yet decided. */
+  open_reviews: { user_id: string; user_name: string; decided: boolean }[];
   decided_count: number;
   total_required: number;
 }
@@ -101,6 +112,8 @@ export interface DevLinkBranch {
   repo: string;
   name: string;
   last_commit?: string;
+  /** Provider browse URL for the branch (Bitbucket/GitHub); null/absent when none. */
+  url?: string | null;
   found_via: string;
 }
 

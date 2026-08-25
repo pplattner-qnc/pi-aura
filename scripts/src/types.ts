@@ -17,6 +17,7 @@ import type {
   BoardSummary,
   Capacity,
   NotificationList,
+  OpenReview,
   PriorityQueue,
   TaskList,
 } from "@pi-aura/shared/aura-client";
@@ -41,17 +42,26 @@ export interface RawAuraData {
 // digest.json contract.
 // ---------------------------------------------------------------------------
 
+export interface DigestNotificationItem {
+  /** Pre-summarized human-readable line: "YYYY-MM-DD — <type> by <actor>: <target> v<version> (<decision>)". */
+  line: string;
+  /** Raw Aura notification type code (e.g. "task.status_changed") — drives the emoji badge + tooltip label in the UI. */
+  type: string;
+  /** Absolute URL to the originating task/artifact/comment in Aura, when the notification carries a `link`. Null when the notification has no deep-link. */
+  url: string | null;
+}
+
 export interface DigestNotifications {
   /** Notifications that arrived since the last digest's `fetched_at` (minus a
    * small safety margin so nothing at the exact fetch instant slips through).
    * Includes both read and unread — "what happened while you were away", not
    * just what still needs a click. Bounded by a hard fetch cap. */
-  since_last_run: string[];
+  since_last_run: DigestNotificationItem[];
   /** Unread notifications older than the since-last-run boundary. Computed by
    * fetching the newest N notifications at/older than the boundary (regardless
    * of read state) and dropping the read ones — so this surfaces only items
    * that still need attention. N is a small cap, not an unread count. */
-  older_unread: string[];
+  older_unread: DigestNotificationItem[];
 }
 
 export interface DigestAttention {
@@ -96,6 +106,10 @@ export interface DigestReview {
   version: number;
   reported_decision?: string; // e.g. "REJECTED" from a notification
   decisions: ApprovalDecision[];
+  /** Reviewers assigned to this run who have NOT yet decided (from
+   *  `getArtifactApprovals.open_reviews`, `decided: false`). Surfaced so the
+   *  dashboard can show who still needs to review, not just who already did. */
+  open_reviews: OpenReview[];
   decided_count: number;
   total_required: number;
 }
@@ -313,6 +327,10 @@ export interface DevLinkBranch {
   repo: string;
   name: string;
   last_commit?: string;
+  /** Provider browse URL for the branch (Bitbucket/GitHub). Present when the
+   * branch came from Aura's `TaskRepositoryRef.browse_url`; null/absent for
+   * branches discovered via Bitbucket search with no stored URL. */
+  url?: string | null;
   found_via: string;
 }
 

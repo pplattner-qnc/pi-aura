@@ -64,6 +64,7 @@ function review(index: number): DigestType["reviews"][number] {
     title: `Open review ${index + 1}`,
     version: index,
     decisions: [],
+    open_reviews: [],
     decided_count: 0,
     total_required: 2,
   };
@@ -86,12 +87,12 @@ function realisticDigest(): DigestType {
       notifications: {
         since_last_run: [],
         older_unread: [
-          "2026-08-24 — task.status_changed",
-          "2026-08-24 — task.member_added",
-          "2026-08-24 — task.status_changed",
-          "2026-08-24 — task.status_changed",
-          "2026-08-21 — artifact.review_decided",
-          "2026-08-21 — comment.mention",
+          { line: "2026-08-24 — task.status_changed", type: "task.status_changed", url: "https://aura.dev-anwalt.de/tasks?task=AURA-1747" },
+          { line: "2026-08-24 — task.member_added", type: "task.member_added", url: null },
+          { line: "2026-08-24 — task.status_changed", type: "task.status_changed", url: "https://aura.dev-anwalt.de/tasks?task=AURA-932" },
+          { line: "2026-08-24 — task.status_changed", type: "task.status_changed", url: "https://aura.dev-anwalt.de/tasks?task=AURA-932" },
+          { line: "2026-08-21 — artifact.review_decided", type: "artifact.review_decided", url: "https://aura.dev-anwalt.de/artifacts?artifact=c81ddaf0-30a1-41b7-9ab1-7067e77ccf4f" },
+          { line: "2026-08-21 — comment.mention", type: "comment.mention", url: "https://aura.dev-anwalt.de/artifacts?artifact=0897f297-d8d9-41c2-8dbe-88cfb3a701af&tab=comments&comment=c110cf81-689b-4b21-b67b-b3e63f905db7" },
         ],
       },
     },

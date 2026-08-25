@@ -29,8 +29,10 @@ import { resolve, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { createDefaultAuraClient } from "@pi-aura/shared/aura-client";
+import { loadAuraClientSettings } from "@pi-aura/shared/settings";
 import type {
   ApprovalDecision,
+  ArtifactApprovals,
   AuraClient,
   BoardItem,
   Notification,
@@ -52,6 +54,7 @@ import type {
   DigestCapacity,
   DigestDiff,
   DigestNotifications,
+  DigestNotificationItem,
   DigestQueueRow,
   DigestReview,
   LastDigestStore,
@@ -392,6 +395,7 @@ async function fetchAction(): Promise<void> {
       title: a.title,
       version: a.latest_version ?? 0,
       decisions: [],
+      open_reviews: [],
       decided_count: 0,
       total_required: 0,
     };
@@ -404,8 +408,9 @@ async function fetchAction(): Promise<void> {
       const r: DigestReview = {
         artifact_id: m[1],
         title: item.title ?? "",
-        version: 0, // filled by the orchestrator from getArtifactApprovals
+        version: 0, // filled below from getArtifactApprovals
         decisions: [],
+        open_reviews: [],
         decided_count: 0,
         total_required: item.approvals_pending ?? 0,
       };
@@ -433,6 +438,27 @@ async function fetchAction(): Promise<void> {
   // only, corrections=[]); the full findings live in report.json so the
   // orchestrator can reconcile without any extra MCP calls.
   const verifications = await verifyArtifacts(aura, artifactsToVerify);
+
+  // --- Enrich digest.reviews with the live approvals state -----------------
+  // verifyArtifacts already called getArtifactApprovals for every candidate
+  // artifact (the same set that feeds digest.reviews). Write the current
+  // version, decisions, open_reviews (pending reviewers), and counts back
+  // into the matching DigestReview so the dashboard can show who is to
+  // review and their state — not just who already decided. Reviews whose
+  // getArtifactApprovals lookup failed keep their initialized empty state.
+  const approvalsById = new Map<string, ArtifactApprovals>();
+  for (const v of verifications) {
+    if (v.current) approvalsById.set(v.artifact_id, v.current);
+  }
+  for (const r of reviews) {
+    const ap = approvalsById.get(r.artifact_id);
+    if (!ap) continue;
+    r.version = ap.version;
+    r.decisions = ap.decisions;
+    r.open_reviews = ap.open_reviews;
+    r.decided_count = ap.decided_count;
+    r.total_required = ap.total_required;
+  }
 
   // --- Dev links: related PRs / branches per queue task --------------------
   // Fetch each queue task's detail (for jira_issues + description), then fan
@@ -666,8 +692,12 @@ async function verifyArtifacts(
   return results;
 }
 
-function summarizeNotifications(items: Notification[]): string[] {
-  const lines: string[] = [];
+function summarizeNotifications(items: Notification[]): DigestNotificationItem[] {
+  const { baseUrl } = loadAuraClientSettings();
+  // The REST API base is e.g. "https://aura.dev-anwalt.de/api"; the app root
+  // (where "/tasks?task=…" lives) is that without the "/api" suffix.
+  const appRoot = baseUrl ? baseUrl.replace(/\/api\/?$/, "") : null;
+  const out: DigestNotificationItem[] = [];
   for (const n of items) {
     const date = safeString(n.created_at).slice(0, 10);
     const type = safeString(n.type) || "notification";
@@ -683,9 +713,11 @@ function summarizeNotifications(items: Notification[]): string[] {
     if (target) line += `: ${target}`;
     if (version) line += ` v${version}`;
     if (decision) line += ` (${decision})`;
-    lines.push(line);
+    const link = safeString(n.link) || null;
+    const url = link && appRoot ? `${appRoot}${link.startsWith("/") ? link : `/${link}`}` : null;
+    out.push({ line, type, url });
   }
-  return lines;
+  return out;
 }
 
 function extractVerifyTargets(
@@ -782,11 +814,11 @@ function renderAttention(d: Digest): string {
   lines.push(attentionLine("🟡", "Waiting on you", d.attention.waiting_on_you));
   lines.push(attentionLine("🔵", "Waiting on others", d.attention.waiting_on_others ?? []));
   const since = d.attention.notifications.since_last_run.length > 0
-    ? d.attention.notifications.since_last_run.join("\n  - ")
+    ? d.attention.notifications.since_last_run.map((n) => n.line).join("\n  - ")
     : "Nothing new since last run.";
   lines.push(`- 📬 **Since last run:** ${since}`);
   const older = d.attention.notifications.older_unread.length > 0
-    ? d.attention.notifications.older_unread.join("\n  - ")
+    ? d.attention.notifications.older_unread.map((n) => n.line).join("\n  - ")
     : "No unread notifications.";
   lines.push(`- 📬 **Older unread:** ${older}`);
   return lines.join("\n");
@@ -842,23 +874,29 @@ function renderReviews(d: Digest): string {
     return lines.join("\n");
   }
   // Terse table: one row per artifact, one column per reviewer (emoji only,
-  // all reviewers present). Column headers are first names to keep it narrow.
+  // all reviewers present — decided AND assigned-but-pending). Column headers
+  // are first names to keep it narrow.
   const allReviewerNames: string[] = [];
   const seen = new Set<string>();
+  const addName = (fullName: string) => {
+    const first = fullName.split(",")[0].trim();
+    if (first && !seen.has(first)) { seen.add(first); allReviewerNames.push(first); }
+  };
   for (const r of d.reviews) {
-    for (const dec of r.decisions) {
-      const first = dec.user_name.split(",")[0].trim();
-      if (!seen.has(first)) { seen.add(first); allReviewerNames.push(first); }
-    }
+    for (const dec of r.decisions) addName(dec.user_name);
+    for (const o of r.open_reviews) addName(o.user_name);
   }
   const header = ["Artifact", "v", ...allReviewerNames];
   lines.push(`| ${header.join(" | ")} |`);
   lines.push(`|${header.map(() => "---").join("|")}|`);
   for (const r of d.reviews) {
     const byName = new Map(r.decisions.map((dec) => [dec.user_name.split(",")[0].trim(), decisionEmoji(dec)]));
-    const cells = allReviewerNames.map((n) => byName.get(n) ?? "");
+    const pending = new Set(r.open_reviews.filter((o) => !o.decided).map((o) => o.user_name.split(",")[0].trim()));
+    const cells = allReviewerNames.map((n) => byName.get(n) ?? (pending.has(n) ? "🔵" : ""));
     lines.push(`| ${r.title} | ${r.version} | ${cells.join(" | ")} |`);
   }
+  lines.push("");
+  lines.push("_🔵 assigned · ⏳ pending · ✅ approved · ❌ rejected/needs revision_");
   return lines.join("\n");
 }
 
