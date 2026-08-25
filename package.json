@@ -9,6 +9,7 @@
     "extensions": [
       "./extensions/aura-skill-instruction.ts",
       "./extensions/aura-secrets.ts",
+      "./extensions/aura-tasks.ts",
       "./extensions/engineering-rules.ts",
       "./.pi/extensions/digest-dashboard/index.ts"
     ],
