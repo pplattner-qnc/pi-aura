@@ -1,3 +1,2 @@
-task: digest-slash-launch-rewrite
-slice: drop-register-command-keep-tool
-done: true
+task: None
+slice: None
