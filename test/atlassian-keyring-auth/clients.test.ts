@@ -20,6 +20,7 @@ import { join } from "node:path";
 import type { Keyring, SecretKey, StoredSecret } from "@pi-aura/shared/keyring";
 
 import { atlassianClient, readAtlassianCredentials } from "../../scripts/src/clients.js";
+import * as clientsModule from "../../scripts/src/clients.js";
 
 // ---------------------------------------------------------------------------
 // Fake Keyring — implements the Keyring interface for testing.
@@ -336,6 +337,120 @@ describe("atlassianClient", () => {
       });
       const decoded = decodeBasicHeader(client.authHeader);
       assert.equal(decoded, "user@example.com:ATATT3xFVkGI");
+    } finally {
+      cleanupPath(configPath);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slice 4 — digest-script-own-credential
+// Verifies the dead OAuth read path is deleted and the missing-credential
+// warning points at /aura secrets edit (not invalid_token).
+// ---------------------------------------------------------------------------
+
+describe("slice 4: digest-script-own-credential — dead OAuth path removed", () => {
+  it("does not export readOAuthTokenFromKeyring", () => {
+    assert.equal(
+      (clientsModule as Record<string, unknown>).readOAuthTokenFromKeyring,
+      undefined,
+      "readOAuthTokenFromKeyring must be deleted from clients.ts",
+    );
+  });
+});
+
+describe("slice 4: missing-credential warning path", () => {
+  // Replicate buildAtlassianClient's try/catch shape (devlinks.ts:330).
+  // buildAtlassianClient does not accept an injectable keyring, so we test
+  // the exact wrapping behavior: catch the thrown atlassianClient error and
+  // format it as { client: null, warning: "Teamwork Graph dev-links layer skipped: <reason>" }.
+  async function wrapLikeBuildAtlassianClient(
+    fn: () => Promise<unknown>,
+  ): Promise<{ client: null; warning: string }> {
+    try {
+      await fn();
+      throw new Error("expected fn to throw");
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      return {
+        client: null,
+        warning: `Teamwork Graph dev-links layer skipped: ${reason}`,
+      };
+    }
+  }
+
+  it("atlassianClient throws /aura secrets edit when keyring is empty", async () => {
+    const keyring = new FakeKeyring();
+    const configPath = makeMcpJson("atlassian", {
+      type: "http",
+      url: "https://rovo.atlassian.com/mcp",
+    });
+    try {
+      await expect(
+        atlassianClient("atlassian", { keyring, configPath }),
+      ).rejects.toThrow(/\/aura secrets edit/);
+    } finally {
+      cleanupPath(configPath);
+    }
+  });
+
+  it("wrapping the thrown error yields a warning with 'Teamwork Graph dev-links layer skipped' and '/aura secrets edit'", async () => {
+    const keyring = new FakeKeyring();
+    const configPath = makeMcpJson("atlassian", {
+      type: "http",
+      url: "https://rovo.atlassian.com/mcp",
+    });
+    try {
+      const result = await wrapLikeBuildAtlassianClient(() =>
+        atlassianClient("atlassian", { keyring, configPath }),
+      );
+      assert.equal(result.client, null);
+      assert.ok(
+        result.warning.includes("Teamwork Graph dev-links layer skipped"),
+        `warning must contain 'Teamwork Graph dev-links layer skipped', got: ${result.warning}`,
+      );
+      assert.ok(
+        result.warning.includes("/aura secrets edit"),
+        `warning must contain '/aura secrets edit', got: ${result.warning}`,
+      );
+    } finally {
+      cleanupPath(configPath);
+    }
+  });
+
+  it("the warning does NOT contain 'invalid_token'", async () => {
+    const keyring = new FakeKeyring();
+    const configPath = makeMcpJson("atlassian", {
+      type: "http",
+      url: "https://rovo.atlassian.com/mcp",
+    });
+    try {
+      const result = await wrapLikeBuildAtlassianClient(() =>
+        atlassianClient("atlassian", { keyring, configPath }),
+      );
+      assert.ok(
+        !result.warning.includes("invalid_token"),
+        `warning must NOT contain 'invalid_token', got: ${result.warning}`,
+      );
+    } finally {
+      cleanupPath(configPath);
+    }
+  });
+
+  it("the warning matches the exact expected format", async () => {
+    const keyring = new FakeKeyring();
+    const configPath = makeMcpJson("atlassian", {
+      type: "http",
+      url: "https://rovo.atlassian.com/mcp",
+    });
+    try {
+      const result = await wrapLikeBuildAtlassianClient(() =>
+        atlassianClient("atlassian", { keyring, configPath }),
+      );
+      assert.equal(
+        result.warning,
+        "Teamwork Graph dev-links layer skipped: No Atlassian credential in keyring (run `/aura secrets edit`)",
+      );
     } finally {
       cleanupPath(configPath);
     }
