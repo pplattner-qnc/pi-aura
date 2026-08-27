@@ -4,7 +4,7 @@ slug: guided-walkthrough-mode
 title: "Guided walkthrough mode in /aura secrets edit, driven by the walkthrough doc"
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: l
 blocked_by:
   - combined-pat-edit-flow
