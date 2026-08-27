@@ -137,3 +137,32 @@ Out of scope (see map.md "Out of scope"):
   this slice — downstream slices (2–5) will read them.
 - Verified: `tsc --noEmit` exit 0; `tsx --test` 54 pass / 0 fail (36 pre-existing
   + 18 new). No divergence from the slice spec.
+
+### slice: atlassian-basic-auth-client (landed)
+
+- `scripts/src/clients.ts` now builds the Atlassian `McpClient` with HTTP Basic
+  auth (`authHeader: "Basic " + base64(email:token)`) instead of the
+  pi-mcp-adapter OAuth `Bearer` token. The email + API token are read from the
+  `@pi-aura/shared` keyring via a new `readAtlassianCredentials(keyring)`
+  helper that trims whitespace on read and throws an error naming
+  `/aura secrets edit` when either value is missing/empty.
+- `atlassianClient(serverName, opts?)` gained an optional `AtlassianClientOptions`
+  seam (`keyring?`, `configPath?`) for test injection; production callers omit
+  it and `createKeyring()` + `~/.config/mcp/mcp.json` are used at runtime.
+  `loadMcpConfig` was exported to serve as the config-path seam.
+- `readOAuthTokenFromKeyring` is **kept** (not deleted) per the slice spec —
+  slice 4 will remove it after the grep sweep. The module comment was updated
+  to reflect the Basic-auth switch.
+- `McpClient` gained a readonly `get authHeader()` accessor so unit tests can
+  assert the constructed header without a network call.
+- New test file `test/atlassian-keyring-auth/clients.test.ts` (16 tests) covers:
+  both keys present → correct Basic header (decode + compare email:token);
+  no Bearer; whitespace trimming; email/token missing/empty → `/aura secrets edit`
+  throw; server missing / not http / no url → existing "not found or not http"
+  throw; default server name. Uses a `FakeKeyring` implementing the `Keyring`
+  interface and temp `mcp.json` files.
+- Skill bundle dist files (`aura.mjs`, `aura-digest.mjs`) were rebuilt to
+  pick up the slice-1 keyring enum changes and the new `authHeader` getter.
+- Verified: `tsc --noEmit` clean for both `scripts` and `packages/shared`;
+  `vitest run` 81 pass / 0 fail (12 test files). No divergence from the
+  slice spec.

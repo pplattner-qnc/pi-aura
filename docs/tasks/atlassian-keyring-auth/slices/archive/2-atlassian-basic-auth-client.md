@@ -4,7 +4,7 @@ slug: atlassian-basic-auth-client
 title: "Reusable Basic-auth Atlassian McpClient reading email+token from the keyring"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 blocked_by:
   - keyring-atlassian-secret-keys
