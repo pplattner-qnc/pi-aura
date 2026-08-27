@@ -12,7 +12,8 @@
 //
 // Each layer degrades independently — errors are collected per task so the\n// orchestrator can surface them rather than silently dropping links.
 
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { McpClient } from "./mcp-client.js";
 import { atlassianClient, readBitbucketCredentials } from "./clients.js";
 import {
@@ -84,21 +85,30 @@ interface GhPr {
   repository?: { name?: string; nameWithOwner?: string };
 }
 
-function ghSearchPRs(query: string, owners: string[]): GhPr[] {
-  const results: GhPr[] = [];
-  for (const owner of owners) {
-    try {
-      const out = execFileSync(
-        "gh",
-        ["search", "prs", query, "--owner", owner, "--json", "number,title,state,url,repository", "--limit", "20"],
-        { encoding: "utf8", timeout: 30_000 }
-      );
-      results.push(...(JSON.parse(out) as GhPr[]));
-    } catch {
-      // gh not authed, or search failed for this owner — skip silently.
-    }
+const execFileAsync = promisify(execFile);
+
+// Per-owner `gh` search used to be execFileSync, which blocked the event loop
+// for up to 30s per call and showed up as a blocking-io + event-loop-stall
+// finding under the profiler. The async variant frees the loop and lets the
+// owners run concurrently.
+async function ghSearchPRsOnce(query: string, owner: string): Promise<GhPr[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      "gh",
+      ["search", "prs", query, "--owner", owner, "--json", "number,title,state,url,repository", "--limit", "20"],
+      { encoding: "utf8", timeout: 30_000 },
+    );
+    return JSON.parse(stdout) as GhPr[];
+  } catch {
+    // gh not authed, or search failed for this owner — skip silently.
+    return [];
   }
-  return results;
+}
+
+/** Search GitHub PRs across all configured owners concurrently. */
+async function ghSearchPRs(query: string, owners: string[]): Promise<GhPr[]> {
+  const perOwner = await Promise.all(owners.map((o) => ghSearchPRsOnce(query, o)));
+  return perOwner.flat();
 }
 
 // --- similarity scoring for the Bitbucket fallback ------------------------
@@ -236,7 +246,7 @@ export async function fetchTaskDevLinks(
 
   // --- Layer 2: GitHub fallback (search by Aura key) --------------------
   try {
-    const ghPrs = ghSearchPRs(taskKey, settings.github.owners);
+    const ghPrs = await ghSearchPRs(taskKey, settings.github.owners);
     for (const p of ghPrs) {
       if (p.url && seenPrUrls.has(p.url)) continue;
       if (p.url) seenPrUrls.add(p.url);

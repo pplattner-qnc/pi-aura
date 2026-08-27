@@ -8956,7 +8956,8 @@ async function createDefaultAuraClient() {
 }
 
 // src/devlinks.ts
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 // src/clients.ts
 import { readFileSync as readFileSync2 } from "node:fs";
@@ -19245,6 +19246,8 @@ var McpClient = class {
    * Call a tool and return its parsed JSON result. These MCP servers return a
    * single text content block whose text is a JSON string; we unwrap + parse
    * it. Throws if the tool reports an error or the content shape is unexpected.
+   * The call is bounded by callTimeoutMs (default 30s) so a hung server can't
+   * stall the digest fetch.
    */
   async callTool(name, args = {}) {
     if (!this.availableTools.has(name)) {
@@ -19252,7 +19255,9 @@ var McpClient = class {
         `Tool "${name}" is not available on "${this.opts.serverName}". Available: ${[...this.availableTools].sort().join(", ")}`
       );
     }
-    const result = await this.client.callTool({ name, arguments: args });
+    const result = await this.client.callTool({ name, arguments: args }, void 0, {
+      timeout: this.opts.callTimeoutMs ?? 3e4
+    });
     const content = result.content ?? [];
     if (result.isError) {
       const text = content.map((c) => c.type === "text" ? c.text : JSON.stringify(c)).join("\n");
@@ -19341,6 +19346,7 @@ async function loadCreds(keyring, defaultWorkspace) {
   }
   return { email: email2, token, defaultWorkspace };
 }
+var BB_REQUEST_TIMEOUT_MS = 2e4;
 async function bbFetch(path, query, keyring, defaultWorkspace) {
   const creds = await loadCreds(keyring, defaultWorkspace);
   const url2 = new URL(`https://api.bitbucket.org/2.0${path}`);
@@ -19349,7 +19355,8 @@ async function bbFetch(path, query, keyring, defaultWorkspace) {
     headers: {
       Authorization: "Basic " + Buffer.from(`${creds.email}:${creds.token}`).toString("base64"),
       Accept: "application/json"
-    }
+    },
+    signal: AbortSignal.timeout(BB_REQUEST_TIMEOUT_MS)
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -19393,20 +19400,22 @@ async function searchRepoBranches(workspace, repo, q2, keyring) {
 }
 
 // src/devlinks.ts
-function ghSearchPRs(query, owners) {
-  const results = [];
-  for (const owner of owners) {
-    try {
-      const out = execFileSync(
-        "gh",
-        ["search", "prs", query, "--owner", owner, "--json", "number,title,state,url,repository", "--limit", "20"],
-        { encoding: "utf8", timeout: 3e4 }
-      );
-      results.push(...JSON.parse(out));
-    } catch {
-    }
+var execFileAsync = promisify(execFile);
+async function ghSearchPRsOnce(query, owner) {
+  try {
+    const { stdout } = await execFileAsync(
+      "gh",
+      ["search", "prs", query, "--owner", owner, "--json", "number,title,state,url,repository", "--limit", "20"],
+      { encoding: "utf8", timeout: 3e4 }
+    );
+    return JSON.parse(stdout);
+  } catch {
+    return [];
   }
-  return results;
+}
+async function ghSearchPRs(query, owners) {
+  const perOwner = await Promise.all(owners.map((o) => ghSearchPRsOnce(query, o)));
+  return perOwner.flat();
 }
 function tokens(s) {
   return new Set(s.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 2));
@@ -19507,7 +19516,7 @@ async function fetchTaskDevLinks(task, settings, keyring, atlassian) {
     }
   }
   try {
-    const ghPrs = ghSearchPRs(taskKey, settings.github.owners);
+    const ghPrs = await ghSearchPRs(taskKey, settings.github.owners);
     for (const p of ghPrs) {
       if (p.url && seenPrUrls.has(p.url)) continue;
       if (p.url) seenPrUrls.add(p.url);
@@ -19606,6 +19615,148 @@ async function buildAtlassianClient(serverName = "atlassian") {
     const reason = e instanceof Error ? e.message : String(e);
     return { client: null, warning: `Teamwork Graph dev-links layer skipped: ${reason}` };
   }
+}
+
+// src/scheduler.ts
+function keyOf(input) {
+  return canonicalize(input);
+}
+function canonicalize(v2) {
+  if (v2 === null || v2 === void 0) return "null";
+  const t = typeof v2;
+  if (t === "string") return JSON.stringify(v2);
+  if (t === "number" || t === "boolean") return String(v2);
+  if (t === "object") {
+    if (Array.isArray(v2)) return "[" + v2.map(canonicalize).join(",") + "]";
+    const obj = v2;
+    return "{" + Object.keys(obj).sort().map((k2) => JSON.stringify(k2) + ":" + canonicalize(obj[k2])).join(",") + "}";
+  }
+  throw new Error(`keyOf: unhashable value of type ${t}`);
+}
+async function runTasks(root, kinds, init, opts = {}) {
+  const concurrency = Math.max(1, opts.concurrency ?? 8);
+  let maxTasks = Math.max(1, opts.initialMaxTasks ?? 30);
+  const state = init;
+  let capped = false;
+  let capSetBy = null;
+  const runWarnings = [];
+  let taskCount = 0;
+  const queue = [];
+  const seen = /* @__PURE__ */ new Set();
+  const identity = (ref) => `${ref.kind}\0${keyOf(ref.input)}`;
+  const enqueue = (refs, isRoot = false) => {
+    for (const ref of refs) {
+      let id;
+      try {
+        id = identity(ref);
+      } catch (e) {
+        fail2(e instanceof Error ? e : new Error(String(e)));
+        return;
+      }
+      if (seen.has(id)) continue;
+      if (!isRoot && taskCount >= maxTasks) {
+        capped = true;
+        return;
+      }
+      seen.add(id);
+      taskCount++;
+      queue.push(ref);
+    }
+  };
+  const completionQueue = [];
+  let draining = false;
+  let settled = false;
+  let resolve2;
+  let reject;
+  const done = new Promise((res, rej) => {
+    resolve2 = res;
+    reject = rej;
+  });
+  const fail2 = (e) => {
+    if (settled) return;
+    settled = true;
+    reject(e);
+  };
+  const finish = () => {
+    if (settled) return;
+    if (queue.length === 0 && inFlight === 0 && completionQueue.length === 0 && !draining) {
+      settled = true;
+      resolve2();
+    }
+  };
+  const ctx = { get state() {
+    return state;
+  }, get capped() {
+    return capped;
+  } };
+  const drainCompletions = () => {
+    if (draining) return;
+    draining = true;
+    try {
+      while (completionQueue.length > 0) {
+        if (settled) return;
+        const { ref, kind, output } = completionQueue.shift();
+        try {
+          const r = kind.reduce(state, output, ref.input);
+          if (r !== void 0 && r !== null && typeof r.then === "function") {
+            fail2(new Error(`kind "${ref.kind}" reduce must be synchronous (returned a thenable)`));
+            return;
+          }
+          if (r && typeof r === "object" && typeof r.setMaxTasks === "number" && Number.isFinite(r.setMaxTasks)) {
+            if (capSetBy === null) {
+              maxTasks = Math.max(taskCount, Math.max(1, Math.floor(r.setMaxTasks)));
+              capSetBy = ref.kind;
+            } else if (capSetBy !== ref.kind) {
+              runWarnings.push(
+                `scheduler: setMaxTasks ignored from kind "${ref.kind}" (cap already set by "${capSetBy}" to ${maxTasks})`
+              );
+            }
+          }
+          if (kind.spawn) {
+            const children = kind.spawn(output, ref.input, ctx);
+            enqueue(children);
+          }
+        } catch (e) {
+          fail2(e instanceof Error ? e : new Error(String(e)));
+          return;
+        }
+      }
+    } finally {
+      draining = false;
+    }
+  };
+  let inFlight = 0;
+  const pump = () => {
+    if (settled) return;
+    while (queue.length > 0 && inFlight < concurrency) {
+      const ref = queue.shift();
+      const kind = kinds[ref.kind];
+      if (!kind) {
+        fail2(new Error(`scheduler: unknown kind "${ref.kind}"`));
+        return;
+      }
+      inFlight++;
+      Promise.resolve().then(() => kind.run(ref.input, ctx)).then(
+        (output) => {
+          completionQueue.push({ ref, kind, output });
+          drainCompletions();
+        },
+        () => {
+        }
+      ).finally(() => {
+        inFlight--;
+        if (!settled) {
+          pump();
+          finish();
+        }
+      });
+    }
+    finish();
+  };
+  enqueue([root], true);
+  pump();
+  await done;
+  return { state, capped, taskCount, runWarnings, maxTasks };
 }
 
 // src/settings.ts
@@ -20048,54 +20199,28 @@ async function fetchAction() {
   }
   const settings = loadSettings();
   const devLinks = [];
+  const reviewsOwed = [];
   if (!settings.digest) {
     warnings.push("Dev-links feature disabled: no `aura.digest` block in settings.json (set it to enable Teamwork Graph + GitHub + Bitbucket PR/branch lookup).");
   } else {
     const { client: atlassian, warning: atlWarning } = await buildAtlassianClient(settings.mcpServers.atlassian);
     if (atlWarning) warnings.push(atlWarning);
     const keyring = await createKeyring();
-    try {
-      const taskDetails = await Promise.all(
-        queueRows.map(
-          (row) => aura.getTaskByHumanKey(row.key).catch(() => null)
-        )
-      );
-      for (const detail of taskDetails) {
-        if (!detail) continue;
-        const childKeys = (detail.children ?? []).map((c) => c.human_key).filter(Boolean);
-        if (childKeys.length > 0) {
-          const childDetails = await Promise.all(
-            childKeys.map(
-              (k2) => aura.getTaskByHumanKey(k2).catch(() => null)
-            )
-          );
-          const childJira = childDetails.filter((c) => c !== null).flatMap((c) => c.jira_issues ?? []);
-          if (childJira.length > 0) {
-            detail.jira_issues = [...detail.jira_issues ?? [], ...childJira];
-          }
-        }
-        devLinks.push(await fetchTaskDevLinks(detail, settings.digest, keyring, atlassian));
+    const digestSettings = settings.digest;
+    const assignedNotif = allNotifs.filter(
+      (n) => safeString(n.type) === "artifact.review_assigned"
+    );
+    const candidateIds = /* @__PURE__ */ new Set();
+    const titleById = /* @__PURE__ */ new Map();
+    for (const n of assignedNotif) {
+      const p = n.i18n_params ?? {};
+      const id = safeString(p.artifactUuid) || safeString(p.artifact_uuid);
+      if (id) {
+        candidateIds.add(id);
+        const t = safeString(p.artifactTitle) || safeString(p.artifact_title);
+        if (t) titleById.set(id, t);
       }
-    } finally {
-      if (atlassian) await atlassian.close();
     }
-  }
-  const reviewsOwed = [];
-  const assignedNotif = allNotifs.filter(
-    (n) => safeString(n.type) === "artifact.review_assigned"
-  );
-  const candidateIds = /* @__PURE__ */ new Set();
-  const titleById = /* @__PURE__ */ new Map();
-  for (const n of assignedNotif) {
-    const p = n.i18n_params ?? {};
-    const id = safeString(p.artifactUuid) || safeString(p.artifact_uuid);
-    if (id) {
-      candidateIds.add(id);
-      const t = safeString(p.artifactTitle) || safeString(p.artifact_title);
-      if (t) titleById.set(id, t);
-    }
-  }
-  if (candidateIds.size > 0) {
     let myUserId = null;
     for (const r of reviews) {
       try {
@@ -20108,24 +20233,96 @@ async function fetchAction() {
       }
     }
     const myName = "Plattner, Patric";
-    for (const id of candidateIds) {
-      try {
-        const ar = await aura.getArtifactReview(id);
-        const me = ar.reviewers.find(
-          (rv) => myUserId && rv.user_id === myUserId || rv.user_name === myName
-        );
-        if (me && me.status === "ASSIGNED") {
-          reviewsOwed.push({
+    const state = { devLinks: /* @__PURE__ */ new Map(), reviewsOwed: /* @__PURE__ */ new Map() };
+    const devLinksRow = {
+      run: async (taskKey) => {
+        const detail = await aura.getTaskByHumanKey(taskKey).catch(() => null);
+        if (!detail) return null;
+        const childKeys = (detail.children ?? []).map((c) => c.human_key).filter(Boolean);
+        if (childKeys.length > 0) {
+          const childDetails = await Promise.all(
+            childKeys.map((k2) => aura.getTaskByHumanKey(k2).catch(() => null))
+          );
+          const childJira = childDetails.filter((c) => c !== null).flatMap((c) => c.jira_issues ?? []);
+          if (childJira.length > 0) {
+            detail.jira_issues = [...detail.jira_issues ?? [], ...childJira];
+          }
+        }
+        return await fetchTaskDevLinks(detail, digestSettings, keyring, atlassian);
+      },
+      reduce: (s, out) => {
+        if (out) s.devLinks.set(out.task_key, out);
+      }
+    };
+    const reviewCandidate = {
+      run: async (id) => {
+        try {
+          const ar = await aura.getArtifactReview(id);
+          const me = ar.reviewers.find(
+            (rv) => myUserId && rv.user_id === myUserId || rv.user_name === myName
+          );
+          if (!me || me.status !== "ASSIGNED") return null;
+          return {
             artifact_id: id,
             title: ar.review_artifacts?.[0]?.title ?? titleById.get(id) ?? "",
             version: ar.version,
             deadline: ar.review_deadline_at ?? null,
             initiator: ar.initiator?.user_name ?? null,
             review_started_at: ar.review_started_at ?? null
-          });
+          };
+        } catch {
+          return null;
         }
-      } catch {
+      },
+      reduce: (s, out) => {
+        if (out) s.reviewsOwed.set(out.artifact_id, out);
       }
+    };
+    const start = {
+      run: async () => ({ rows: queueRows.length, candidates: candidateIds.size }),
+      reduce: (_s, out) => {
+        const ceiling = Math.max(50, (1 + out.rows + out.candidates) * 10);
+        return { setMaxTasks: ceiling };
+      },
+      spawn: () => [
+        ...queueRows.map((row) => ({ kind: "dev-links-row", input: row.key })),
+        ...[...candidateIds].sort().map((id) => ({ kind: "review-candidate", input: id }))
+      ]
+    };
+    const kinds = {
+      "start": start,
+      "dev-links-row": devLinksRow,
+      "review-candidate": reviewCandidate
+    };
+    let capped = false;
+    let runWarnings = [];
+    let finalCap = 0;
+    try {
+      const result = await runTasks(
+        { kind: "start", input: null },
+        kinds,
+        state,
+        { concurrency: 6, initialMaxTasks: 30 }
+      );
+      capped = result.capped;
+      runWarnings = result.runWarnings;
+      finalCap = result.maxTasks;
+    } finally {
+      if (atlassian) await atlassian.close();
+    }
+    if (capped) {
+      warnings.push(
+        `Digest task cap hit (${finalCap}); some dev-links/reviews work was dropped. This indicates a runaway spawn \u2014 please report it.`
+      );
+    }
+    for (const w2 of runWarnings) warnings.push(w2);
+    for (const row of queueRows) {
+      const dl = state.devLinks.get(row.key);
+      if (dl) devLinks.push(dl);
+    }
+    for (const id of [...candidateIds].sort()) {
+      const ro = state.reviewsOwed.get(id);
+      if (ro) reviewsOwed.push(ro);
     }
   }
   const devLinksByTask = new Map(devLinks.map((l) => [l.task_key, l]));

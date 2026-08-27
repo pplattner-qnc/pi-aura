@@ -39,6 +39,13 @@ export async function loadCreds(
   return { email, token, defaultWorkspace };
 }
 
+// Per-request deadline for Bitbucket REST calls. The digest's dev-links
+// layer fans out across many repos; a single hung request could otherwise
+// stall the whole fetch indefinitely (the profiler flagged these as
+// long-lived async waits with no deadline). 20s is generous for a paginated
+// REST list call while bounding the worst case.
+const BB_REQUEST_TIMEOUT_MS = 20_000;
+
 async function bbFetch<T>(
   path: string,
   query: Record<string, string>,
@@ -53,6 +60,7 @@ async function bbFetch<T>(
       Authorization: "Basic " + Buffer.from(`${creds.email}:${creds.token}`).toString("base64"),
       Accept: "application/json",
     },
+    signal: AbortSignal.timeout(BB_REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");

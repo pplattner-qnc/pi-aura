@@ -15,6 +15,11 @@ export interface McpClientOptions {
   authHeader: string;
   /** Optional client name/version for the initialize handshake. */
   clientName?: string;
+  /** Per-callTool timeout in ms. Bounds long-lived waits so a hung MCP
+   *  server can't stall the digest fetch indefinitely. Defaults to 30s
+   *  (tighter than the SDK's 60s default) since the dev-links layer fans
+   *  out across many calls. */
+  callTimeoutMs?: number;
 }
 
 export class McpClient {
@@ -76,6 +81,8 @@ export class McpClient {
    * Call a tool and return its parsed JSON result. These MCP servers return a
    * single text content block whose text is a JSON string; we unwrap + parse
    * it. Throws if the tool reports an error or the content shape is unexpected.
+   * The call is bounded by callTimeoutMs (default 30s) so a hung server can't
+   * stall the digest fetch.
    */
   async callTool<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
     if (!this.availableTools.has(name)) {
@@ -83,7 +90,9 @@ export class McpClient {
         `Tool "${name}" is not available on "${this.opts.serverName}". Available: ${[...this.availableTools].sort().join(", ")}`
       );
     }
-    const result = await this.client.callTool({ name, arguments: args });
+    const result = await this.client.callTool({ name, arguments: args }, undefined, {
+      timeout: this.opts.callTimeoutMs ?? 30_000,
+    });
     const content = (result.content ?? []) as Array<{
       type: string;
       text?: string;
