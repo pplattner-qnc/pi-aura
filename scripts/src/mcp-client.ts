@@ -49,6 +49,13 @@ export class McpClient {
     }
   }
 
+  /** The configured Authorization header value (e.g. "Bearer <tok>" or
+   *  "Basic <b64>"). Exposed for unit tests that assert the auth header
+   *  without making a network call. */
+  get authHeader(): string {
+    return this.opts.authHeader;
+  }
+
   /** Throw if any of `required` tools are not offered by the server. */
   assertToolsAvailable(required: string[]): void {
     const missing = required.filter((name) => !this.availableTools.has(name));
