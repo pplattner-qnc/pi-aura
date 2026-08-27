@@ -1,20 +1,20 @@
 ---
 kind: map
 slug: atlassian-bitbucket-token
-title: "Split the Atlassian credential + guided PAT provisioning"
-status: active
+title: Split the Atlassian credential + guided PAT provisioning
+status: done
 tasks:
-  - slug: bitbucket-token-infra
-    blocked_by: []
-    done: true
-  - slug: provision-atlassian-pats
-    blocked_by:
-      - bitbucket-token-infra
-    done: true
-  - slug: wire-bitbucket-guided-edit
-    blocked_by:
-      - provision-atlassian-pats
-    done: true
+- slug: bitbucket-token-infra
+  blocked_by: []
+  done: true
+- slug: provision-atlassian-pats
+  blocked_by:
+  - bitbucket-token-infra
+  done: true
+- slug: wire-bitbucket-guided-edit
+  blocked_by:
+  - provision-atlassian-pats
+  done: true
 ---
 
 ## Destination
