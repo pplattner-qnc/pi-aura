@@ -201,7 +201,27 @@
   };
   const NOTIF_DEFAULT = { emoji: "🔔", label: "Notification" } as const;
 
+  // Normalize a notification entry to its summary line. Accepts the current
+  // shape ({ line, type, url }) and the legacy shape (a bare summary string);
+  // returns "" for anything unexpected so the renderer never throws on
+  // `.split` of undefined. Guards against a stale/malformed digest.json.
+  function notifLine(note: unknown): string {
+    if (typeof note === "string") return note;
+    if (note && typeof note === "object" && "line" in note) {
+      const line = (note as { line?: unknown }).line;
+      return typeof line === "string" ? line : "";
+    }
+    return "";
+  }
+  function notifUrl(note: unknown): string | null {
+    if (note && typeof note === "object" && "url" in note) {
+      const url = (note as { url?: unknown }).url;
+      return typeof url === "string" ? url : null;
+    }
+    return null;
+  }
   function notifType(line: string): string {
+    if (!line) return "";
     // Summary format: "YYYY-MM-DD — <type> by ..."
     const rest = line.split(" — ").slice(1).join(" — ");
     return rest.split(" by ")[0].split(": ")[0].trim();
@@ -212,8 +232,9 @@
   // Strip the leading "YYYY-MM-DD — <type>" prefix from a summary line so the
   // visible text starts at "by <actor>: <target>" (the readable part).
   function notifBody(line: string): string {
+    if (!line) return "";
     const rest = line.split(" — ").slice(1).join(" — ");
-    return rest.split(" by ").slice(1).join(" by ");
+    return rest.split(" by ").slice(1).join(" by ") || line;
   }
 </script>
 
@@ -350,14 +371,16 @@
                       <li><p class="text-base-content/60 italic">Nothing new since last run.</p></li>
                     {:else}
                       {#each digest.attention.notifications.since_last_run as note, i (i)}
-                        {@const m = notifMeta(note.line)}
-                        {@const body = notifBody(note.line)}
+                        {@const line = notifLine(note)}
+                        {@const m = notifMeta(line)}
+                        {@const body = notifBody(line)}
+                        {@const url = notifUrl(note)}
                         <li class="text-sm flex items-start gap-1.5">
                           <span class="tooltip tooltip-right shrink-0" data-tip={m.label}>
                             <span class="badge badge-sm border-0 bg-base-200 text-base-content/70" aria-hidden="true">{m.emoji}</span>
                           </span>
-                          {#if note.url}
-                            <a class="link link-primary link-hover min-w-0 underline-offset-2" href={note.url} target="_blank" rel="noreferrer">{body}</a>
+                          {#if url}
+                            <a class="link link-primary link-hover min-w-0 underline-offset-2" href={url} target="_blank" rel="noreferrer">{body}</a>
                           {:else}
                             <span class="min-w-0">{body}</span>
                           {/if}
@@ -377,14 +400,16 @@
                       <li><p class="text-base-content/60 italic">No unread notifications.</p></li>
                     {:else}
                       {#each digest.attention.notifications.older_unread as note, i (i)}
-                        {@const m = notifMeta(note.line)}
-                        {@const body = notifBody(note.line)}
+                        {@const line = notifLine(note)}
+                        {@const m = notifMeta(line)}
+                        {@const body = notifBody(line)}
+                        {@const url = notifUrl(note)}
                         <li class="text-sm flex items-start gap-1.5">
                           <span class="tooltip tooltip-right shrink-0" data-tip={m.label}>
                             <span class="badge badge-sm border-0 bg-base-200 text-base-content/70" aria-hidden="true">{m.emoji}</span>
                           </span>
-                          {#if note.url}
-                            <a class="link link-primary link-hover min-w-0 underline-offset-2" href={note.url} target="_blank" rel="noreferrer">{body}</a>
+                          {#if url}
+                            <a class="link link-primary link-hover min-w-0 underline-offset-2" href={url} target="_blank" rel="noreferrer">{body}</a>
                           {:else}
                             <span class="min-w-0">{body}</span>
                           {/if}

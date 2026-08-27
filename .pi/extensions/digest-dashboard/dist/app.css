@@ -31,7 +31,6 @@
       --tw-ring-offset-width: 0px;
       --tw-ring-offset-color: #fff;
       --tw-ring-offset-shadow: 0 0 #0000;
-      --tw-outline-style: solid;
       --tw-duration: initial;
     }
   }
@@ -2461,16 +2460,8 @@
     flex: 1;
   }
 
-  .flex-shrink {
-    flex-shrink: 1;
-  }
-
   .shrink-0 {
     flex-shrink: 0;
-  }
-
-  .border-collapse {
-    border-collapse: collapse;
   }
 
   .rotate-90 {
@@ -2591,11 +2582,6 @@
 
   .rounded-md {
     border-radius: var(--radius-md);
-  }
-
-  .border {
-    border-style: var(--tw-border-style);
-    border-width: 1px;
   }
 
   .border-0 {
@@ -2903,11 +2889,6 @@
 
   .ring-base-200 {
     --tw-ring-color: var(--color-base-200);
-  }
-
-  .outline {
-    outline-style: var(--tw-outline-style);
-    outline-width: 1px;
   }
 
   .transition {
@@ -3231,12 +3212,6 @@ body {
   syntax: "*";
   inherits: false;
   initial-value: 0 0 #0000;
-}
-
-@property --tw-outline-style {
-  syntax: "*";
-  inherits: false;
-  initial-value: solid;
 }
 
 @property --tw-duration {

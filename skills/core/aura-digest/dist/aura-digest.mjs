@@ -8860,6 +8860,17 @@ function mapTask(d) {
   const g2 = d;
   const jira = "jira_issues" in g2 ? g2.jira_issues ?? [] : [];
   const children = "children" in g2 ? g2.children ?? [] : [];
+  const repositories = "repositories" in g2 ? g2.repositories ?? [] : [];
+  const inherited = "inherited_repositories" in g2 ? g2.inherited_repositories ?? [] : [];
+  const mapRepo = (r) => ({
+    id: r.id,
+    display_name: r.display_name,
+    source: r.source,
+    workspace: r.workspace,
+    slug: r.slug,
+    branch: r.branch ?? null,
+    browse_url: r.browse_url ?? null
+  });
   return {
     id: g2.id,
     human_key: g2.human_key,
@@ -8869,7 +8880,10 @@ function mapTask(d) {
     status_type: g2.status_type,
     level: g2.level,
     jira_issues: jira.map((j2) => ({ issue_key: j2.issue_key, summary: j2.summary })),
-    children: children.map((c) => ({ human_key: c.human_key, title: c.title }))
+    children: children.map((c) => ({ human_key: c.human_key, title: c.title })),
+    repositories: repositories.map(mapRepo),
+    inherited_repositories: inherited.map(mapRepo),
+    suggested_branch: "suggested_branch" in g2 ? g2.suggested_branch ?? null : null
   };
 }
 function mapTaskList(d) {
@@ -19438,6 +19452,22 @@ async function fetchTaskDevLinks(task, settings, mcpServers, atlassian) {
   const prs = [];
   const branches = [];
   const seenPrUrls = /* @__PURE__ */ new Set();
+  const seenBranchKeys = /* @__PURE__ */ new Set();
+  for (const repo of [...task.repositories ?? [], ...task.inherited_repositories ?? []]) {
+    const url2 = repo.browse_url ?? null;
+    const branchName = repo.branch ?? null;
+    if (!url2 || !branchName) continue;
+    const key = url2;
+    if (seenBranchKeys.has(key)) continue;
+    seenBranchKeys.add(key);
+    branches.push({
+      provider: repo.source.toLowerCase(),
+      repo: repo.slug,
+      name: branchName,
+      url: url2,
+      found_via: "aura-repository"
+    });
+  }
   if (atlassian && jiraKeys.length > 0) {
     try {
       for (const jiraKey of jiraKeys) {
@@ -19977,6 +20007,7 @@ async function fetchAction() {
       title: a.title,
       version: a.latest_version ?? 0,
       decisions: [],
+      open_reviews: [],
       decided_count: 0,
       total_required: 0
     };
@@ -19990,8 +20021,9 @@ async function fetchAction() {
         artifact_id: m2[1],
         title: item.title ?? "",
         version: 0,
-        // filled by the orchestrator from getArtifactApprovals
+        // filled below from getArtifactApprovals
         decisions: [],
+        open_reviews: [],
         decided_count: 0,
         total_required: item.approvals_pending ?? 0
       };
@@ -20008,6 +20040,19 @@ async function fetchAction() {
     waitingOnOthersLinks
   );
   const verifications = await verifyArtifacts(aura, artifactsToVerify);
+  const approvalsById = /* @__PURE__ */ new Map();
+  for (const v2 of verifications) {
+    if (v2.current) approvalsById.set(v2.artifact_id, v2.current);
+  }
+  for (const r of reviews) {
+    const ap = approvalsById.get(r.artifact_id);
+    if (!ap) continue;
+    r.version = ap.version;
+    r.decisions = ap.decisions;
+    r.open_reviews = ap.open_reviews;
+    r.decided_count = ap.decided_count;
+    r.total_required = ap.total_required;
+  }
   const settings = loadSettings();
   const devLinks = [];
   if (!settings.digest) {
@@ -20190,7 +20235,9 @@ async function verifyArtifacts(client2, candidates) {
   return results;
 }
 function summarizeNotifications(items) {
-  const lines = [];
+  const { baseUrl } = loadAuraClientSettings();
+  const appRoot = baseUrl ? baseUrl.replace(/\/api\/?$/, "") : null;
+  const out = [];
   for (const n of items) {
     const date4 = safeString(n.created_at).slice(0, 10);
     const type = safeString(n.type) || "notification";
@@ -20206,9 +20253,11 @@ function summarizeNotifications(items) {
     if (target) line += `: ${target}`;
     if (version2) line += ` v${version2}`;
     if (decision) line += ` (${decision})`;
-    lines.push(line);
+    const link = safeString(n.link) || null;
+    const url2 = link && appRoot ? `${appRoot}${link.startsWith("/") ? link : `/${link}`}` : null;
+    out.push({ line, type, url: url2 });
   }
-  return lines;
+  return out;
 }
 function extractVerifyTargets(notifications, pendingArtifacts, waitingOnOthersLinks) {
   const isReviewEvent = (type) => type.includes("artifact") && type.includes("review");
@@ -20287,9 +20336,9 @@ function renderAttention(d) {
   lines.push(attentionLine("\u{1F534}", "Overdue", d.attention.overdue));
   lines.push(attentionLine("\u{1F7E1}", "Waiting on you", d.attention.waiting_on_you));
   lines.push(attentionLine("\u{1F535}", "Waiting on others", d.attention.waiting_on_others ?? []));
-  const since = d.attention.notifications.since_last_run.length > 0 ? d.attention.notifications.since_last_run.join("\n  - ") : "Nothing new since last run.";
+  const since = d.attention.notifications.since_last_run.length > 0 ? d.attention.notifications.since_last_run.map((n) => n.line).join("\n  - ") : "Nothing new since last run.";
   lines.push(`- \u{1F4EC} **Since last run:** ${since}`);
-  const older = d.attention.notifications.older_unread.length > 0 ? d.attention.notifications.older_unread.join("\n  - ") : "No unread notifications.";
+  const older = d.attention.notifications.older_unread.length > 0 ? d.attention.notifications.older_unread.map((n) => n.line).join("\n  - ") : "No unread notifications.";
   lines.push(`- \u{1F4EC} **Older unread:** ${older}`);
   return lines.join("\n");
 }
@@ -20341,23 +20390,28 @@ function renderReviews(d) {
   }
   const allReviewerNames = [];
   const seen = /* @__PURE__ */ new Set();
-  for (const r of d.reviews) {
-    for (const dec of r.decisions) {
-      const first = dec.user_name.split(",")[0].trim();
-      if (!seen.has(first)) {
-        seen.add(first);
-        allReviewerNames.push(first);
-      }
+  const addName = (fullName) => {
+    const first = fullName.split(",")[0].trim();
+    if (first && !seen.has(first)) {
+      seen.add(first);
+      allReviewerNames.push(first);
     }
+  };
+  for (const r of d.reviews) {
+    for (const dec of r.decisions) addName(dec.user_name);
+    for (const o of r.open_reviews) addName(o.user_name);
   }
   const header = ["Artifact", "v", ...allReviewerNames];
   lines.push(`| ${header.join(" | ")} |`);
   lines.push(`|${header.map(() => "---").join("|")}|`);
   for (const r of d.reviews) {
     const byName = new Map(r.decisions.map((dec) => [dec.user_name.split(",")[0].trim(), decisionEmoji(dec)]));
-    const cells = allReviewerNames.map((n) => byName.get(n) ?? "");
+    const pending = new Set(r.open_reviews.filter((o) => !o.decided).map((o) => o.user_name.split(",")[0].trim()));
+    const cells = allReviewerNames.map((n) => byName.get(n) ?? (pending.has(n) ? "\u{1F535}" : ""));
     lines.push(`| ${r.title} | ${r.version} | ${cells.join(" | ")} |`);
   }
+  lines.push("");
+  lines.push("_\u{1F535} assigned \xB7 \u23F3 pending \xB7 \u2705 approved \xB7 \u274C rejected/needs revision_");
   return lines.join("\n");
 }
 function renderReviewsOwed(d) {

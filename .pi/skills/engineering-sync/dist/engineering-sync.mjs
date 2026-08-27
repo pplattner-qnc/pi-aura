@@ -4914,6 +4914,17 @@ function mapTask(d) {
   const g2 = d;
   const jira = "jira_issues" in g2 ? g2.jira_issues ?? [] : [];
   const children = "children" in g2 ? g2.children ?? [] : [];
+  const repositories = "repositories" in g2 ? g2.repositories ?? [] : [];
+  const inherited = "inherited_repositories" in g2 ? g2.inherited_repositories ?? [] : [];
+  const mapRepo = (r) => ({
+    id: r.id,
+    display_name: r.display_name,
+    source: r.source,
+    workspace: r.workspace,
+    slug: r.slug,
+    branch: r.branch ?? null,
+    browse_url: r.browse_url ?? null
+  });
   return {
     id: g2.id,
     human_key: g2.human_key,
@@ -4923,7 +4934,10 @@ function mapTask(d) {
     status_type: g2.status_type,
     level: g2.level,
     jira_issues: jira.map((j2) => ({ issue_key: j2.issue_key, summary: j2.summary })),
-    children: children.map((c) => ({ human_key: c.human_key, title: c.title }))
+    children: children.map((c) => ({ human_key: c.human_key, title: c.title })),
+    repositories: repositories.map(mapRepo),
+    inherited_repositories: inherited.map(mapRepo),
+    suggested_branch: "suggested_branch" in g2 ? g2.suggested_branch ?? null : null
   };
 }
 function mapTaskList(d) {

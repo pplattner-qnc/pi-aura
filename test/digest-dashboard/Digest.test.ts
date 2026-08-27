@@ -235,6 +235,45 @@ describe("Digest dashboard rendering", () => {
     expect(target.textContent).toContain("Committed");
   });
 
+  it("renders notifications shaped as {line,type,url} objects without throwing", async () => {
+    const digest = baseDigest([]);
+    digest.attention.notifications = {
+      since_last_run: [
+        { line: "2026-08-24 — task.status_changed by Anne: Thing v1 (APPROVED)", type: "task.status_changed", url: "https://aura/t/1" },
+      ],
+      older_unread: [
+        { line: "2026-08-21 — comment.mention by Marcel", type: "comment.mention", url: null },
+      ],
+    };
+    const { target } = await mountWithDigest(digest);
+
+    // Renders the readable body (after the "— <type> by " prefix), not the date/type.
+    expect(target.textContent).toContain("Anne: Thing v1 (APPROVED)");
+    expect(target.textContent).toContain("Marcel");
+    // The link is rendered for url items, plain span for null-url items.
+    expect(target.querySelector('a[href="https://aura/t/1"]')).not.toBeNull();
+  });
+
+  // Regression: a stale dist build once wrote notifications as bare summary
+  // strings ("YYYY-MM-DD — <type>") instead of {line,type,url} objects. The
+  // component read `note.line` → undefined and threw `line.split is not a
+  // function`, bricking the whole dashboard on a stuck loading screen.
+  it("tolerates legacy string-shaped notifications without throwing", async () => {
+    const digest = baseDigest([]);
+    digest.attention.notifications = {
+      since_last_run: ["2026-08-24 — task.status_changed"],
+      older_unread: ["2026-08-21 — comment.mention"],
+    } as unknown as DigestType["attention"]["notifications"];
+    const { target } = await mountWithDigest(digest);
+
+    // The dashboard must finish loading (not stay on "Loading digest…").
+    expect(target.textContent).not.toContain("Loading digest…");
+    // The legacy bare-string shape carries no actor/target, so the full line
+    // is shown as the body fallback (notifBody returns the original line).
+    expect(target.textContent).toContain("task.status_changed");
+    expect(target.textContent).toContain("comment.mention");
+  });
+
   it("renders dismissible warning toasts in the bottom-right", async () => {
     const digest = { ...baseDigest([]), warnings: ["First warning", "Second warning"] };
     const { target } = await mountWithDigest(digest);

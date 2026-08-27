@@ -4006,7 +4006,23 @@
       "question.answered": { emoji: "❓", label: "Question answered" }
     };
     const NOTIF_DEFAULT = { emoji: "🔔", label: "Notification" };
+    function notifLine(note) {
+      if (typeof note === "string") return note;
+      if (note && typeof note === "object" && "line" in note) {
+        const line = note.line;
+        return typeof line === "string" ? line : "";
+      }
+      return "";
+    }
+    function notifUrl(note) {
+      if (note && typeof note === "object" && "url" in note) {
+        const url = note.url;
+        return typeof url === "string" ? url : null;
+      }
+      return null;
+    }
     function notifType(line) {
+      if (!line) return "";
       const rest = line.split(" — ").slice(1).join(" — ");
       return rest.split(" by ")[0].split(": ")[0].trim();
     }
@@ -4014,8 +4030,9 @@
       return NOTIF_META[notifType(line)] ?? NOTIF_DEFAULT;
     }
     function notifBody(line) {
+      if (!line) return "";
       const rest = line.split(" — ").slice(1).join(" — ");
-      return rest.split(" by ").slice(1).join(" by ");
+      return rest.split(" by ").slice(1).join(" by ") || line;
     }
     var fragment = comment();
     var node = first_child(fragment);
@@ -4258,8 +4275,10 @@
             var fragment_7 = comment();
             var node_17 = first_child(fragment_7);
             each(node_17, 17, () => get(digest).attention.notifications.since_last_run, index, ($$anchor4, note) => {
-              const m = /* @__PURE__ */ user_derived(() => notifMeta(get(note).line));
-              const body = /* @__PURE__ */ user_derived(() => notifBody(get(note).line));
+              const line = /* @__PURE__ */ user_derived(() => notifLine(get(note)));
+              const m = /* @__PURE__ */ user_derived(() => notifMeta(get(line)));
+              const body = /* @__PURE__ */ user_derived(() => notifBody(get(line)));
+              const url = /* @__PURE__ */ user_derived(() => notifUrl(get(note)));
               var li_8 = root_14();
               var span_5 = child(li_8);
               var span_6 = child(span_5);
@@ -4270,7 +4289,7 @@
                   var a_1 = root_12();
                   var text_16 = child(a_1);
                   template_effect(() => {
-                    set_attribute(a_1, "href", get(note).url);
+                    set_attribute(a_1, "href", get(url));
                     set_text(text_16, get(body));
                   });
                   append($$anchor5, a_1);
@@ -4282,7 +4301,7 @@
                   append($$anchor5, span_7);
                 };
                 if_block(node_18, ($$render) => {
-                  if (get(note).url) $$render(consequent_15);
+                  if (get(url)) $$render(consequent_15);
                   else $$render(alternate_4, -1);
                 });
               }
@@ -4312,8 +4331,10 @@
             var fragment_8 = comment();
             var node_20 = first_child(fragment_8);
             each(node_20, 17, () => get(digest).attention.notifications.older_unread, index, ($$anchor4, note) => {
-              const m = /* @__PURE__ */ user_derived(() => notifMeta(get(note).line));
-              const body = /* @__PURE__ */ user_derived(() => notifBody(get(note).line));
+              const line = /* @__PURE__ */ user_derived(() => notifLine(get(note)));
+              const m = /* @__PURE__ */ user_derived(() => notifMeta(get(line)));
+              const body = /* @__PURE__ */ user_derived(() => notifBody(get(line)));
+              const url = /* @__PURE__ */ user_derived(() => notifUrl(get(note)));
               var li_10 = root_14();
               var span_8 = child(li_10);
               var span_9 = child(span_8);
@@ -4324,7 +4345,7 @@
                   var a_2 = root_12();
                   var text_19 = child(a_2);
                   template_effect(() => {
-                    set_attribute(a_2, "href", get(note).url);
+                    set_attribute(a_2, "href", get(url));
                     set_text(text_19, get(body));
                   });
                   append($$anchor5, a_2);
@@ -4336,7 +4357,7 @@
                   append($$anchor5, span_10);
                 };
                 if_block(node_21, ($$render) => {
-                  if (get(note).url) $$render(consequent_17);
+                  if (get(url)) $$render(consequent_17);
                   else $$render(alternate_6, -1);
                 });
               }
