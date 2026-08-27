@@ -6,7 +6,7 @@
 // run loudly instead of silently dropping work.
 
 import { describe, it, expect } from "vitest";
-import { runTasks, type Kind, type KindMap, type TaskRef } from "./scheduler.js";
+import { runTasks, type Kind, type KindMap, type TaskRef, type ProgressEvent, type NodeHandle } from "./scheduler.js";
 
 interface CountState {
   // bumped inside a reducer; the test checks it never exceeds 1.
@@ -231,5 +231,395 @@ describe("runTasks synchronization", () => {
   });
 });
 
-// keep the unused helper from tripng noUnusedLocals in some configs
+// keep the unused helper from tripping noUnusedLocals in some configs
 void makeKinds;
+
+describe("runTasks progress nodes", () => {
+  // Helper: collect all ProgressEvents into an array for assertion.
+  const recorder = (): { events: ProgressEvent[]; hook: (e: ProgressEvent) => void } => {
+    const events: ProgressEvent[] = [];
+    return { events, hook: (e) => events.push(e) };
+  };
+  // Find the last event for a given node label.
+  const lastStatus = (events: ProgressEvent[], label: string): ProgressEvent | undefined =>
+    [...events].reverse().find((e) => e.label === label);
+
+  it("ctx.progress.create fires a running event; ctx.node is undefined for root", async () => {
+    let createdNode: NodeHandle | undefined;
+    let rootNode: NodeHandle | undefined;
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          rootNode = ctx.node; // root has no parent-created attachment
+          createdNode = ctx.progress.create(undefined, "root task");
+          ctx.progress.finish(createdNode);
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    expect(rootNode).toBeUndefined();
+    expect(createdNode).toBeDefined();
+    expect(events.some((e) => e.label === "root task" && e.status === "running")).toBe(true);
+    expect(events.some((e) => e.label === "root task" && e.status === "done")).toBe(true);
+  });
+
+  it("finish(node) marks node done right now; node stays (not removed)", async () => {
+    let createdNode: NodeHandle | undefined;
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          createdNode = ctx.progress.create(undefined, "my task");
+          ctx.progress.finish(createdNode);
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    const nodeEvents = events.filter((e) => e.label === "my task");
+    expect(nodeEvents.length).toBe(2);
+    expect(nodeEvents[0].status).toBe("running");
+    expect(nodeEvents[1].status).toBe("done");
+  });
+
+  it("finish(node, { deferCloseForChildren: true }) with no children becomes done immediately", async () => {
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          const node = ctx.progress.create(undefined, "deferred-empty");
+          ctx.progress.finish(node, { deferCloseForChildren: true });
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    expect(lastStatus(events, "deferred-empty")?.status).toBe("done");
+  });
+
+  it("deferred parent stays running until all child-nodes close, then resolves to done", async () => {
+    // Pattern from arch spec: parent creates child NODES first, finishes
+    // parent with deferCloseForChildren, then spawns child TASKS that thread
+    // those nodes via TaskRef.node. The parent stays running until all
+    // child-nodes are terminal.
+    let parentNode: NodeHandle | undefined;
+    let child0Node: NodeHandle | undefined;
+    let child1Node: NodeHandle | undefined;
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          parentNode = ctx.progress.create(undefined, "parent");
+          child0Node = ctx.progress.create(parentNode, "child 0");
+          child1Node = ctx.progress.create(parentNode, "child 1");
+          ctx.progress.finish(parentNode, { deferCloseForChildren: true });
+          return null;
+        },
+        spawn: () => [
+          { kind: "child", input: 0, node: child0Node! },
+          { kind: "child", input: 1, node: child1Node! },
+        ],
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+      child: {
+        run: async (_input: number, ctx) => {
+          ctx.progress.finish(ctx.node!);
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    // Parent stays running until both children finish, then resolves to done.
+    expect(lastStatus(events, "parent")?.status).toBe("done");
+    expect(lastStatus(events, "child 0")?.status).toBe("done");
+    expect(lastStatus(events, "child 1")?.status).toBe("done");
+  });
+
+  it("deferred parent becomes error when any child-node errors", async () => {
+    let parentNode: NodeHandle | undefined;
+    let child0Node: NodeHandle | undefined;
+    let child1Node: NodeHandle | undefined;
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          parentNode = ctx.progress.create(undefined, "parent");
+          child0Node = ctx.progress.create(parentNode, "child 0");
+          child1Node = ctx.progress.create(parentNode, "child 1");
+          ctx.progress.finish(parentNode, { deferCloseForChildren: true });
+          return null;
+        },
+        spawn: () => [
+          { kind: "child", input: 0, node: child0Node! },
+          { kind: "child", input: 1, node: child1Node! },
+        ],
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+      child: {
+        run: async (i: number, ctx) => {
+          if (i === 0) ctx.progress.setStatus(ctx.node!, "error");
+          else ctx.progress.finish(ctx.node!);
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    expect(lastStatus(events, "parent")?.status).toBe("error");
+    expect(lastStatus(events, "child 0")?.status).toBe("error");
+    expect(lastStatus(events, "child 1")?.status).toBe("done");
+  });
+
+  it("deferred parent: child-node attached AFTER the finish still counts (dynamic)", async () => {
+    // Parent finishes with defer (has 1 child), then creates a 2nd child
+    // node AFTER the finish. Both must close for the parent to resolve.
+    let parentNode: NodeHandle | undefined;
+    let earlyChild: NodeHandle | undefined;
+    let lateChild: NodeHandle | undefined;
+    let lateChildFinished = false;
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          parentNode = ctx.progress.create(undefined, "parent");
+          earlyChild = ctx.progress.create(parentNode, "early child");
+          ctx.progress.finish(parentNode, { deferCloseForChildren: true });
+          // Dynamic: create a child AFTER the defer finish.
+          lateChild = ctx.progress.create(parentNode, "late child");
+          // Finish the early child first — parent should stay running
+          // because the late child is still open.
+          ctx.progress.finish(earlyChild);
+          // Now finish the late child — parent should resolve.
+          ctx.progress.finish(lateChild);
+          lateChildFinished = true;
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    expect(lateChildFinished).toBe(true);
+    expect(lastStatus(events, "parent")?.status).toBe("done");
+  });
+
+  it("deferred parent with unfinished child-nodes: sweep closes children as error, parent resolves to error", async () => {
+    // Parent creates child nodes, finishes with defer, spawns child tasks
+    // that DON'T finish their nodes. End-of-run sweep closes them as error,
+    // and the parent (deferred) resolves to error.
+    let parentNode: NodeHandle | undefined;
+    let child0Node: NodeHandle | undefined;
+    let child1Node: NodeHandle | undefined;
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          parentNode = ctx.progress.create(undefined, "parent");
+          child0Node = ctx.progress.create(parentNode, "child 0");
+          child1Node = ctx.progress.create(parentNode, "child 1");
+          ctx.progress.finish(parentNode, { deferCloseForChildren: true });
+          return null;
+        },
+        spawn: () => [
+          { kind: "child", input: 0, node: child0Node! },
+          { kind: "child", input: 1, node: child1Node! },
+        ],
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+      child: {
+        run: async () => null, // don't finish the node
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    // Children swept to error → parent resolves to error.
+    expect(lastStatus(events, "parent")?.status).toBe("error");
+    expect(lastStatus(events, "child 0")?.status).toBe("error");
+    expect(lastStatus(events, "child 1")?.status).toBe("error");
+  });
+
+  it("setStatus mutates a node's status directly", async () => {
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          const node = ctx.progress.create(undefined, "my task");
+          ctx.progress.setStatus(node, "error");
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    const nodeEvents = events.filter((e) => e.label === "my task");
+    expect(nodeEvents[0].status).toBe("running");
+    expect(nodeEvents[1].status).toBe("error");
+    expect(nodeEvents.length).toBe(2);
+  });
+
+  it("a node never finished → end-of-run sweep marks it error", async () => {
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          ctx.progress.create(undefined, "orphan");
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    const nodeEvents = events.filter((e) => e.label === "orphan");
+    expect(nodeEvents[0].status).toBe("running");
+    expect(nodeEvents[nodeEvents.length - 1].status).toBe("error");
+  });
+
+  it("a task that throws does NOT trigger per-task node auto-close (only end-of-run sweep)", async () => {
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          ctx.progress.create(undefined, "will-throw");
+          throw new Error("task exploded");
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    const nodeEvents = events.filter((e) => e.label === "will-throw");
+    // running (from create), then error (from end-of-run sweep only).
+    expect(nodeEvents[0].status).toBe("running");
+    expect(nodeEvents[1].status).toBe("error");
+    expect(nodeEvents.length).toBe(2);
+  });
+
+  it("TaskRef.node threads to the child as ctx.node", async () => {
+    let parentNode: NodeHandle | undefined;
+    let childCtxNode: NodeHandle | undefined;
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          parentNode = ctx.progress.create(undefined, "parent");
+          return null;
+        },
+        spawn: () => [{ kind: "child", input: 0, node: parentNode! }],
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+      child: {
+        run: async (_input: number, ctx) => {
+          childCtxNode = ctx.node;
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    expect(childCtxNode).toBeDefined();
+    expect(childCtxNode).toBe(parentNode);
+  });
+
+  it("nodes are append-only: never removed mid-run", async () => {
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          const node = ctx.progress.create(undefined, "persistent");
+          ctx.progress.finish(node);
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    const nodeEvents = events.filter((e) => e.label === "persistent");
+    expect(nodeEvents.length).toBe(2);
+    expect(nodeEvents.every((e) => e.id === nodeEvents[0].id)).toBe(true);
+  });
+
+  it("onProgress fires for every status transition", async () => {
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          const node = ctx.progress.create(undefined, "all transitions");
+          ctx.progress.setStatus(node, "error");
+          ctx.progress.setStatus(node, "done");
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    const nodeEvents = events.filter((e) => e.label === "all transitions");
+    expect(nodeEvents.map((e) => e.status)).toEqual(["running", "error", "done"]);
+  });
+
+  it("parent-child relationship in ProgressEvent via parentId", async () => {
+    let parentNode: NodeHandle | undefined;
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          parentNode = ctx.progress.create(undefined, "root parent");
+          const child = ctx.progress.create(parentNode, "child node");
+          ctx.progress.finish(child);
+          ctx.progress.finish(parentNode);
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    const childRunning = events.find((e) => e.label === "child node" && e.status === "running");
+    expect(childRunning).toBeDefined();
+    expect(childRunning?.parentId).toBe(parentNode!.id.toString());
+  });
+});
