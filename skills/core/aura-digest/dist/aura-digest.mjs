@@ -19289,7 +19289,7 @@ async function readAtlassianCredentials(keyring) {
   const token = rawToken?.trim() ?? "";
   if (!email2 || !token) {
     throw new Error(
-      "No Atlassian credential in keyring (run `/aura secrets edit`)"
+      "no Atlassian credential in keyring (run `/aura secrets edit`)"
     );
   }
   return { email: email2, token };

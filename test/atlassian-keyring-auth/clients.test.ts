@@ -449,7 +449,7 @@ describe("slice 4: missing-credential warning path", () => {
       );
       assert.equal(
         result.warning,
-        "Teamwork Graph dev-links layer skipped: No Atlassian credential in keyring (run `/aura secrets edit`)",
+        "Teamwork Graph dev-links layer skipped: no Atlassian credential in keyring (run `/aura secrets edit`)",
       );
     } finally {
       cleanupPath(configPath);

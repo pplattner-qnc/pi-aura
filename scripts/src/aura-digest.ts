@@ -465,8 +465,9 @@ async function fetchAction(): Promise<void> {
   // Fetch each queue task's detail (for jira_issues + description), then fan
   // out across Teamwork Graph (primary) + GitHub `gh search` + Bitbucket. The
   // Aura client is still open for getTaskByHumanKey; the Atlassian client is
-  // built separately (OAuth token from the keyring) and degrades to null if
-  // unavailable. Disabled when no auraDigest settings are present.
+  // built separately (Basic auth using the email + API token stored in the
+  // @pi-aura/shared keyring) and degrades to null if unavailable. Disabled
+  // when no auraDigest settings are present.
   const settings = loadSettings();
   const devLinks: TaskDevLinks[] = [];
   if (!settings.digest) {
