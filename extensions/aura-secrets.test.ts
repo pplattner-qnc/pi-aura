@@ -420,20 +420,23 @@ console.log("decideEditAction pure-function tests passed");
 
 // --- pickSecretKey pure function ---
 
+// pickSecretKey is a PURE single-key lookup: the two Atlassian token labels
+// map to their token keys. The standalone "Atlassian email" label is GONE —
+// the email is now prompted within the combined flow, not chosen directly.
 assert.deepStrictEqual(
   pickSecretKey("Aura PAT"),
   { service: "aura", name: "pat" },
   "Aura PAT -> aura/pat"
 );
 assert.deepStrictEqual(
-  pickSecretKey("Atlassian email"),
-  { service: "atlassian", name: "email" },
-  "Atlassian email -> atlassian/email"
+  pickSecretKey("Atlassian Teamwork Graph token"),
+  { service: "atlassian", name: "api_token" },
+  "Atlassian Teamwork Graph token -> atlassian/api_token"
 );
 assert.deepStrictEqual(
-  pickSecretKey("Atlassian API token"),
-  { service: "atlassian", name: "api_token" },
-  "Atlassian API token -> atlassian/api_token"
+  pickSecretKey("Atlassian Bitbucket token"),
+  { service: "atlassian", name: "bitbucket_token" },
+  "Atlassian Bitbucket token -> atlassian/bitbucket_token"
 );
 assert.strictEqual(pickSecretKey(undefined), null, "undefined (cancel) -> null");
 assert.strictEqual(pickSecretKey(""), null, "empty string -> null");
@@ -562,11 +565,13 @@ console.log("handleEdit tests passed");
 function makeMockEditChooserUi(opts: {
   selectResult?: string;
   editorResult?: string;
+  editorResults?: (string | undefined)[];
   confirmResult?: boolean;
 } = {}) {
   const notifies: NotifyCall[] = [];
   const editorCalls: { title: string; prefill: string }[] = [];
   const selectCalls: { title: string; options: string[] }[] = [];
+  let editorCallIndex = 0;
   return {
     ui: {
       notify(message: string, level: "info" | "warning" | "error") {
@@ -578,7 +583,14 @@ function makeMockEditChooserUi(opts: {
       },
       async editor(title: string, prefill: string): Promise<string | undefined> {
         editorCalls.push({ title, prefill });
-        return opts.editorResult;
+        let result: string | undefined;
+        if (opts.editorResults) {
+          result = opts.editorResults[editorCallIndex];
+          editorCallIndex++;
+        } else {
+          result = opts.editorResult;
+        }
+        return result;
       },
       async confirm(_title: string, _message: string) {
         return opts.confirmResult ?? false;
@@ -622,34 +634,19 @@ function makeMockEditChooserUi(opts: {
   );
 }
 
-// Choose Atlassian email -> edits atlassian/email
+// Chooser labels are distinct and include all three options
 {
-  const mock = makeMockEditChooserUi({ selectResult: "Atlassian email", editorResult: "user@example.com" });
+  const mock = makeMockEditChooserUi({ selectResult: undefined });
   const kr = makeMockKeyring();
   await handleSecretEdit(
     mock.ui,
     async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
   );
-  const stored = kr.getStored();
-  assert.strictEqual(stored.length, 1, "one secret written for Atlassian email");
-  assert.deepStrictEqual(stored[0].key, { service: "atlassian", name: "email" }, "Atlassian email routes to atlassian/email");
-  assert.strictEqual(stored[0].secret, "user@example.com", "Atlassian email value stored");
-  assert.strictEqual(mock.getEditorCalls()[0].prefill, "<paste your Atlassian email here>", "Atlassian email placeholder prefilled");
-}
-
-// Choose Atlassian API token -> edits atlassian/api_token
-{
-  const mock = makeMockEditChooserUi({ selectResult: "Atlassian API token", editorResult: "api-tok-xyz" });
-  const kr = makeMockKeyring();
-  await handleSecretEdit(
-    mock.ui,
-    async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
-  );
-  const stored = kr.getStored();
-  assert.strictEqual(stored.length, 1, "one secret written for Atlassian API token");
-  assert.deepStrictEqual(stored[0].key, { service: "atlassian", name: "api_token" }, "Atlassian API token routes to atlassian/api_token");
-  assert.strictEqual(stored[0].secret, "api-tok-xyz", "Atlassian API token value stored");
-  assert.strictEqual(mock.getEditorCalls()[0].prefill, "<paste your Atlassian API token here>", "Atlassian API token placeholder prefilled");
+  const options = mock.getSelectCalls()[0].options;
+  assert.ok(options.includes("Aura PAT"), "chooser includes Aura PAT");
+  assert.ok(options.includes("Atlassian Teamwork Graph token"), "chooser includes Atlassian Teamwork Graph token");
+  assert.ok(options.includes("Atlassian Bitbucket token"), "chooser includes Atlassian Bitbucket token");
+  assert.strictEqual(new Set(options).size, options.length, "chooser labels are all distinct");
 }
 
 // Cancel chooser (select returns undefined) -> no keyring write
@@ -668,7 +665,135 @@ function makeMockEditChooserUi(opts: {
   );
 }
 
-// Chooser labels are distinct and include all three options
+console.log("edit-handler chooser routing tests passed");
+
+// --- combined email+token flow (handleAtlassianPatEdit via handleSecretEdit) ---
+//
+// These tests exercise the combined flow through the public handleSecretEdit
+// dispatch. They do NOT re-test handleEdit/decideEditAction internals. They
+// assert that picking a Teamwork/Bitbucket item stores the email + the right
+// token, and that a cancel mid-flow is atomic (no partial write).
+
+// Pick "Atlassian Teamwork Graph token" -> email prompt then api_token prompt -> both stored
+{
+  const mock = makeMockEditChooserUi({
+    selectResult: "Atlassian Teamwork Graph token",
+    editorResults: ["user@example.com", "twg-tok-123"],
+  });
+  const kr = makeMockKeyring();
+  await handleSecretEdit(
+    mock.ui,
+    async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
+  );
+  const stored = kr.getStored();
+  assert.strictEqual(stored.length, 2, "two secrets written for combined flow");
+  const emailEntry = stored.find((s) => s.key.service === "atlassian" && s.key.name === "email");
+  assert.ok(emailEntry, "email stored");
+  assert.strictEqual(emailEntry!.secret, "user@example.com", "email value stored");
+  const tokenEntry = stored.find((s) => s.key.service === "atlassian" && s.key.name === "api_token");
+  assert.ok(tokenEntry, "api_token stored");
+  assert.strictEqual(tokenEntry!.secret, "twg-tok-123", "Teamwork Graph token value stored");
+  // The email prompt comes first, then the token prompt
+  assert.strictEqual(mock.getEditorCalls().length, 2, "two editor prompts");
+  assert.ok(mock.getEditorCalls()[0].title.includes("email"), "first prompt is for email");
+  assert.ok(mock.getEditorCalls()[1].title.includes("Teamwork"), "second prompt is for the token");
+}
+
+// Pick "Atlassian Bitbucket token" -> email prompt then bitbucket_token prompt -> both stored
+{
+  const mock = makeMockEditChooserUi({
+    selectResult: "Atlassian Bitbucket token",
+    editorResults: ["user@example.com", "bb-tok-456"],
+  });
+  const kr = makeMockKeyring();
+  await handleSecretEdit(
+    mock.ui,
+    async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
+  );
+  const stored = kr.getStored();
+  assert.strictEqual(stored.length, 2, "two secrets written for combined flow");
+  const emailEntry = stored.find((s) => s.key.service === "atlassian" && s.key.name === "email");
+  assert.ok(emailEntry, "email stored");
+  assert.strictEqual(emailEntry!.secret, "user@example.com", "email value stored");
+  const tokenEntry = stored.find((s) => s.key.service === "atlassian" && s.key.name === "bitbucket_token");
+  assert.ok(tokenEntry, "bitbucket_token stored");
+  assert.strictEqual(tokenEntry!.secret, "bb-tok-456", "Bitbucket token value stored");
+}
+
+// Atomicity: cancel at the email prompt -> NO keyring write (neither email nor token)
+{
+  const mock = makeMockEditChooserUi({
+    selectResult: "Atlassian Teamwork Graph token",
+    editorResults: [undefined, "twg-tok-123"],
+  });
+  const kr = makeMockKeyring();
+  await handleSecretEdit(
+    mock.ui,
+    async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
+  );
+  const stored = kr.getStored();
+  assert.strictEqual(stored.length, 0, "nothing stored when email prompt cancelled — the whole PAT aborts, not half");
+  // Only the email prompt was opened; the token prompt never fires
+  assert.strictEqual(mock.getEditorCalls().length, 1, "only the email prompt opened before abort");
+}
+
+// Atomicity: cancel at the token prompt -> email ALSO not written
+{
+  const mock = makeMockEditChooserUi({
+    selectResult: "Atlassian Bitbucket token",
+    editorResults: ["user@example.com", undefined],
+  });
+  const kr = makeMockKeyring();
+  await handleSecretEdit(
+    mock.ui,
+    async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
+  );
+  const stored = kr.getStored();
+  assert.strictEqual(stored.length, 0, "nothing stored when token prompt cancelled — email is NOT written either");
+  const emailEntry = stored.find((s) => s.key.service === "atlassian" && s.key.name === "email");
+  assert.ok(!emailEntry, "no partial write: email not left without a token");
+  assert.strictEqual(mock.getEditorCalls().length, 2, "both prompts opened, but neither persisted");
+}
+
+// Email already set -> email prompt prefilled with current value
+{
+  const kr = makeMockKeyring();
+  // Pre-seed the keyring with an existing email
+  await kr.keyring.setSecret({ service: "atlassian", name: "email" }, "existing@example.com");
+  const mock = makeMockEditChooserUi({
+    selectResult: "Atlassian Teamwork Graph token",
+    editorResults: ["existing@example.com", "new-twg-tok"],
+  });
+  await handleSecretEdit(
+    mock.ui,
+    async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
+  );
+  assert.ok(
+    mock.getEditorCalls()[0].prefill === "existing@example.com",
+    "email prompt prefilled with current atlassian/email value"
+  );
+}
+
+// Token already set -> token prompt prefilled with current value
+{
+  const kr = makeMockKeyring();
+  // Pre-seed the keyring with an existing token
+  await kr.keyring.setSecret({ service: "atlassian", name: "api_token" }, "old-twg-tok");
+  const mock = makeMockEditChooserUi({
+    selectResult: "Atlassian Teamwork Graph token",
+    editorResults: ["user@example.com", "old-twg-tok"],
+  });
+  await handleSecretEdit(
+    mock.ui,
+    async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
+  );
+  assert.ok(
+    mock.getEditorCalls()[1].prefill === "old-twg-tok",
+    "token prompt prefilled with current token value"
+  );
+}
+
+// Labels are distinct: "Atlassian Teamwork Graph token" / "Atlassian Bitbucket token"
 {
   const mock = makeMockEditChooserUi({ selectResult: undefined });
   const kr = makeMockKeyring();
@@ -677,13 +802,20 @@ function makeMockEditChooserUi(opts: {
     async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
   );
   const options = mock.getSelectCalls()[0].options;
-  assert.ok(options.includes("Aura PAT"), "chooser includes Aura PAT");
-  assert.ok(options.includes("Atlassian email"), "chooser includes Atlassian email");
-  assert.ok(options.includes("Atlassian API token"), "chooser includes Atlassian API token");
-  assert.strictEqual(new Set(options).size, options.length, "chooser labels are all distinct");
+  assert.ok(
+    options.filter((o) => o.startsWith("Atlassian")).length === 2,
+    "two Atlassian token labels in the chooser"
+  );
+  assert.ok(
+    options.includes("Atlassian Teamwork Graph token") &&
+    options.includes("Atlassian Bitbucket token") &&
+    !options.includes("Atlassian email") &&
+    !options.includes("Atlassian API token"),
+    "labels are the two distinct token names, not the old email/API-token labels"
+  );
 }
 
-console.log("edit-handler chooser routing tests passed");
+console.log("combined email+token flow tests passed");
 
 console.log("handler dispatch tests passed");
 console.log("All tests passed");
