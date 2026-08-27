@@ -6,15 +6,15 @@ status: active
 tasks:
   - slug: bitbucket-token-infra
     blocked_by: []
-    done: false
+    done: true
   - slug: provision-atlassian-pats
     blocked_by:
       - bitbucket-token-infra
-    done: false
+    done: true
   - slug: wire-bitbucket-guided-edit
     blocked_by:
       - provision-atlassian-pats
-    done: false
+    done: true
 ---
 
 ## Destination
