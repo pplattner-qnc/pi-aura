@@ -2,11 +2,11 @@
 kind: task
 type: manual
 slug: provision-atlassian-pats
-title: "Collaboratively create + verify both scoped Atlassian PATs"
+title: Collaboratively create + verify both scoped Atlassian PATs
 map: atlassian-bitbucket-token
-status: ready
+status: done
 blocked_by:
-  - bitbucket-token-infra
+- bitbucket-token-infra
 ---
 
 ## Exact prerequisite
