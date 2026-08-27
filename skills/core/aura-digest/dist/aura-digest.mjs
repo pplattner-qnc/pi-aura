@@ -53,7 +53,8 @@ var init_file_keyring = __esm({
     KNOWN_SECRET_KEYS = [
       { service: "aura", name: "pat" },
       { service: "atlassian", name: "email" },
-      { service: "atlassian", name: "api_token" }
+      { service: "atlassian", name: "api_token" },
+      { service: "atlassian", name: "bitbucket_token" }
     ];
     FileKeyring = class {
       storePath;
@@ -225,7 +226,8 @@ var init_macos_keyring = __esm({
     KNOWN_SECRET_KEYS2 = [
       { service: "aura", name: "pat" },
       { service: "atlassian", name: "email" },
-      { service: "atlassian", name: "api_token" }
+      { service: "atlassian", name: "api_token" },
+      { service: "atlassian", name: "bitbucket_token" }
     ];
     MacosKeyring = class {
       /** True on macOS when `/usr/bin/security` exists. */
@@ -414,7 +416,8 @@ var init_secret_service_keyring = __esm({
     KNOWN_SECRET_KEYS3 = [
       { service: "aura", name: "pat" },
       { service: "atlassian", name: "email" },
-      { service: "atlassian", name: "api_token" }
+      { service: "atlassian", name: "api_token" },
+      { service: "atlassian", name: "bitbucket_token" }
     ];
     SecretServiceKeyring = class {
       /** True on Linux when the D-Bus session bus is reachable and a Secret
@@ -19282,10 +19285,13 @@ var MCP_CONFIG_PATH = join3(homedir3(), ".config", "mcp", "mcp.json");
 function loadMcpConfig(path = MCP_CONFIG_PATH) {
   return JSON.parse(readFileSync2(path, "utf8"));
 }
+async function readAtlassianEmail(keyring) {
+  const raw = await keyring.getSecret({ service: "atlassian", name: "email" });
+  return raw?.trim() ?? "";
+}
 async function readAtlassianCredentials(keyring) {
-  const rawEmail = await keyring.getSecret({ service: "atlassian", name: "email" });
+  const email2 = await readAtlassianEmail(keyring);
   const rawToken = await keyring.getSecret({ service: "atlassian", name: "api_token" });
-  const email2 = rawEmail?.trim() ?? "";
   const token = rawToken?.trim() ?? "";
   if (!email2 || !token) {
     throw new Error(

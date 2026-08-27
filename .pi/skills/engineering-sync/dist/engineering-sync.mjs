@@ -36,7 +36,8 @@ var init_file_keyring = __esm({
     KNOWN_SECRET_KEYS = [
       { service: "aura", name: "pat" },
       { service: "atlassian", name: "email" },
-      { service: "atlassian", name: "api_token" }
+      { service: "atlassian", name: "api_token" },
+      { service: "atlassian", name: "bitbucket_token" }
     ];
     FileKeyring = class {
       storePath;
@@ -208,7 +209,8 @@ var init_macos_keyring = __esm({
     KNOWN_SECRET_KEYS2 = [
       { service: "aura", name: "pat" },
       { service: "atlassian", name: "email" },
-      { service: "atlassian", name: "api_token" }
+      { service: "atlassian", name: "api_token" },
+      { service: "atlassian", name: "bitbucket_token" }
     ];
     MacosKeyring = class {
       /** True on macOS when `/usr/bin/security` exists. */
@@ -397,7 +399,8 @@ var init_secret_service_keyring = __esm({
     KNOWN_SECRET_KEYS3 = [
       { service: "aura", name: "pat" },
       { service: "atlassian", name: "email" },
-      { service: "atlassian", name: "api_token" }
+      { service: "atlassian", name: "api_token" },
+      { service: "atlassian", name: "bitbucket_token" }
     ];
     SecretServiceKeyring = class {
       /** True on Linux when the D-Bus session bus is reachable and a Secret
