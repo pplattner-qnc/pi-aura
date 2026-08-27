@@ -38,6 +38,15 @@ export function loadMcpConfig(path: string = MCP_CONFIG_PATH): McpConfig {
   return JSON.parse(readFileSync(path, "utf8")) as McpConfig;
 }
 
+/** Read the shared Atlassian account email from the keyring.
+ *  Trims whitespace and returns "" if the value is missing or empty — this
+ *  helper never throws, so each reader can compose its own /aura secrets
+ *  edit message with a single throw site. */
+export async function readAtlassianEmail(keyring: Keyring): Promise<string> {
+  const raw = await keyring.getSecret({ service: "atlassian", name: "email" });
+  return raw?.trim() ?? "";
+}
+
 /** Read the Atlassian email + API token from the @pi-aura/shared keyring.
  *  Trims whitespace on read so a trailing editor newline doesn't break auth.
  *  Throws an Error whose message names `/aura secrets edit` when either value
@@ -45,13 +54,34 @@ export function loadMcpConfig(path: string = MCP_CONFIG_PATH): McpConfig {
 export async function readAtlassianCredentials(
   keyring: Keyring,
 ): Promise<{ email: string; token: string }> {
-  const rawEmail = await keyring.getSecret({ service: "atlassian", name: "email" });
+  const email = await readAtlassianEmail(keyring);
   const rawToken = await keyring.getSecret({ service: "atlassian", name: "api_token" });
-  const email = rawEmail?.trim() ?? "";
   const token = rawToken?.trim() ?? "";
   if (!email || !token) {
     throw new Error(
       "no Atlassian credential in keyring (run `/aura secrets edit`)",
+    );
+  }
+  return { email, token };
+}
+
+/** Read the shared Atlassian email + the Bitbucket token from the
+ *  @pi-aura/shared keyring. Trims whitespace on read so a trailing editor
+ *  newline doesn't break auth. Throws an Error whose message names
+ *  `/aura secrets edit` when either value is missing or empty — the same
+ *  message shape as readAtlassianCredentials. */
+export async function readBitbucketCredentials(
+  keyring: Keyring,
+): Promise<{ email: string; token: string }> {
+  const email = await readAtlassianEmail(keyring);
+  const rawToken = await keyring.getSecret({
+    service: "atlassian",
+    name: "bitbucket_token",
+  });
+  const token = rawToken?.trim() ?? "";
+  if (!email || !token) {
+    throw new Error(
+      "no Bitbucket credential in keyring (run `/aura secrets edit`)",
     );
   }
   return { email, token };
