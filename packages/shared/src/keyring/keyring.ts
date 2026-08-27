@@ -12,7 +12,9 @@ export type SecretKey =
   // Aura PAT.
   | { service: "atlassian"; name: "email" }
   // Atlassian API token. Same empty-string contract as atlassian/email.
-  | { service: "atlassian"; name: "api_token" };
+  | { service: "atlassian"; name: "api_token" }
+  // Atlassian Bitbucket token. Same empty-string contract as atlassian/email.
+  | { service: "atlassian"; name: "bitbucket_token" };
 
 /** One stored secret together with its key. */
 export interface StoredSecret {
