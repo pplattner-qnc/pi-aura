@@ -1,11 +1,11 @@
 // clients.ts — build McpClient instances for the servers this script uses.
 //
-// - Atlassian (Jira/Teamwork Graph): HTTP + OAuth access token read from the
-//   OS keyring, where pi-mcp-adapter persists it (service "pi-mcp-adapter.oauth",
-//   account "sha256-<sha256(serverName)>"). Reusing the adapter's stored token
-//   avoids a separate OAuth flow — the script rides on the user's existing
-//   `pi` MCP authentication. The token may be chunked across multiple keyring
-//   entries (the adapter chunks payloads > 1000 chars); we reassemble them.
+// - Atlassian (Jira/Teamwork Graph): HTTP + Basic auth using the Atlassian
+//   email + API token stored in the @pi-aura/shared keyring
+//   ({service:"atlassian",name:"email"} + {service:"atlassian",name:"api_token"}).
+//   The user provisions these via `/aura secrets edit`. This replaces the
+//   old pi-mcp-adapter OAuth token read (readOAuthTokenFromKeyring, kept
+//   below for slice 4 to delete after the grep sweep).
 //
 // Bitbucket is NOT an MCP client here: the bitbucket MCP server is stdio (npx),
 // which the script can't easily drive, but the same credentials (email + API

@@ -51,7 +51,9 @@ var init_file_keyring = __esm({
     NAMESPACE = "aura-skills";
     DEFAULT_STORE_PATH = join(homedir(), ".cache", NAMESPACE, "store.json");
     KNOWN_SECRET_KEYS = [
-      { service: "aura", name: "pat" }
+      { service: "aura", name: "pat" },
+      { service: "atlassian", name: "email" },
+      { service: "atlassian", name: "api_token" }
     ];
     FileKeyring = class {
       storePath;
@@ -221,7 +223,9 @@ var init_macos_keyring = __esm({
     NAMESPACE2 = "aura-skills";
     SECURITY_BINARY = "/usr/bin/security";
     KNOWN_SECRET_KEYS2 = [
-      { service: "aura", name: "pat" }
+      { service: "aura", name: "pat" },
+      { service: "atlassian", name: "email" },
+      { service: "atlassian", name: "api_token" }
     ];
     MacosKeyring = class {
       /** True on macOS when `/usr/bin/security` exists. */
@@ -408,7 +412,9 @@ var init_secret_service_keyring = __esm({
     COLLECTION_INTERFACE = "org.freedesktop.Secret.Collection";
     ITEM_INTERFACE = "org.freedesktop.Secret.Item";
     KNOWN_SECRET_KEYS3 = [
-      { service: "aura", name: "pat" }
+      { service: "aura", name: "pat" },
+      { service: "atlassian", name: "email" },
+      { service: "atlassian", name: "api_token" }
     ];
     SecretServiceKeyring = class {
       /** True on Linux when the D-Bus session bus is reachable and a Secret
@@ -8953,7 +8959,6 @@ import { execFileSync } from "node:child_process";
 import { readFileSync as readFileSync2 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
 import { join as join3 } from "node:path";
-import { createHash } from "node:crypto";
 
 // ../node_modules/zod/v4/core/core.js
 var _a;
@@ -19214,6 +19219,12 @@ var McpClient = class {
       this.availableTools.add(tool.name);
     }
   }
+  /** The configured Authorization header value (e.g. "Bearer <tok>" or
+   *  "Basic <b64>"). Exposed for unit tests that assert the auth header
+   *  without making a network call. */
+  get authHeader() {
+    return this.opts.authHeader;
+  }
   /** Throw if any of `required` tools are not offered by the server. */
   assertToolsAvailable(required2) {
     const missing = required2.filter((name) => !this.availableTools.has(name));
@@ -19271,78 +19282,33 @@ var MCP_CONFIG_PATH = join3(homedir3(), ".config", "mcp", "mcp.json");
 function loadMcpConfig(path = MCP_CONFIG_PATH) {
   return JSON.parse(readFileSync2(path, "utf8"));
 }
-var keyringEntryCtor = null;
-var keyringLoadFailed = false;
-async function readOAuthTokenFromKeyring(serverName) {
-  if (keyringLoadFailed) return null;
-  if (!keyringEntryCtor) {
-    try {
-      const mod = await import("@napi-rs/keyring");
-      keyringEntryCtor = mod.Entry;
-    } catch {
-      keyringLoadFailed = true;
-      return null;
-    }
+async function readAtlassianCredentials(keyring) {
+  const rawEmail = await keyring.getSecret({ service: "atlassian", name: "email" });
+  const rawToken = await keyring.getSecret({ service: "atlassian", name: "api_token" });
+  const email2 = rawEmail?.trim() ?? "";
+  const token = rawToken?.trim() ?? "";
+  if (!email2 || !token) {
+    throw new Error(
+      "No Atlassian credential in keyring (run `/aura secrets edit`)"
+    );
   }
-  const service = "pi-mcp-adapter.oauth";
-  const account = `sha256-${createHash("sha256").update(serverName, "utf8").digest("hex")}`;
-  let pwd;
-  try {
-    const entry = new keyringEntryCtor(service, account);
-    pwd = entry.getPassword();
-  } catch (e) {
-    throw new Error(`keyring read failed for ${serverName}: ${e instanceof Error ? e.message : String(e)}`);
-  }
-  if (!pwd) return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(pwd);
-  } catch {
-    return null;
-  }
-  if (parsed.__piMcpAdapterOAuthChunked === 1) {
-    const chunkCount = parsed.chunkCount;
-    const chunkDigest = parsed.chunkDigest;
-    const parts = [];
-    for (let i = 0; i < chunkCount; i++) {
-      const chunkAccount = `${account}.chunk.${chunkDigest}.${i}`;
-      let chunk;
-      try {
-        chunk = new keyringEntryCtor(service, chunkAccount).getPassword();
-      } catch {
-        return null;
-      }
-      if (!chunk) return null;
-      parts.push(chunk);
-    }
-    try {
-      const full = JSON.parse(parts.join(""));
-      return full.tokens?.accessToken ?? null;
-    } catch {
-      return null;
-    }
-  }
-  const tokens2 = parsed.tokens;
-  return tokens2?.accessToken ?? null;
+  return { email: email2, token };
 }
-async function atlassianClient(serverName = "atlassian") {
-  const config2 = loadMcpConfig();
+async function atlassianClient(serverName = "atlassian", opts) {
+  const config2 = loadMcpConfig(opts?.configPath);
   const server = config2.mcpServers[serverName];
   if (!server || server.type !== "http" || !server.url) {
     throw new Error(
       `Atlassian MCP server "${serverName}" not found or not http in mcp.json. Add it with type=http to use dev-links.`
     );
   }
-  const token = await readOAuthTokenFromKeyring(serverName);
-  if (!token) {
-    throw new Error(
-      `No Atlassian OAuth token found in the OS keyring for "${serverName}". Run \`/mcp reconnect ${serverName}\` in pi to authenticate, then retry.`
-    );
-  }
+  const keyring = opts?.keyring ?? await createKeyring();
+  const { email: email2, token } = await readAtlassianCredentials(keyring);
+  const credential = Buffer.from(`${email2}:${token}`).toString("base64");
   return new McpClient({
     serverName,
     url: server.url,
-    authHeader: `Bearer ${token}`,
+    authHeader: `Basic ${credential}`,
     clientName: "aura-digest-script"
   });
 }
