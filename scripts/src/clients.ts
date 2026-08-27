@@ -3,9 +3,7 @@
 // - Atlassian (Jira/Teamwork Graph): HTTP + Basic auth using the Atlassian
 //   email + API token stored in the @pi-aura/shared keyring
 //   ({service:"atlassian",name:"email"} + {service:"atlassian",name:"api_token"}).
-//   The user provisions these via `/aura secrets edit`. This replaces the
-//   old pi-mcp-adapter OAuth token read (readOAuthTokenFromKeyring, kept
-//   below for slice 4 to delete after the grep sweep).
+//   The user provisions these via `/aura secrets edit`.
 //
 // Bitbucket is NOT an MCP client here: the bitbucket MCP server is stdio (npx),
 // which the script can't easily drive, but the same credentials (email + API
@@ -15,7 +13,6 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
 import { McpClient } from "./mcp-client.js";
 import type { Keyring } from "@pi-aura/shared/keyring";
 import { createKeyring } from "@pi-aura/shared/keyring";
@@ -39,79 +36,6 @@ interface McpConfig {
  *  inject a temp config file. */
 export function loadMcpConfig(path: string = MCP_CONFIG_PATH): McpConfig {
   return JSON.parse(readFileSync(path, "utf8")) as McpConfig;
-}
-
-/** Read the OAuth access token that pi-mcp-adapter persisted for `serverName`
- * from the OS keyring. Returns null if no token is stored (user hasn't authed
- * that server via pi yet). Handles the adapter's chunked-payload format.
- * Lazy-loads @napi-rs/keyring (a native binding) so a missing/unsupported
- * platform binding degrades to null (skipping the Teamwork Graph layer)
- * rather than crashing the whole script at import time. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let keyringEntryCtor: any = null;
-let keyringLoadFailed = false;
-
-export async function readOAuthTokenFromKeyring(serverName: string): Promise<string | null> {
-  if (keyringLoadFailed) return null;
-  if (!keyringEntryCtor) {
-    try {
-      // Dynamic import so a missing native binding doesn't abort the script.
-      const mod = await import("@napi-rs/keyring");
-      keyringEntryCtor = mod.Entry;
-    } catch {
-      keyringLoadFailed = true;
-      return null;
-    }
-  }
-  const service = "pi-mcp-adapter.oauth";
-  const account = `sha256-${createHash("sha256").update(serverName, "utf8").digest("hex")}`;
-  // getPassword() can throw on a revoked keyring or D-Bus error; wrap so a
-  // runtime keyring failure degrades to null (skipping TWG) rather than
-  // propagating. The caller (buildAtlassianClient) turns null into a silent
-  // skip, so we log the reason to stderr for diagnosability.
-  let pwd: string | null;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const entry = new keyringEntryCtor(service, account) as any;
-    pwd = entry.getPassword();
-  } catch (e) {
-    // Re-throw with a clear message; buildAtlassianClient catches and records
-    // it as a digest warning so the caller sees the degradation reason.
-    throw new Error(`keyring read failed for ${serverName}: ${e instanceof Error ? e.message : String(e)}`);
-  }
-  if (!pwd) return null;
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(pwd) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-  // Chunked manifest -> reassemble.
-  if (parsed.__piMcpAdapterOAuthChunked === 1) {
-    const chunkCount = parsed.chunkCount as number;
-    const chunkDigest = parsed.chunkDigest as string;
-    const parts: string[] = [];
-    for (let i = 0; i < chunkCount; i++) {
-      const chunkAccount = `${account}.chunk.${chunkDigest}.${i}`;
-      let chunk: string | null;
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        chunk = new keyringEntryCtor(service, chunkAccount).getPassword();
-      } catch {
-        return null;
-      }
-      if (!chunk) return null;
-      parts.push(chunk);
-    }
-    try {
-      const full = JSON.parse(parts.join("")) as { tokens?: { accessToken?: string } };
-      return full.tokens?.accessToken ?? null;
-    } catch {
-      return null;
-    }
-  }
-  const tokens = parsed.tokens as { accessToken?: string } | undefined;
-  return tokens?.accessToken ?? null;
 }
 
 /** Read the Atlassian email + API token from the @pi-aura/shared keyring.
