@@ -117,3 +117,23 @@ Out of scope (see map.md "Out of scope"):
   `settings.aura.digest.bitbucket.workspace`, not the keyring.
 - The pi-mcp-adapter keyring-read path is deleted in this change (nothing else
   consumes it). Confirm with a `grep` sweep before deleting.
+
+## Implementation notes
+
+### slice: keyring-atlassian-secret-keys (landed)
+
+- `SecretKey` union in `packages/shared/src/keyring/keyring.ts` extended from
+  1 to 3 members: added `{ service: "atlassian"; name: "email" }` and
+  `{ service: "atlassian"; name: "api_token" }`. Both carry an inline comment
+  documenting the empty-string-as-not-set contract, mirroring the Aura PAT.
+- `KNOWN_SECRET_KEYS` in all three backends (`file-keyring.ts`,
+  `macos-keyring.ts`, `secret-service-keyring.ts`) lists both new keys, so
+  `listSecrets` probes them with no per-backend special casing.
+- New test file `packages/shared/test/keyring.test.ts` (18 tests) covers
+  set/get/overwrite/delete/missing/empty-string round-trips for both new keys
+  plus an `aura/pat` regression block, all through the `FileKeyring(storePath)`
+  test seam (no platform dependency).
+- No consumer files touched. The two new keys are writable but unused after
+  this slice — downstream slices (2–5) will read them.
+- Verified: `tsc --noEmit` exit 0; `tsx --test` 54 pass / 0 fail (36 pre-existing
+  + 18 new). No divergence from the slice spec.

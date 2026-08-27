@@ -4,7 +4,7 @@ slug: keyring-atlassian-secret-keys
 title: "Extend the @pi-aura/shared keyring enum with atlassian email + api_token keys"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: s
 blocked_by: []
 ---
