@@ -1,2 +1,2 @@
 task: wire-bitbucket-guided-edit
-slice: wire-bitbucket-reader
+slice: combined-pat-edit-flow

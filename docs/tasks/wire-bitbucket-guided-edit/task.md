@@ -129,3 +129,41 @@ Out of scope (see map.md):
   succeeds (dist committed), `vitest run` green — 15 files / 120 tests pass.
 - No out-of-scope changes: chooser, guided mode, `aura-secrets.ts`, `settings.ts`,
   keyring package untouched — those are later slices.
+
+### slice: combined-pat-edit-flow (landed)
+
+- `extensions/aura-secrets.ts`: `SECRET_LABELS` changed from
+  `["Aura PAT", "Atlassian email", "Atlassian API token"]` to
+  `["Aura PAT", "Atlassian Teamwork Graph token", "Atlassian Bitbucket token"]` —
+  the standalone "Atlassian email" chooser item is removed. `pickSecretKey` maps
+  the two new token labels to `{service:"atlassian",name:"api_token"}` and
+  `{service:"atlassian",name:"bitbucket_token"}` respectively; the Aura PAT mapping
+  is unchanged.
+- New `handleAtlassianPatEdit` implements the combined email+token flow: it opens
+  the email editor (prefilled with the current `atlassian/email` if set), then the
+  token editor (prefilled with the current token if set), runs `decideEditAction`
+  (the unchanged pure primitive) on both, and only then writes both secrets — a
+  cancel at either prompt aborts the whole PAT provisioning with no partial write
+  (the atomicity contract is documented in a comment). The confirm-on-empty guard
+  is applied per secret via a new `resolveEmptyGuard` helper that mirrors the same
+  logic `handleEdit` uses. `decideEditAction` / `handleEdit` are unchanged.
+- `handleSecretEdit` dispatch: Aura PAT routes through the unchanged `handleEdit`
+  (single-secret edit); the two Atlassian token labels route through
+  `handleAtlassianPatEdit`. `SECRET_PLACEHOLDERS` retains the "Atlassian email"
+  placeholder key (used by the combined flow's email prompt) and adds distinct
+  placeholders for each token label.
+- Tests: `extensions/aura-secrets.test.ts` extended — `makeMockEditChooserUi` now
+  supports sequential editor prompts (`editorResults: [email, token]`). New tests
+  cover: `pickSecretKey` maps the new labels; the combined flow stores email +
+  api_token (Teamwork) / email + bitbucket_token (Bitbucket); atomicity — cancel
+  at email prompt → no write, cancel at token prompt → email also not written;
+  email/token prefilled from current keyring values; chooser has no standalone
+  email item and labels are distinct; Aura PAT flow unchanged. The standalone
+  "Atlassian email" and "Atlassian API token" chooser-routing tests were replaced
+  by the combined-flow tests.
+- Validation: `scripts` typecheck clean, `packages/shared` typecheck clean, build
+  succeeds, `vitest run` green — 15 files / 120 tests pass,
+  `node --experimental-strip-types extensions/aura-secrets.test.ts` passes (all
+  test sections green including "combined email+token flow tests passed").
+- No out-of-scope changes: guided yes/no prompt (slice 3), `bitbucket.ts`,
+  `devlinks.ts`, `settings.ts`, keyring package untouched.

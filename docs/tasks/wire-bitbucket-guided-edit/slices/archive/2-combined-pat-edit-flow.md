@@ -4,7 +4,7 @@ slug: combined-pat-edit-flow
 title: "/aura secrets edit: combined email+token flow per PAT (no standalone email item)"
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: m
 blocked_by:
   - wire-bitbucket-reader
