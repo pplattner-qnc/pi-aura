@@ -4,7 +4,7 @@ slug: bitbucket-shared-credential
 title: "Bitbucket fallback reads the shared Atlassian keyring credential instead of its MCP env"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: s
 blocked_by:
   - atlassian-basic-auth-client

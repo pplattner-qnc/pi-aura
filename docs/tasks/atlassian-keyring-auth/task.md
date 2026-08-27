@@ -230,4 +230,48 @@ Out of scope (see map.md "Out of scope"):
   `buildAtlassianClient` does not accept an injectable keyring seam. This is
   a test-level choice and does not affect production behavior.
 
+### slice: bitbucket-shared-credential (landed)
+
+- `scripts/src/bitbucket.ts`'s `loadCreds` was refactored from reading
+  `ATLASSIAN_USER_EMAIL` / `ATLASSIAN_API_TOKEN` / `BITBUCKET_DEFAULT_WORKSPACE`
+  out of the `atlassian-bitbucket` MCP server env in `mcp.json` to reading the
+  email + API token from the shared Atlassian keyring via
+  `readAtlassianCredentials(keyring)` (the same helper from slice 2) and taking
+  `defaultWorkspace` as a caller-provided string (from settings). The loader is
+  now exported and takes an injectable `Keyring` + `defaultWorkspace` for unit
+  testing without `mcp.json`. The `readFileSync`/`homedir`/`join` imports and
+  the `MCP_CONFIG_PATH` constant were removed.
+- `bbFetch` and the three public functions (`listWorkspaceRepos`,
+  `searchRepoPRs`, `searchRepoBranches`) now thread a `Keyring` parameter
+  through to `loadCreds` instead of passing a `serverName` string. The
+  Basic-auth header construction (`Basic base64(email:token)`) is unchanged.
+- `scripts/src/devlinks.ts`: `fetchTaskDevLinks`'s signature changed from
+  `(task, settings, mcpServers, atlassian)` to `(task, settings, keyring,
+  atlassian)`. The Bitbucket layer 3 now pre-loads credentials once via
+  `readAtlassianCredentials(keyring)` before iterating repos; if the keyring
+  is empty or the workspace is missing, the entire Bitbucket layer is skipped
+  with a single `Bitbucket dev-links layer skipped: ...` warning — mirroring
+  `buildAtlassianClient`'s degrade pattern — instead of repeating the same
+  error for every repo. The `McpServerNames` import was replaced by a
+  `Keyring` import.
+- `scripts/src/aura-digest.ts`: `fetchAction` now calls `createKeyring()` and
+  passes the `keyring` to `fetchTaskDevLinks` instead of `settings.mcpServers`.
+- New test file `test/atlassian-keyring-auth/bitbucket.test.ts` (10 tests)
+  covers `loadCreds` with a `FakeKeyring` implementing the `Keyring` interface:
+  happy path (keyring populated + workspace set → correct creds), whitespace
+  trimming, keyring empty/missing email/missing token/empty-string email →
+  `/aura secrets edit` throw, wrapping the throw into a `Bitbucket dev-links
+  layer skipped` warning, workspace missing → workspace-specific throw +
+  warning (no `/aura secrets edit` mention). No `mcp.json` read in tests.
+- The `atlassian-bitbucket` MCP server entry in `mcp.json` is not removed or
+  edited (it still powers the user's stdio MCP server); only the script's
+  reliance on its env is removed. Confirmed by the diff: no `mcp.json` changes.
+- `defaultWorkspace` stays in `settings.aura.digest.bitbucket.workspace` (a
+  non-secret config value), not moved into the keyring.
+- Skill bundle dist file `aura-digest.mjs` was rebuilt to pick up the
+  devlinks/aura-digest signature changes.
+- No TDD/verify worker result files were present at the expected paths
+  (`tdd-bitbucket-shared-credential/result.md`, `verify-bitbucket-shared-credential/result.md`),
+  so no divergence notes from either worker were available to reconcile.
+
 
