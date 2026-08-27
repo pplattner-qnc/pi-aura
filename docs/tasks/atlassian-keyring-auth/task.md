@@ -163,6 +163,40 @@ Out of scope (see map.md "Out of scope"):
   interface and temp `mcp.json` files.
 - Skill bundle dist files (`aura.mjs`, `aura-digest.mjs`) were rebuilt to
   pick up the slice-1 keyring enum changes and the new `authHeader` getter.
-- Verified: `tsc --noEmit` clean for both `scripts` and `packages/shared`;
-  `vitest run` 81 pass / 0 fail (12 test files). No divergence from the
-  slice spec.
+### slice: aura-secrets-edit-picker (landed)
+
+- `/aura secrets edit` now shows a chooser (`ui.select`) with three options —
+  "Aura PAT", "Atlassian email", "Atlassian API token" — plus a cancel option.
+  Selecting cancel exits with "no change" and writes nothing to the keyring.
+- New pure exported function `pickSecretKey(choice: string | undefined): SecretKey | null`
+  maps chooser labels to `SecretKey` values: `"Aura PAT"` → `{service:"aura",name:"pat"}`,
+  `"Atlassian email"` → `{service:"atlassian",name:"email"}`, `"Atlassian API token"` →
+  `{service:"atlassian",name:"api_token"}`, and `undefined`/unknown → `null`.
+- `handleEdit` was generalized with three optional parameters (`key`, `label`,
+  `placeholder`) defaulting to the existing Aura PAT behavior, so prior callers and
+  tests are unaffected. The confirm dialog now uses the label dynamically
+  (`"Save empty ${label}?"`). `decideEditAction` is unchanged.
+- New exported orchestrator `handleSecretEdit(ui, keyringFactory)` shows the chooser,
+  maps the choice via `pickSecretKey`, reads the current value from the keyring,
+  and routes through `handleEdit` with the correct key/label/placeholder.
+- Constants `SECRET_LABELS` (readonly tuple of the three labels) and
+  `SECRET_PLACEHOLDERS` (label → placeholder string) keep the mapping in one place.
+  The Atlassian token label is explicitly "Atlassian API token" (not just "API token")
+  to disambiguate from the Aura PAT.
+- `extensions/aura-secrets.test.ts` gained `pickSecretKey` pure tests (6 assertions)
+  and edit-handler chooser routing tests (5 scenarios): each secret → correct key,
+  cancel → no keyring write / editor never opened, distinct labels. A new
+  `makeMockEditChooserUi` fake supports `select` + `editor` + `confirm` + `notify`.
+- `/aura secrets discover` is unchanged (still only discovers the Aura PAT from
+  `mcp.json`); no new slash command registered; `getArgumentCompletions` unchanged.
+- Divergence notes from the TDD worker: (1) `handleEdit` was generalized with
+  defaulted optional parameters rather than a thin wrapper, to keep existing
+  Aura PAT tests passing without changes; (2) `handleSecretEdit` is exported as a
+  new orchestrator (mirroring how `handleEdit`/`handleDiscover` are exported for
+  testing); (3) `pickSecretKey` accepts `string | undefined` (not just `string`)
+  because `ui.select` returns `undefined` for cancel/non-TUI — tests cover this.
+- Verified: `node --experimental-strip-types extensions/aura-secrets.test.ts` all
+  tests passed; `npx vitest run` 12 files / 81 tests passed; `npx tsc --noEmit -p
+  scripts/tsconfig.json` clean. No blockers from verification.
+
+

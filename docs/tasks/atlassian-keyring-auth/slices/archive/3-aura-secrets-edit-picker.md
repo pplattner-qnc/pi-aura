@@ -4,7 +4,7 @@ slug: aura-secrets-edit-picker
 title: "/aura secrets edit chooses which secret (Aura PAT / Atlassian email / Atlassian API token) to edit"
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: m
 blocked_by:
   - keyring-atlassian-secret-keys
