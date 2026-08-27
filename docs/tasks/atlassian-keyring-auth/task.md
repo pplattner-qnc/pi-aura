@@ -274,4 +274,31 @@ Out of scope (see map.md "Out of scope"):
   (`tdd-bitbucket-shared-credential/result.md`, `verify-bitbucket-shared-credential/result.md`),
   so no divergence notes from either worker were available to reconcile.
 
+### Coherence refactor + whole-task code review (post-landing)
+
+- Dropped the orphaned `@napi-rs/keyring` direct dependency from
+  `scripts/package.json` — slice 4 deleted the only importer, so the native
+  binding was no longer needed. `npm install` / `make build` no longer pull it.
+- Aligned the missing-credential warning casing to the spec: the acceptance
+  criterion + arch spec mandate lowercase `"no Atlassian credential…"`; the
+  code + a test had encoded capital `"No"`. Fixed `readAtlassianCredentials`
+  in `scripts/src/clients.ts` and the exact-format test in
+  `test/atlassian-keyring-auth/clients.test.ts` to the lowercase form so the
+  test now guards the spec string.
+- Fixed a stale comment in `scripts/src/aura-digest.ts` (dev-links block) that
+  still said "OAuth token from the keyring" after the Basic-auth swap; now
+  describes the shared keyring credential.
+- Advisory whole-task code review (`code-reviewer`): no documented-standard
+  breach. Judgement-call smells left as-is: duplicated `FakeKeyring` across
+  test files (pre-existing pattern across 5 files — not worth refactoring this
+  task) and a speculative-generality note on `bbCreds` fields (forced by the
+  `BitbucketCreds` shape). The new `test/<task-slug>/` vitest location was
+  folded into `docs/testing.md`.
+- Root cause of the original `invalid_token` bug (context for future readers):
+  the digest script borrowed the `pi-mcp-adapter` OAuth access token from the
+  OS keyring and never refreshed it, so an expired token surfaced as
+  `invalid_token` from the Rovo MCP server. pi-aura now owns its Atlassian
+  email + API token in the `@pi-aura/shared` keyring (Basic auth, no refresh
+  needed), so adapter-token expiry can no longer break the digest.
+
 
