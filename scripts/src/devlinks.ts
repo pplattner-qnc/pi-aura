@@ -14,7 +14,7 @@
 
 import { execFileSync } from "node:child_process";
 import { McpClient } from "./mcp-client.js";
-import { atlassianClient, readAtlassianCredentials } from "./clients.js";
+import { atlassianClient, readBitbucketCredentials } from "./clients.js";
 import {
   searchRepoBranches,
   searchRepoPRs,
@@ -264,7 +264,7 @@ export async function fetchTaskDevLinks(
   // repeating the same error for every repo.
   let bbCreds: { email: string; token: string; defaultWorkspace: string } | null = null;
   try {
-    const { email, token } = await readAtlassianCredentials(keyring);
+    const { email, token } = await readBitbucketCredentials(keyring);
     if (!ws) {
       throw new Error("Bitbucket workspace not set in settings (configure settings.aura.digest.bitbucket.workspace)");
     }

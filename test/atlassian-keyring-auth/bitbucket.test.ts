@@ -1,6 +1,9 @@
 /**
  * Unit tests for the Bitbucket credential loader refactored to read from the
  * shared Atlassian keyring (slice 5 of the atlassian-keyring-auth task).
+ * Updated for the wire-bitbucket-reader task: loadCreds now reads
+ * atlassian/bitbucket_token (via readBitbucketCredentials) instead of
+ * atlassian/api_token.
  *
  * Run via root vitest:
  *   npx vitest run test/atlassian-keyring-auth/bitbucket.test.ts
@@ -28,12 +31,12 @@ import { loadCreds } from "../../scripts/src/bitbucket.js";
 class FakeKeyring implements Keyring {
   private store = new Map<string, string>();
 
-  constructor(secrets: Partial<{ email: string | null; api_token: string | null }> = {}) {
+  constructor(secrets: Partial<{ email: string | null; bitbucket_token: string | null }> = {}) {
     if (secrets.email !== undefined) {
       this.store.set("atlassian/email", secrets.email ?? "");
     }
-    if (secrets.api_token !== undefined) {
-      this.store.set("atlassian/api_token", secrets.api_token ?? "");
+    if (secrets.bitbucket_token !== undefined) {
+      this.store.set("atlassian/bitbucket_token", secrets.bitbucket_token ?? "");
     }
   }
 
@@ -70,22 +73,22 @@ describe("loadCreds", () => {
   it("returns {email, token, defaultWorkspace} when keyring populated + workspace set", async () => {
     const keyring = new FakeKeyring({
       email: "user@example.com",
-      api_token: "ATATT3xFVkGI",
+      bitbucket_token: "BB-token-abc",
     });
     const creds = await loadCreds(keyring, "my-workspace");
     assert.equal(creds.email, "user@example.com");
-    assert.equal(creds.token, "ATATT3xFVkGI");
+    assert.equal(creds.token, "BB-token-abc");
     assert.equal(creds.defaultWorkspace, "my-workspace");
   });
 
   it("trims whitespace from keyring values", async () => {
     const keyring = new FakeKeyring({
       email: "  user@example.com\n  ",
-      api_token: "  ATATT3xFVkGI\n",
+      bitbucket_token: "  BB-token-abc\n",
     });
     const creds = await loadCreds(keyring, "my-workspace");
     assert.equal(creds.email, "user@example.com");
-    assert.equal(creds.token, "ATATT3xFVkGI");
+    assert.equal(creds.token, "BB-token-abc");
   });
 });
 
@@ -95,7 +98,7 @@ describe("loadCreds", () => {
 
 describe("loadCreds — keyring empty", () => {
   it("throws with /aura secrets edit message when email is missing", async () => {
-    const keyring = new FakeKeyring({ api_token: "ATATT3xFVkGI" });
+    const keyring = new FakeKeyring({ bitbucket_token: "BB-token-abc" });
     await expect(loadCreds(keyring, "my-workspace")).rejects.toThrow(
       /run `\/aura secrets edit`/,
     );
@@ -116,7 +119,7 @@ describe("loadCreds — keyring empty", () => {
   });
 
   it("throws with /aura secrets edit message when email is empty string", async () => {
-    const keyring = new FakeKeyring({ email: "", api_token: "ATATT3xFVkGI" });
+    const keyring = new FakeKeyring({ email: "", bitbucket_token: "BB-token-abc" });
     await expect(loadCreds(keyring, "my-workspace")).rejects.toThrow(
       /run `\/aura secrets edit`/,
     );
@@ -153,7 +156,7 @@ describe("loadCreds — workspace missing", () => {
   it("throws a workspace-specific warning when defaultWorkspace is empty", async () => {
     const keyring = new FakeKeyring({
       email: "user@example.com",
-      api_token: "ATATT3xFVkGI",
+      bitbucket_token: "BB-token-abc",
     });
     await expect(loadCreds(keyring, "")).rejects.toThrow(/workspace/i);
   });
@@ -161,7 +164,7 @@ describe("loadCreds — workspace missing", () => {
   it("wrapping the thrown error yields a layer-skip warning naming the workspace", async () => {
     const keyring = new FakeKeyring({
       email: "user@example.com",
-      api_token: "ATATT3xFVkGI",
+      bitbucket_token: "BB-token-abc",
     });
     let warning: string | null = null;
     let creds: { email: string; token: string; defaultWorkspace: string } | null = null;
