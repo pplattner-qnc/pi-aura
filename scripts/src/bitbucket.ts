@@ -1,15 +1,15 @@
 // bitbucket.ts — Bitbucket REST client (direct HTTP, basic auth).
 //
 // The atlassian-bitbucket MCP server is stdio (npx), which a standalone script
-// can't easily drive, but the same Atlassian email + API token stored in the
+// can't easily drive, but the Atlassian email + Bitbucket token stored in the
 // @pi-aura/shared keyring ({service:"atlassian",name:"email"} +
-// {service:"atlassian",name:"api_token"}) work against api.bitbucket.org
+// {service:"atlassian",name:"bitbucket_token"}) work against api.bitbucket.org
 // directly via HTTP basic auth. The workspace comes from
 // settings.aura.digest.bitbucket.workspace (a non-secret config value).
 // This module wraps the small subset we need: list workspace repos, list repo
 // PRs (with a q filter), list repo branches.
 
-import { readAtlassianCredentials } from "./clients.js";
+import { readBitbucketCredentials } from "./clients.js";
 import type { Keyring } from "@pi-aura/shared/keyring";
 
 interface BitbucketCreds {
@@ -32,7 +32,7 @@ export async function loadCreds(
   keyring: Keyring,
   defaultWorkspace: string,
 ): Promise<BitbucketCreds> {
-  const { email, token } = await readAtlassianCredentials(keyring);
+  const { email, token } = await readBitbucketCredentials(keyring);
   if (!defaultWorkspace) {
     throw new Error("Bitbucket workspace not set in settings (configure settings.aura.digest.bitbucket.workspace)");
   }

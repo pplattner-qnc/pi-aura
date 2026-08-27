@@ -19300,6 +19300,20 @@ async function readAtlassianCredentials(keyring) {
   }
   return { email: email2, token };
 }
+async function readBitbucketCredentials(keyring) {
+  const email2 = await readAtlassianEmail(keyring);
+  const rawToken = await keyring.getSecret({
+    service: "atlassian",
+    name: "bitbucket_token"
+  });
+  const token = rawToken?.trim() ?? "";
+  if (!email2 || !token) {
+    throw new Error(
+      "no Bitbucket credential in keyring (run `/aura secrets edit`)"
+    );
+  }
+  return { email: email2, token };
+}
 async function atlassianClient(serverName = "atlassian", opts) {
   const config2 = loadMcpConfig(opts?.configPath);
   const server = config2.mcpServers[serverName];
@@ -19321,7 +19335,7 @@ async function atlassianClient(serverName = "atlassian", opts) {
 
 // src/bitbucket.ts
 async function loadCreds(keyring, defaultWorkspace) {
-  const { email: email2, token } = await readAtlassianCredentials(keyring);
+  const { email: email2, token } = await readBitbucketCredentials(keyring);
   if (!defaultWorkspace) {
     throw new Error("Bitbucket workspace not set in settings (configure settings.aura.digest.bitbucket.workspace)");
   }
@@ -19514,7 +19528,7 @@ async function fetchTaskDevLinks(task, settings, keyring, atlassian) {
   const preferred = settings.bitbucket.preferredRepos;
   let bbCreds = null;
   try {
-    const { email: email2, token } = await readAtlassianCredentials(keyring);
+    const { email: email2, token } = await readBitbucketCredentials(keyring);
     if (!ws) {
       throw new Error("Bitbucket workspace not set in settings (configure settings.aura.digest.bitbucket.workspace)");
     }
