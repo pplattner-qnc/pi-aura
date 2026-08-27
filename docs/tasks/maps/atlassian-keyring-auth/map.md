@@ -1,12 +1,12 @@
 ---
 kind: map
 slug: atlassian-keyring-auth
-title: "Own pi-aura's Atlassian access (API token + Basic auth, no borrowed tokens)"
-status: active
+title: Own pi-aura's Atlassian access (API token + Basic auth, no borrowed tokens)
+status: done
 tasks:
-  - slug: atlassian-keyring-auth
-    blocked_by: []
-    done: true
+- slug: atlassian-keyring-auth
+  blocked_by: []
+  done: true
 ---
 
 ## Destination
