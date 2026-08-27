@@ -16,7 +16,9 @@ import auraSecretsExtension, {
   getArgumentCompletions,
   handleDiscover,
   handleEdit,
+  handleSecretEdit,
   parseAuraArgs,
+  pickSecretKey,
   readMcpBearerToken,
   type DiscoverySource,
   type EditDecision,
@@ -416,6 +418,29 @@ assertDecision(
 
 console.log("decideEditAction pure-function tests passed");
 
+// --- pickSecretKey pure function ---
+
+assert.deepStrictEqual(
+  pickSecretKey("Aura PAT"),
+  { service: "aura", name: "pat" },
+  "Aura PAT -> aura/pat"
+);
+assert.deepStrictEqual(
+  pickSecretKey("Atlassian email"),
+  { service: "atlassian", name: "email" },
+  "Atlassian email -> atlassian/email"
+);
+assert.deepStrictEqual(
+  pickSecretKey("Atlassian API token"),
+  { service: "atlassian", name: "api_token" },
+  "Atlassian API token -> atlassian/api_token"
+);
+assert.strictEqual(pickSecretKey(undefined), null, "undefined (cancel) -> null");
+assert.strictEqual(pickSecretKey(""), null, "empty string -> null");
+assert.strictEqual(pickSecretKey("unknown"), null, "unknown label -> null");
+
+console.log("pickSecretKey pure-function tests passed");
+
 // --- handleEdit UI/keyring logic ---
 
 function makeMockEditUi(options: {
@@ -527,6 +552,138 @@ function makeMockEditUi(options: {
 }
 
 console.log("handleEdit tests passed");
+
+// --- edit-handler chooser routing ---
+//
+// These tests cover the chooser → SecretKey → handleEdit routing. They do
+// NOT re-test handleEdit/decideEditAction internals; they assert the right
+// key is written and the right placeholder/label reach the editor.
+
+function makeMockEditChooserUi(opts: {
+  selectResult?: string;
+  editorResult?: string;
+  confirmResult?: boolean;
+} = {}) {
+  const notifies: NotifyCall[] = [];
+  const editorCalls: { title: string; prefill: string }[] = [];
+  const selectCalls: { title: string; options: string[] }[] = [];
+  return {
+    ui: {
+      notify(message: string, level: "info" | "warning" | "error") {
+        notifies.push({ message, level });
+      },
+      async select(title: string, selectOptions: string[]) {
+        selectCalls.push({ title, options: selectOptions });
+        return opts.selectResult;
+      },
+      async editor(title: string, prefill: string): Promise<string | undefined> {
+        editorCalls.push({ title, prefill });
+        return opts.editorResult;
+      },
+      async confirm(_title: string, _message: string) {
+        return opts.confirmResult ?? false;
+      },
+    },
+    getNotifies() {
+      return notifies;
+    },
+    getEditorCalls() {
+      return editorCalls;
+    },
+    getSelectCalls() {
+      return selectCalls;
+    },
+  };
+}
+
+// Choose Aura PAT -> edits aura/pat
+{
+  const mock = makeMockEditChooserUi({ selectResult: "Aura PAT", editorResult: "new-aura-pat" });
+  const kr = makeMockKeyring();
+  await handleSecretEdit(
+    mock.ui,
+    async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
+  );
+  const stored = kr.getStored();
+  assert.strictEqual(stored.length, 1, "one secret written for Aura PAT");
+  assert.deepStrictEqual(stored[0].key, { service: "aura", name: "pat" }, "Aura PAT routes to aura/pat");
+  assert.strictEqual(stored[0].secret, "new-aura-pat", "Aura PAT value stored");
+  assert.ok(
+    mock.getSelectCalls().length === 1 && mock.getSelectCalls()[0].options.includes("Aura PAT"),
+    "chooser offered Aura PAT"
+  );
+  assert.ok(
+    mock.getEditorCalls().length === 1 && mock.getEditorCalls()[0].title === "Aura PAT",
+    "editor title is Aura PAT"
+  );
+  assert.ok(
+    mock.getEditorCalls()[0].prefill === "<paste your Aura PAT here>",
+    "Aura PAT placeholder prefilled"
+  );
+}
+
+// Choose Atlassian email -> edits atlassian/email
+{
+  const mock = makeMockEditChooserUi({ selectResult: "Atlassian email", editorResult: "user@example.com" });
+  const kr = makeMockKeyring();
+  await handleSecretEdit(
+    mock.ui,
+    async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
+  );
+  const stored = kr.getStored();
+  assert.strictEqual(stored.length, 1, "one secret written for Atlassian email");
+  assert.deepStrictEqual(stored[0].key, { service: "atlassian", name: "email" }, "Atlassian email routes to atlassian/email");
+  assert.strictEqual(stored[0].secret, "user@example.com", "Atlassian email value stored");
+  assert.strictEqual(mock.getEditorCalls()[0].prefill, "<paste your Atlassian email here>", "Atlassian email placeholder prefilled");
+}
+
+// Choose Atlassian API token -> edits atlassian/api_token
+{
+  const mock = makeMockEditChooserUi({ selectResult: "Atlassian API token", editorResult: "api-tok-xyz" });
+  const kr = makeMockKeyring();
+  await handleSecretEdit(
+    mock.ui,
+    async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
+  );
+  const stored = kr.getStored();
+  assert.strictEqual(stored.length, 1, "one secret written for Atlassian API token");
+  assert.deepStrictEqual(stored[0].key, { service: "atlassian", name: "api_token" }, "Atlassian API token routes to atlassian/api_token");
+  assert.strictEqual(stored[0].secret, "api-tok-xyz", "Atlassian API token value stored");
+  assert.strictEqual(mock.getEditorCalls()[0].prefill, "<paste your Atlassian API token here>", "Atlassian API token placeholder prefilled");
+}
+
+// Cancel chooser (select returns undefined) -> no keyring write
+{
+  const mock = makeMockEditChooserUi({ selectResult: undefined });
+  const kr = makeMockKeyring();
+  await handleSecretEdit(
+    mock.ui,
+    async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
+  );
+  assert.strictEqual(kr.getStored().length, 0, "nothing stored on chooser cancel");
+  assert.strictEqual(mock.getEditorCalls().length, 0, "editor never opened on chooser cancel");
+  assert.ok(
+    notifiesSome(mock.getNotifies(), (n) => n.message === "no change" && n.level === "info"),
+    "no-change notification on chooser cancel"
+  );
+}
+
+// Chooser labels are distinct and include all three options
+{
+  const mock = makeMockEditChooserUi({ selectResult: undefined });
+  const kr = makeMockKeyring();
+  await handleSecretEdit(
+    mock.ui,
+    async () => kr.keyring as unknown as import("@pi-aura/shared/keyring").Keyring
+  );
+  const options = mock.getSelectCalls()[0].options;
+  assert.ok(options.includes("Aura PAT"), "chooser includes Aura PAT");
+  assert.ok(options.includes("Atlassian email"), "chooser includes Atlassian email");
+  assert.ok(options.includes("Atlassian API token"), "chooser includes Atlassian API token");
+  assert.strictEqual(new Set(options).size, options.length, "chooser labels are all distinct");
+}
+
+console.log("edit-handler chooser routing tests passed");
 
 console.log("handler dispatch tests passed");
 console.log("All tests passed");

@@ -405,7 +405,7 @@ class SecretServiceBackend implements KeyringBackend {
     // JSON file) that setSecret/deleteSecret maintain; listSecrets pairs the
     // indexed accounts with the secrets returned by search, positionally.
     //
-    // Accounts written by other tools (node-keytar, @napi-rs/keyring) won't be
+    // Accounts written by other tools (node-keytar, other keyring libs) won't be
     // in the index; for those, listSecrets returns account="" so the caller
     // still gets the secret values. This matches keytar's findCredentials,
     // which on Linux also requires the account to be known.

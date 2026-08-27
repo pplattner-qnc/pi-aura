@@ -38,7 +38,10 @@ make build            # typecheck + bundle
 ## Mock conventions
 
 - Inject a fake `Keyring` (returns a test PAT) over hitting the real OS
-  keyring — see `packages/shared/test/hey-api-aura-client.test.ts`.
+  keyring — see `packages/shared/test/hey-api-aura-client.test.ts`. A
+  `FakeKeyring` implementing the `Keyring` interface is the standard seam for
+  tests under `test/<task-slug>/` (see `test/atlassian-keyring-auth/`); assert
+  constructed auth headers, not live network calls.
 - Inject a fake generated SDK / `createClient` over hitting real Aura for
   `HeyApiAuraClient` mapping tests; assert the domain<->generated mapping
   without network calls.
