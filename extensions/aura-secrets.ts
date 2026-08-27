@@ -118,30 +118,38 @@ export async function discoverPat(sources: DiscoverySource[]): Promise<Discovere
 
 const AURA_PAT_KEY: SecretKey = { service: "aura", name: "pat" };
 
-/** Labels shown in the /aura secrets edit chooser. Must be distinct — the
- *  Atlassian token is labelled "Atlassian API token", not just "API token",
- *  to disambiguate it from the Aura PAT. */
-const SECRET_LABELS = ["Aura PAT", "Atlassian email", "Atlassian API token"] as const;
+/** Labels shown in the /aura secrets edit chooser. The standalone
+ *  "Atlassian email" item is GONE — the email is prompted within the
+ *  combined flow for each Atlassian token. The two Atlassian token labels
+ *  are distinct so the user can tell them apart. */
+const SECRET_LABELS = [
+  "Aura PAT",
+  "Atlassian Teamwork Graph token",
+  "Atlassian Bitbucket token",
+] as const;
 
-/** Prefill placeholders for each editable secret. */
+/** Prefill placeholders for each editable secret. The email placeholder is
+ *  keyed by the email secret's label, used by the combined flow. */
 const SECRET_PLACEHOLDERS: Record<string, string> = {
   "Aura PAT": "<paste your Aura PAT here>",
   "Atlassian email": "<paste your Atlassian email here>",
-  "Atlassian API token": "<paste your Atlassian API token here>",
+  "Atlassian Teamwork Graph token": "<paste your Atlassian Teamwork Graph API token here>",
+  "Atlassian Bitbucket token": "<paste your Atlassian Bitbucket API token here>",
 };
 
 /** Map a chooser label to the SecretKey it corresponds to.
  *
- *  Pure function, unit-testable without a pi session or keyring.
- *  Returns null for cancel (undefined) or an unknown label. */
+ *  Pure single-key lookup, unit-testable without a pi session or keyring.
+ *  Maps the two Atlassian token labels to their token keys; Aura PAT is
+ *  unchanged. Returns null for cancel (undefined) or an unknown label. */
 export function pickSecretKey(choice: string | undefined): SecretKey | null {
   switch (choice) {
     case "Aura PAT":
       return { service: "aura", name: "pat" };
-    case "Atlassian email":
-      return { service: "atlassian", name: "email" };
-    case "Atlassian API token":
+    case "Atlassian Teamwork Graph token":
       return { service: "atlassian", name: "api_token" };
+    case "Atlassian Bitbucket token":
+      return { service: "atlassian", name: "bitbucket_token" };
     default:
       return null;
   }
