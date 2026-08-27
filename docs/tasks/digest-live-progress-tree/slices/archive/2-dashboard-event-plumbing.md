@@ -4,7 +4,7 @@ slug: 2-dashboard-event-plumbing
 title: Add progress + agent_log event types and extend /events SSE to state.json
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 blocked_by: []
 ---

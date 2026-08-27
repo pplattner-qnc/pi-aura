@@ -1,2 +1,2 @@
 task: digest-live-progress-tree
-slice: 1-scheduler-progress-nodes
+slice: 2-dashboard-event-plumbing
