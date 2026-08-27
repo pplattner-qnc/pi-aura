@@ -4,13 +4,8 @@ type: feature
 slug: atlassian-keyring-auth
 title: "Own pi-aura's Atlassian access: API token + Basic auth in the keyring"
 map: atlassian-keyring-auth
-status: ready
-slices:
-- keyring-atlassian-secret-keys
-- atlassian-basic-auth-client
-- aura-secrets-edit-picker
-- digest-script-own-credential
-- bitbucket-shared-credential
+status: done
+slices: []
 ---
 
 ## User-visible outcome

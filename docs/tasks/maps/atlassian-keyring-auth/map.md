@@ -4,7 +4,9 @@ slug: atlassian-keyring-auth
 title: "Own pi-aura's Atlassian access (API token + Basic auth, no borrowed tokens)"
 status: active
 tasks:
-  - atlassian-keyring-auth
+  - slug: atlassian-keyring-auth
+    blocked_by: []
+    done: true
 ---
 
 ## Destination
