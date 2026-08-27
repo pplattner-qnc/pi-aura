@@ -141,3 +141,25 @@ source of truth). The digest tools (`digest-dashboard-start`,
 `digest-dashboard-stop`, `digest-fetch`, `digest-save`) are registered but
 **inactive by default** — the `session_start` handler filters `DIGEST_TOOLS` out
 of the active set; `/digest` activates them additively.
+
+## Guided Atlassian PAT provisioning (`extensions/atlassian-provision.ts`)
+
+The guided `/aura secrets edit` walkthrough + the per-token access probes live
+in a sibling module `extensions/atlassian-provision.ts` (split from
+`aura-secrets.ts` to keep both focused; see the code-quality rule's "split
+proactively" guidance).
+
+- **Probe helpers are the one place live network calls are legitimate at
+  runtime**, but unit tests must mock them. `probeTeamworkGraph` takes an
+  injectable `clientFactory: () => Promise<McpProbeClient>` (a minimal seam
+  interface decoupled from the real `McpClient`); `probeBitbucket` takes an
+  injectable `fetchImpl`. Tests pass a fake `McpProbeClient` / fake `fetch` and
+  assert the right endpoint + Basic header — never a live call.
+- **`parseWalkthrough(markdown)`** is a pure helper that extracts the two
+  sequences (app + scopes + steps) from `docs/atlassian-api-token-walkthrough.md`
+  at run time. Unit-test it against a fixture doc (and an integration test
+  against the real doc) — no pi session or network needed.
+- **`runGuidedWalkthrough`** is tested by injecting fake probe functions
+  (`ProbeFunctions`) so the orchestrator's step sequencing is verified without
+  the network. Atomicity (cancel mid-guided → no partial keyring write) is
+  asserted the same way as the combined edit flow.
