@@ -6,7 +6,7 @@
  */
 
 import assert from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -123,6 +123,38 @@ assert.deepStrictEqual(
 assert.strictEqual(seqB.kind, "bitbucket", "Sequence B kind");
 
 console.log("parseWalkthrough tests passed");
+
+// parseWalkthrough against the REAL walkthrough doc (integration check —
+// proves the doc is the source of truth and parseWalkthrough reads it
+// correctly end-to-end). The manual task produced this doc.
+{
+  const realDoc = readFileSync(
+    join(process.cwd(), "docs", "atlassian-api-token-walkthrough.md"),
+    "utf8"
+  );
+  const realParsed = parseWalkthrough(realDoc);
+  assert.strictEqual(realParsed.sequences.length, 2, "real doc has two sequences");
+  const realA = realParsed.sequences[0];
+  assert.strictEqual(realA.kind, "teamwork-graph", "real Sequence A is teamwork-graph");
+  assert.strictEqual(realA.app, "Rovo MCP V2", "real Sequence A app is Rovo MCP V2");
+  assert.deepStrictEqual(
+    realA.tokenKey,
+    { service: "atlassian", name: "api_token" },
+    "real Sequence A token key"
+  );
+  assert.ok(realA.scopes.length >= 3, "real Sequence A has scopes");
+  const realB = realParsed.sequences[1];
+  assert.strictEqual(realB.kind, "bitbucket", "real Sequence B is bitbucket");
+  assert.strictEqual(realB.app, "Bitbucket", "real Sequence B app is Bitbucket");
+  assert.deepStrictEqual(
+    realB.tokenKey,
+    { service: "atlassian", name: "bitbucket_token" },
+    "real Sequence B token key"
+  );
+  assert.ok(realB.scopes.length >= 4, "real Sequence B has scopes");
+}
+
+console.log("parseWalkthrough real-doc integration test passed");
 
 // ---------------------------------------------------------------------------
 // probeTeamworkGraph (mocked McpClient)
