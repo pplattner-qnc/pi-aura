@@ -42,6 +42,7 @@ import type {
 } from "@pi-aura/shared/aura-client";
 import { buildAtlassianClient, fetchTaskDevLinks } from "./devlinks.js";
 import { loadSettings } from "./settings.js";
+import { createKeyring } from "@pi-aura/shared/keyring";
 import { buildActions } from "./build-actions.js";
 import { writeDashboardDigest } from "./write-dashboard-digest.js";
 import type {
@@ -473,6 +474,7 @@ async function fetchAction(): Promise<void> {
   } else {
     const { client: atlassian, warning: atlWarning } = await buildAtlassianClient(settings.mcpServers.atlassian);
     if (atlWarning) warnings.push(atlWarning);
+    const keyring = await createKeyring();
     try {
       // Fetch each queue task's detail, then also its children's details so we
       // collect subtask Jira keys too — PRs often live on a subtask's Jira key,
@@ -501,7 +503,7 @@ async function fetchAction(): Promise<void> {
             detail.jira_issues = [...(detail.jira_issues ?? []), ...childJira];
           }
         }
-        devLinks.push(await fetchTaskDevLinks(detail, settings.digest, settings.mcpServers, atlassian));
+        devLinks.push(await fetchTaskDevLinks(detail, settings.digest, keyring, atlassian));
       }
     } finally {
       if (atlassian) await atlassian.close();

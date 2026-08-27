@@ -1,16 +1,16 @@
 // bitbucket.ts — Bitbucket REST client (direct HTTP, basic auth).
 //
 // The atlassian-bitbucket MCP server is stdio (npx), which a standalone script
-// can't easily drive, but the same credentials in mcp.json
-// (ATLASSIAN_USER_EMAIL + ATLASSIAN_API_TOKEN) work against api.bitbucket.org
-// directly via HTTP basic auth. This module wraps the small subset we need:
-// list workspace repos, list repo PRs (with a q filter), list repo branches.
+// can't easily drive, but the same Atlassian email + API token stored in the
+// @pi-aura/shared keyring ({service:"atlassian",name:"email"} +
+// {service:"atlassian",name:"api_token"}) work against api.bitbucket.org
+// directly via HTTP basic auth. The workspace comes from
+// settings.aura.digest.bitbucket.workspace (a non-secret config value).
+// This module wraps the small subset we need: list workspace repos, list repo
+// PRs (with a q filter), list repo branches.
 
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-
-const MCP_CONFIG_PATH = join(homedir(), ".config", "mcp", "mcp.json");
+import { readAtlassianCredentials } from "./clients.js";
+import type { Keyring } from "@pi-aura/shared/keyring";
 
 interface BitbucketCreds {
   email: string;
@@ -18,23 +18,34 @@ interface BitbucketCreds {
   defaultWorkspace: string;
 }
 
-function loadCreds(serverName = "atlassian-bitbucket"): BitbucketCreds {
-  const config = JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf8")) as {
-    mcpServers: Record<string, { env?: Record<string, string> }>;
-  };
-  const env = config.mcpServers[serverName]?.env;
-  if (!env) throw new Error(`${serverName} server not found in mcp.json`);
-  const email = env.ATLASSIAN_USER_EMAIL;
-  const token = env.ATLASSIAN_API_TOKEN;
-  const defaultWorkspace = env.BITBUCKET_DEFAULT_WORKSPACE;
-  if (!email || !token || !defaultWorkspace) {
-    throw new Error(`${serverName} env missing ATLASSIAN_USER_EMAIL/ATLASSIAN_API_TOKEN/BITBUCKET_DEFAULT_WORKSPACE`);
+/** Load Bitbucket credentials from the shared Atlassian keyring + a
+ *  caller-provided defaultWorkspace (from settings). Throws an Error whose
+ *  message names `/aura secrets edit` when the Atlassian keyring entries are
+ *  missing/empty. Throws when defaultWorkspace is empty (workspace-specific
+ *  warning). The caller (devlinks.ts) wraps these throws into a layer-skip
+ *  warning, mirroring buildAtlassianClient's degrade pattern — the Bitbucket
+ *  layer is skipped, never an unhandled throw.
+ *
+ *  Exported for unit testing with an injectable Keyring + a
+ *  defaultWorkspace string — no mcp.json read. */
+export async function loadCreds(
+  keyring: Keyring,
+  defaultWorkspace: string,
+): Promise<BitbucketCreds> {
+  const { email, token } = await readAtlassianCredentials(keyring);
+  if (!defaultWorkspace) {
+    throw new Error("Bitbucket workspace not set in settings (configure settings.aura.digest.bitbucket.workspace)");
   }
   return { email, token, defaultWorkspace };
 }
 
-async function bbFetch<T>(path: string, query: Record<string, string>, serverName = "atlassian-bitbucket"): Promise<T> {
-  const creds = loadCreds(serverName);
+async function bbFetch<T>(
+  path: string,
+  query: Record<string, string>,
+  keyring: Keyring,
+  defaultWorkspace: string,
+): Promise<T> {
+  const creds = await loadCreds(keyring, defaultWorkspace);
   const url = new URL(`https://api.bitbucket.org/2.0${path}`);
   for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
   const res = await fetch(url, {
@@ -73,7 +84,10 @@ export interface BbBranch {
 }
 
 /** List all repo slugs in the workspace (sorted by updated_on desc). */
-export async function listWorkspaceRepos(workspace: string, serverName = "atlassian-bitbucket"): Promise<string[]> {
+export async function listWorkspaceRepos(
+  workspace: string,
+  keyring: Keyring,
+): Promise<string[]> {
   const slugs: string[] = [];
   let page = 1;
   // Page through; 100 per page.
@@ -81,7 +95,8 @@ export async function listWorkspaceRepos(workspace: string, serverName = "atlass
     const data = await bbFetch<BbPaginated<{ slug: string; updated_on: string }>>(
       `/repositories/${workspace}`,
       { pagelen: "100", page: String(page), sort: "updated_on", fields: "values.slug,pagelen,page,next" },
-      serverName
+      keyring,
+      workspace,
     );
     slugs.push(...data.values.map((v) => v.slug));
     if (!data.next) break;
@@ -91,21 +106,33 @@ export async function listWorkspaceRepos(workspace: string, serverName = "atlass
 }
 
 /** Search a repo's PRs (any state) by a `q` filter, returning matched PRs. */
-export async function searchRepoPRs(workspace: string, repo: string, q: string, serverName = "atlassian-bitbucket"): Promise<BbPullRequest[]> {
+export async function searchRepoPRs(
+  workspace: string,
+  repo: string,
+  q: string,
+  keyring: Keyring,
+): Promise<BbPullRequest[]> {
   const data = await bbFetch<BbPaginated<BbPullRequest>>(
     `/repositories/${workspace}/${repo}/pullrequests`,
     { pagelen: "50", q, fields: "values.id,values.title,values.state,values.source.branch.name,values.destination.branch.name,values.links.html.href" },
-    serverName
+    keyring,
+    workspace,
   );
   return data.values;
 }
 
 /** Search a repo's branches by a `q` filter (name~"..."). */
-export async function searchRepoBranches(workspace: string, repo: string, q: string, serverName = "atlassian-bitbucket"): Promise<BbBranch[]> {
+export async function searchRepoBranches(
+  workspace: string,
+  repo: string,
+  q: string,
+  keyring: Keyring,
+): Promise<BbBranch[]> {
   const data = await bbFetch<BbPaginated<BbBranch>>(
     `/repositories/${workspace}/${repo}/refs/branches`,
     { pagelen: "50", q, fields: "values.name,values.target.hash" },
-    serverName
+    keyring,
+    workspace,
   );
   return data.values;
 }

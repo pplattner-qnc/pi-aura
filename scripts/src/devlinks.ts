@@ -14,7 +14,7 @@
 
 import { execFileSync } from "node:child_process";
 import { McpClient } from "./mcp-client.js";
-import { atlassianClient } from "./clients.js";
+import { atlassianClient, readAtlassianCredentials } from "./clients.js";
 import {
   searchRepoBranches,
   searchRepoPRs,
@@ -28,7 +28,8 @@ import type {
   TaskDevLinks,
 } from "./types.js";
 import type { Task } from "@pi-aura/shared/aura-client";
-import type { AuraDigestSettings, McpServerNames } from "./settings.js";
+import type { AuraDigestSettings } from "./settings.js";
+import type { Keyring } from "@pi-aura/shared/keyring";
 
 // --- Atlassian Teamwork Graph shapes (subset) -----------------------------
 
@@ -139,7 +140,7 @@ function taskText(task: Task, jiraSummaries: string[]): string {
 export async function fetchTaskDevLinks(
   task: Task,
   settings: AuraDigestSettings,
-  mcpServers: McpServerNames,
+  keyring: Keyring,
   atlassian: McpClient | null,
 ): Promise<TaskDevLinks> {
   const taskKey = task.human_key;
@@ -256,41 +257,60 @@ export async function fetchTaskDevLinks(
   // --- Layer 3: Bitbucket fallback (preferredRepos + similarity top-5) --
   const ws = settings.bitbucket.workspace;
   const preferred = settings.bitbucket.preferredRepos;
-  // PR search + branch search both key off the Aura key.
-  const prQ = `title~"${taskKey}" or source.branch.name~"${taskKey}"`;
-  const brQ = `name~"${taskKey}"`;
-  const tryRepo = async (repo: string): Promise<boolean> => {
-    try {
-      const [repoPrs, repoBranches] = await Promise.all([
-        searchRepoPRs(ws, repo, prQ, mcpServers.atlassianBitbucket),
-        searchRepoBranches(ws, repo, brQ, mcpServers.atlassianBitbucket),
-      ]);
-      for (const p of repoPrs) addBbPr(p, repo, prs, seenPrUrls);
-      for (const b of repoBranches) addBbBranch(b, repo, branches);
-      return repoPrs.length > 0 || repoBranches.length > 0;
-    } catch (e) {
-      errors.push(`bitbucket/${repo}: ${e instanceof Error ? e.message : String(e)}`);
-      return false;
-    }
-  };
 
-  // 3a. preferredRepos first.
-  let found = false;
-  for (const repo of preferred) {
-    if (await tryRepo(repo)) found = true;
+  // Pre-check: load Bitbucket credentials once. If the keyring is empty or
+  // the workspace is missing, skip the entire Bitbucket layer with a single
+  // warning — mirroring buildAtlassianClient's degrade pattern — instead of
+  // repeating the same error for every repo.
+  let bbCreds: { email: string; token: string; defaultWorkspace: string } | null = null;
+  try {
+    const { email, token } = await readAtlassianCredentials(keyring);
+    if (!ws) {
+      throw new Error("Bitbucket workspace not set in settings (configure settings.aura.digest.bitbucket.workspace)");
+    }
+    bbCreds = { email, token, defaultWorkspace: ws };
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    errors.push(`Bitbucket dev-links layer skipped: ${reason}`);
   }
-  // 3b. If nothing found, similarity fallback over the whole workspace.
-  if (!found) {
-    try {
-      const allRepos = await listWorkspaceRepos(ws, mcpServers.atlassianBitbucket);
-      const jiraSummaries = (task.jira_issues ?? []).map((j) => j.summary ?? "");
-      const candidates = topReposBySimilarity(allRepos, taskText(task, jiraSummaries), 5)
-        .filter((r) => !preferred.includes(r));
-      for (const repo of candidates) {
-        await tryRepo(repo);
+
+  if (bbCreds) {
+    // PR search + branch search both key off the Aura key.
+    const prQ = `title~"${taskKey}" or source.branch.name~"${taskKey}"`;
+    const brQ = `name~"${taskKey}"`;
+    const tryRepo = async (repo: string): Promise<boolean> => {
+      try {
+        const [repoPrs, repoBranches] = await Promise.all([
+          searchRepoPRs(ws, repo, prQ, keyring),
+          searchRepoBranches(ws, repo, brQ, keyring),
+        ]);
+        for (const p of repoPrs) addBbPr(p, repo, prs, seenPrUrls);
+        for (const b of repoBranches) addBbBranch(b, repo, branches);
+        return repoPrs.length > 0 || repoBranches.length > 0;
+      } catch (e) {
+        errors.push(`bitbucket/${repo}: ${e instanceof Error ? e.message : String(e)}`);
+        return false;
       }
-    } catch (e) {
-      errors.push(`bitbucket/similarity: ${e instanceof Error ? e.message : String(e)}`);
+    };
+
+    // 3a. preferredRepos first.
+    let found = false;
+    for (const repo of preferred) {
+      if (await tryRepo(repo)) found = true;
+    }
+    // 3b. If nothing found, similarity fallback over the whole workspace.
+    if (!found) {
+      try {
+        const allRepos = await listWorkspaceRepos(ws, keyring);
+        const jiraSummaries = (task.jira_issues ?? []).map((j) => j.summary ?? "");
+        const candidates = topReposBySimilarity(allRepos, taskText(task, jiraSummaries), 5)
+          .filter((r) => !preferred.includes(r));
+        for (const repo of candidates) {
+          await tryRepo(repo);
+        }
+      } catch (e) {
+        errors.push(`bitbucket/similarity: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
   }
 
