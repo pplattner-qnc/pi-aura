@@ -312,9 +312,6 @@ async function resolveEmptyGuard(
   kind: string,
   current: string | null
 ): Promise<string | null> {
-  if (decision.action === "cancel") {
-    return null;
-  }
   if (decision.action === "unchanged") {
     // Unchanged: re-write the current value (idempotent) so the atomic
     // write covers both secrets.
