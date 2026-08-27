@@ -41,6 +41,7 @@ import type {
   ArtifactListItem,
 } from "@pi-aura/shared/aura-client";
 import { buildAtlassianClient, fetchTaskDevLinks } from "./devlinks.js";
+import { runTasks, type Kind, type KindMap, type TaskRef, type Hashable } from "./scheduler.js";
 import { loadSettings } from "./settings.js";
 import { createKeyring } from "@pi-aura/shared/keyring";
 import { buildActions } from "./build-actions.js";
@@ -461,79 +462,48 @@ async function fetchAction(): Promise<void> {
     r.total_required = ap.total_required;
   }
 
-  // --- Dev links: related PRs / branches per queue task --------------------
-  // Fetch each queue task's detail (for jira_issues + description), then fan
-  // out across Teamwork Graph (primary) + GitHub `gh search` + Bitbucket. The
-  // Aura client is still open for getTaskByHumanKey; the Atlassian client is
-  // built separately (Basic auth using the email + API token stored in the
-  // @pi-aura/shared keyring) and degrades to null if unavailable. Disabled
-  // when no auraDigest settings are present.
+  // --- Dev links + reviews-owed: one bounded-concurrency scheduler run ---
+  // Both fan-outs go through a single runTasks call with shared global state
+  // { devLinks, reviewsOwed }. A single root task spawns the dev-link rows
+  // (one per queue task) and the review-candidate tasks; the scheduler pumps
+  // them under one global cap. The previous sequential loops here were the
+  // dominant serial wait in the ~54s fetch.
+  //
+  // Task identity is (kind, input): kind -> {run, spawn, reduce} lives in a
+  // registry; a task is just {kind, input} with a hashable input. Dedup is
+  // first-seen-wins on (kind, keyOf(input)), so two parents spawning the same
+  // work share one run. reduce folds each output into the shared state as it
+  // completes; we read it back in deterministic key order afterwards.
   const settings = loadSettings();
   const devLinks: TaskDevLinks[] = [];
+  const reviewsOwed: DigestReviewOwed[] = [];
   if (!settings.digest) {
     warnings.push("Dev-links feature disabled: no `aura.digest` block in settings.json (set it to enable Teamwork Graph + GitHub + Bitbucket PR/branch lookup).");
   } else {
     const { client: atlassian, warning: atlWarning } = await buildAtlassianClient(settings.mcpServers.atlassian);
     if (atlWarning) warnings.push(atlWarning);
     const keyring = await createKeyring();
-    try {
-      // Fetch each queue task's detail, then also its children's details so we
-      // collect subtask Jira keys too — PRs often live on a subtask's Jira key,
-      // not the parent's (e.g. AURA-742's own Jira has no PRs; its sibling
-      // AURA-932 -> ANW-8184 has the OTEL PR). Merge child jira_issues in.
-      const taskDetails = await Promise.all(
-        queueRows.map((row) =>
-          aura.getTaskByHumanKey(row.key)
-            .catch(() => null)
-        )
-      );
-      for (const detail of taskDetails) {
-        if (!detail) continue;
-        // Pull in children's Jira keys (one getTaskByHumanKey per child).
-        const childKeys = (detail.children ?? []).map((c) => c.human_key).filter(Boolean);
-        if (childKeys.length > 0) {
-          const childDetails = await Promise.all(
-            childKeys.map((k) =>
-              aura.getTaskByHumanKey(k).catch(() => null)
-            )
-          );
-          const childJira = childDetails
-            .filter((c): c is Task => c !== null)
-            .flatMap((c) => c.jira_issues ?? []);
-          if (childJira.length > 0) {
-            detail.jira_issues = [...(detail.jira_issues ?? []), ...childJira];
-          }
-        }
-        devLinks.push(await fetchTaskDevLinks(detail, settings.digest, keyring, atlassian));
-      }
-    } finally {
-      if (atlassian) await atlassian.close();
-    }
-  }
+    const digestSettings = settings.digest;
 
-  // --- Reviews I owe: artifacts assigned to me as reviewer, not yet decided ---
-  // Candidates come from the `artifact.review_assigned` notifications (they're
-  // addressed to me by definition). For each, call getArtifactReview and keep
-  // only those where my reviewer row is still ASSIGNED. My user_id is derived
-  // from the first review I initiated (is_initiator: true) among the reviews
-  // already in d.reviews; fallback: match reviewer by name "Plattner, Patric".
-  const reviewsOwed: DigestReviewOwed[] = [];
-  const assignedNotif = allNotifs.filter(
-    (n) => safeString(n.type) === "artifact.review_assigned"
-  );
-  const candidateIds = new Set<string>();
-  const titleById = new Map<string, string>();
-  for (const n of assignedNotif) {
-    const p = (n.i18n_params as Record<string, unknown> | undefined) ?? {};
-    const id = safeString(p.artifactUuid) || safeString(p.artifact_uuid);
-    if (id) {
-      candidateIds.add(id);
-      const t = safeString(p.artifactTitle) || safeString(p.artifact_title);
-      if (t) titleById.set(id, t);
+    // --- review-candidate prerequisites (small, sequential, breaks early) ---
+    // My user_id comes from the first review I initiated. Candidates come from
+    // `artifact.review_assigned` notifications. Both are computed before the
+    // scheduler run and captured in the review kind's closure so the task
+    // input stays a plain hashable id.
+    const assignedNotif = allNotifs.filter(
+      (n) => safeString(n.type) === "artifact.review_assigned"
+    );
+    const candidateIds = new Set<string>();
+    const titleById = new Map<string, string>();
+    for (const n of assignedNotif) {
+      const p = (n.i18n_params as Record<string, unknown> | undefined) ?? {};
+      const id = safeString(p.artifactUuid) || safeString(p.artifact_uuid);
+      if (id) {
+        candidateIds.add(id);
+        const t = safeString(p.artifactTitle) || safeString(p.artifact_title);
+        if (t) titleById.set(id, t);
+      }
     }
-  }
-  if (candidateIds.size > 0) {
-    // Find my user id: from a review I initiated (my own artifact in d.reviews).
     let myUserId: string | null = null;
     for (const r of reviews) {
       try {
@@ -542,24 +512,125 @@ async function fetchAction(): Promise<void> {
       } catch { /* ignore */ }
     }
     const myName = "Plattner, Patric";
-    for (const id of candidateIds) {
-      try {
-        const ar = await aura.getArtifactReview(id);
-        // Find my reviewer row by user_id (preferred) or name fallback.
-        const me = ar.reviewers.find(
-          (rv) => (myUserId && rv.user_id === myUserId) || rv.user_name === myName
-        );
-        if (me && me.status === "ASSIGNED") {
-          reviewsOwed.push({
+
+    // --- shared global state + kinds ---
+    interface FanoutState {
+      devLinks: Map<string, TaskDevLinks>; // keyed by task_key (deterministic read order)
+      reviewsOwed: Map<string, DigestReviewOwed>; // keyed by artifact_id
+    }
+    const state: FanoutState = { devLinks: new Map(), reviewsOwed: new Map() };
+
+    // dev-links-row: fetch a queue task's detail (+ children's Jira keys),
+    // then fetchTaskDevLinks. Input is just the human key (hashable).
+    const devLinksRow: Kind<string, TaskDevLinks | null, FanoutState> = {
+      run: async (taskKey) => {
+        const detail = await aura.getTaskByHumanKey(taskKey).catch(() => null);
+        if (!detail) return null;
+        const childKeys = (detail.children ?? []).map((c) => c.human_key).filter(Boolean);
+        if (childKeys.length > 0) {
+          const childDetails = await Promise.all(
+            childKeys.map((k) => aura.getTaskByHumanKey(k).catch(() => null))
+          );
+          const childJira = childDetails
+            .filter((c): c is Task => c !== null)
+            .flatMap((c) => c.jira_issues ?? []);
+          if (childJira.length > 0) {
+            detail.jira_issues = [...(detail.jira_issues ?? []), ...childJira];
+          }
+        }
+        return await fetchTaskDevLinks(detail, digestSettings, keyring, atlassian);
+      },
+      reduce: (s, out) => {
+        if (out) s.devLinks.set(out.task_key, out);
+      },
+    };
+
+    // review-candidate: getArtifactReview + keep if my row is ASSIGNED.
+    // Input is just the artifact id (hashable).
+    const reviewCandidate: Kind<string, DigestReviewOwed | null, FanoutState> = {
+      run: async (id) => {
+        try {
+          const ar = await aura.getArtifactReview(id);
+          const me = ar.reviewers.find(
+            (rv) => (myUserId && rv.user_id === myUserId) || rv.user_name === myName
+          );
+          if (!me || me.status !== "ASSIGNED") return null;
+          return {
             artifact_id: id,
             title: ar.review_artifacts?.[0]?.title ?? titleById.get(id) ?? "",
             version: ar.version,
             deadline: ar.review_deadline_at ?? null,
             initiator: ar.initiator?.user_name ?? null,
             review_started_at: ar.review_started_at ?? null,
-          });
-        }
-      } catch { /* ignore unreachable artifacts */ }
+          };
+        } catch { /* unreachable artifact */ return null; }
+      },
+      reduce: (s, out) => {
+        if (out) s.reviewsOwed.set(out.artifact_id, out);
+      },
+    };
+
+    // start: the single root. Its run returns the known fan-out shape
+    // (rows + candidates); its reduce sets the task cap from that (the first
+    // reducer to set it wins), then its spawn enqueues the rows + candidates
+    // under that cap. So the cap is learned from the base data, not guessed
+    // at the call site.
+    interface StartOutput {
+      rows: number;
+      candidates: number;
+    }
+    const start: Kind<null, StartOutput, FanoutState> = {
+      run: async () => ({ rows: queueRows.length, candidates: candidateIds.size }),
+      reduce: (_s, out) => {
+        // Generous ceiling: 1 (start) + rows + candidates, times a 10x
+        // buffer so the cap only trips on a real runaway spawn bug, not on
+        // normal fan-out. Floored at 50 so tiny runs have headroom.
+        const ceiling = Math.max(50, (1 + out.rows + out.candidates) * 10);
+        return { setMaxTasks: ceiling };
+      },
+      spawn: () => [
+        ...queueRows.map((row): TaskRef => ({ kind: "dev-links-row", input: row.key })),
+        ...[...candidateIds].sort().map((id): TaskRef => ({ kind: "review-candidate", input: id })),
+      ],
+    };
+
+    const kinds: KindMap<FanoutState> = {
+      "start": start as unknown as Kind<Hashable, unknown, FanoutState>,
+      "dev-links-row": devLinksRow as unknown as Kind<Hashable, unknown, FanoutState>,
+      "review-candidate": reviewCandidate as unknown as Kind<Hashable, unknown, FanoutState>,
+    };
+
+    let capped = false;
+    let runWarnings: string[] = [];
+    let finalCap = 0;
+    try {
+      const result = await runTasks<FanoutState>(
+        { kind: "start", input: null }, kinds, state, { concurrency: 6, initialMaxTasks: 30 },
+      );
+      capped = result.capped;
+      runWarnings = result.runWarnings;
+      finalCap = result.maxTasks;
+    } finally {
+      if (atlassian) await atlassian.close();
+    }
+    if (capped) {
+      warnings.push(
+        `Digest task cap hit (${finalCap}); some dev-links/reviews work was dropped. This indicates a runaway spawn — please report it.`
+      );
+    }
+    // Surface scheduler-level notices (e.g. a reducer tried to set the cap
+    // after it was already set) — these are programming hints, not data loss.
+    for (const w of runWarnings) warnings.push(w);
+
+    // Read global state back in deterministic key order (queue order for
+    // dev-links, sorted artifact id for reviews-owed).
+    for (const row of queueRows) {
+      const dl = state.devLinks.get(row.key);
+      if (dl) devLinks.push(dl);
+    }
+    for (const id of [...candidateIds].sort()) {
+      const ro = state.reviewsOwed.get(id);
+      if (ro) reviewsOwed.push(ro);
     }
   }
   // --- Enrich queue rows with a compact Git column from dev_links ----------
