@@ -12,7 +12,7 @@ import { platform } from "node:process";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 import { appendEvent } from "./state.ts";
-import type { StateEvent } from "./state.ts";
+import { readState, type StateEvent } from "./state.ts";
 
 export interface DigestServer {
   port: number;
@@ -169,8 +169,41 @@ export async function startServer(opts: StartServerOptions): Promise<DigestServe
         });
         watchers.push(watcher);
 
+        // Watch state.json for agent→page events (progress, agent_log). On
+        // change, send the last event's id + type so the browser can
+        // refetch state.json. The statePath file may not exist yet when the
+        // SSE connects; watch lazily once it appears.
+        let stateWatcher: FSWatcher | undefined;
+        const openStateWatcher = (): void => {
+          if (stateWatcher) return;
+          try {
+            stateWatcher = watch(opts.statePath, (eventType) => {
+              if (eventType !== "change") return;
+              let latest: StateEvent | undefined;
+              try {
+                const state = readState(opts.statePath);
+                latest = state.events[state.events.length - 1];
+              } catch {
+                return;
+              }
+              if (latest) {
+                res.write(`event: state-change\ndata: {"id":${latest.id},"type":"${latest.type}"}\n\n`);
+              }
+            });
+            watchers.push(stateWatcher);
+          } catch {
+            // state.json may not exist yet; the next change will retry.
+          }
+        };
+        openStateWatcher();
+
         req.on("close", () => {
           watcher.close();
+          if (stateWatcher) {
+            stateWatcher.close();
+            const idx = watchers.indexOf(stateWatcher);
+            if (idx !== -1) watchers.splice(idx, 1);
+          }
           const idx = watchers.indexOf(watcher);
           if (idx !== -1) watchers.splice(idx, 1);
         });

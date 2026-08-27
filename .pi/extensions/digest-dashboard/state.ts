@@ -16,12 +16,30 @@ export interface UpdateViewPayload {
   [key: string]: unknown;
 }
 
+/** Wire shape for a scheduler progress node, mirroring the scheduler's
+ *  ProgressEvent (slice 1). Slice 3's onProgress hook projects a
+ *  ProgressEvent into this payload before POSTing it. */
+export interface ProgressPayload {
+  id: string;
+  label: string;
+  parentId?: string;
+  status: "running" | "done" | "error";
+  startedAt: number;
+  endedAt?: number;
+  kind: string;
+}
+
+/** Wire shape for a free-form agent log line rendered below the tree. */
+export interface AgentLogPayload {
+  message: string;
+}
+
 export interface StateEvent {
   id: number;
   ts: string;
   dir: "page→agent" | "agent→page";
-  type: "action_click" | "ack" | "update_view";
-  payload: ActionClickPayload | AckPayload | UpdateViewPayload;
+  type: "action_click" | "ack" | "update_view" | "progress" | "agent_log";
+  payload: ActionClickPayload | AckPayload | UpdateViewPayload | ProgressPayload | AgentLogPayload;
 }
 
 export interface StateFile {
