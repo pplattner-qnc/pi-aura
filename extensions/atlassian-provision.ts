@@ -197,7 +197,7 @@ export async function probeTeamworkGraph(
     await client.callTool("getTeamworkGraphContext", {
       cloudId,
       // Any work-item key — a 404 is a success signal (authenticated + reached the API).
-      workItemKey: "PROBE-0",
+      objectIdentifier: "PROBE-0",
     });
     await client.close().catch(() => {});
     return {
@@ -324,6 +324,21 @@ export async function probeBitbucket(
 // Probe function bundle (injectable for tests)
 // ---------------------------------------------------------------------------
 
+/** Build a live McpClient for the Rovo MCP V2 gateway, typed as the probe
+ *  seam. Imported dynamically so unit tests (which mock the probe) stay free
+ *  of the MCP SDK dependency. Used by both the initial probe and the re-probe
+ *  path so the factory is not duplicated. */
+async function makeMcpProbeClient(creds: { email: string; token: string }): Promise<McpProbeClient> {
+  const { McpClient } = await import("../scripts/src/mcp-client.js");
+  const credential = Buffer.from(`${creds.email}:${creds.token}`).toString("base64");
+  return new McpClient({
+    serverName: "atlassian",
+    url: "https://mcp.atlassian.com/v1/mcp/authv2",
+    authHeader: `Basic ${credential}`,
+    clientName: "pi-aura-guided-walkthrough",
+  }) as unknown as McpProbeClient;
+}
+
 /** The two probe functions, injectable so tests can mock them. */
 export interface ProbeFunctions {
   probeTeamworkGraph(
@@ -427,19 +442,7 @@ export async function runGuidedWalkthrough(
       // for the test path, the probe function itself receives a factory.
       // We build a default factory that creates a real McpClient — but the
       // test injects a fake probeTeamworkGraph that ignores it.
-      result = await probes.probeTeamworkGraph(creds, settings.jiraCloudId, async () => {
-        // Live client: McpClient against the Atlassian MCP server.
-        // Imported dynamically to keep the unit test (which mocks the probe)
-        // free of the MCP SDK dependency.
-        const { McpClient } = await import("../scripts/src/mcp-client.js");
-        const credential = Buffer.from(`${creds.email}:${creds.token}`).toString("base64");
-        return new McpClient({
-          serverName: "atlassian",
-          url: "https://mcp.atlassian.com/v1/mcp/authv2",
-          authHeader: `Basic ${credential}`,
-          clientName: "pi-aura-guided-walkthrough",
-        }) as unknown as McpProbeClient;
-      });
+      result = await probes.probeTeamworkGraph(creds, settings.jiraCloudId, () => makeMcpProbeClient(creds));
     } else {
       result = await probes.probeBitbucket(creds, settings.bitbucketWorkspace);
     }
@@ -465,16 +468,7 @@ export async function runGuidedWalkthrough(
       if (rerun) {
         // Re-run the probe with the same credentials.
         if (seq.kind === "teamwork-graph") {
-          result = await probes.probeTeamworkGraph(creds, settings.jiraCloudId, async () => {
-            const { McpClient } = await import("../scripts/src/mcp-client.js");
-            const credential = Buffer.from(`${creds.email}:${creds.token}`).toString("base64");
-            return new McpClient({
-              serverName: "atlassian",
-              url: "https://mcp.atlassian.com/v1/mcp/authv2",
-              authHeader: `Basic ${credential}`,
-              clientName: "pi-aura-guided-walkthrough",
-            }) as unknown as McpProbeClient;
-          });
+          result = await probes.probeTeamworkGraph(creds, settings.jiraCloudId, () => makeMcpProbeClient(creds));
         } else {
           result = await probes.probeBitbucket(creds, settings.bitbucketWorkspace);
         }
