@@ -118,6 +118,35 @@ export async function discoverPat(sources: DiscoverySource[]): Promise<Discovere
 
 const AURA_PAT_KEY: SecretKey = { service: "aura", name: "pat" };
 
+/** Labels shown in the /aura secrets edit chooser. Must be distinct — the
+ *  Atlassian token is labelled "Atlassian API token", not just "API token",
+ *  to disambiguate it from the Aura PAT. */
+const SECRET_LABELS = ["Aura PAT", "Atlassian email", "Atlassian API token"] as const;
+
+/** Prefill placeholders for each editable secret. */
+const SECRET_PLACEHOLDERS: Record<string, string> = {
+  "Aura PAT": "<paste your Aura PAT here>",
+  "Atlassian email": "<paste your Atlassian email here>",
+  "Atlassian API token": "<paste your Atlassian API token here>",
+};
+
+/** Map a chooser label to the SecretKey it corresponds to.
+ *
+ *  Pure function, unit-testable without a pi session or keyring.
+ *  Returns null for cancel (undefined) or an unknown label. */
+export function pickSecretKey(choice: string | undefined): SecretKey | null {
+  switch (choice) {
+    case "Aura PAT":
+      return { service: "aura", name: "pat" };
+    case "Atlassian email":
+      return { service: "atlassian", name: "email" };
+    case "Atlassian API token":
+      return { service: "atlassian", name: "api_token" };
+    default:
+      return null;
+  }
+}
+
 /** Decision produced by `decideEditAction` for the edit handler. */
 export type EditDecision =
   | { action: "cancel" }
@@ -146,16 +175,23 @@ export function decideEditAction(
 
 /** Thin UI wrapper around `decideEditAction`.
  *
- *  Opens the editor prefilled with the current PAT (or a placeholder), asks for
- *  confirmation when storing an empty PAT, and writes the result back to the
- *  keyring. Guards for cancel/non-TUI mode. */
+ *  Opens the editor prefilled with the current value (or a placeholder),
+ *  asks for confirmation when storing an empty value, and writes the result
+ *  back to the keyring. Guards for cancel/non-TUI mode.
+ *
+ *  Generalized in slice 3 (aura-secrets-edit-picker) to accept the SecretKey,
+ *  label, and placeholder as parameters so the chooser can route any of the
+ *  three editable secrets through the same edit flow. `decideEditAction` is
+ *  unchanged. */
 export async function handleEdit(
   ui: Pick<ExtensionUIContext, "notify" | "editor" | "confirm">,
   keyringFactory: () => Promise<Keyring>,
-  current: string | null
+  current: string | null,
+  key: SecretKey = AURA_PAT_KEY,
+  label: string = "Aura PAT",
+  placeholder: string = "<paste your Aura PAT here>"
 ): Promise<void> {
-  const placeholder = "<paste your Aura PAT here>";
-  const edited = await ui.editor("Aura PAT", current ?? placeholder);
+  const edited = await ui.editor(label, current ?? placeholder);
 
   const decision = decideEditAction(current, edited);
 
@@ -168,8 +204,8 @@ export async function handleEdit(
       return;
     case "confirm-empty": {
       const confirmed = await ui.confirm(
-        "Save empty PAT?",
-        "An empty PAT won't authenticate. Save anyway?"
+        `Save empty ${label}?`,
+        `An empty ${label} won't authenticate. Save anyway?`
       );
       if (!confirmed) {
         ui.notify("no change", "info");
@@ -184,8 +220,33 @@ export async function handleEdit(
 
   const value = decision.action === "save" ? decision.value : "";
   const keyring = await keyringFactory();
-  await keyring.setSecret(AURA_PAT_KEY, value);
+  await keyring.setSecret(key, value);
   ui.notify("saved", "info");
+}
+
+/** Chooser → edit orchestrator for `/aura secrets edit`.
+ *
+ *  Shows a `ctx.ui.select` chooser listing the editable secrets, maps the
+ *  choice to a SecretKey via `pickSecretKey`, reads the current value from
+ *  the keyring, and routes through the existing `handleEdit` flow.
+ *  Cancel (select returns undefined) exits with "no change" and no keyring
+ *  write. */
+export async function handleSecretEdit(
+  ui: Pick<ExtensionUIContext, "notify" | "editor" | "confirm" | "select">,
+  keyringFactory: () => Promise<Keyring>
+): Promise<void> {
+  const choice = await ui.select("Edit which secret?", [...SECRET_LABELS]);
+  const key = pickSecretKey(choice);
+  if (key === null) {
+    ui.notify("no change", "info");
+    return;
+  }
+
+  const keyring = await keyringFactory();
+  const current = await keyring.getSecret(key);
+  const label = choice!;
+  const placeholder = SECRET_PLACEHOLDERS[label];
+  await handleEdit(ui, () => Promise.resolve(keyring), current, key, label, placeholder);
 }
 
 /** Thin UI wrapper around `discoverPat`.
@@ -289,8 +350,7 @@ export default function auraSecretsExtension(pi: ExtensionAPI) {
           const { createKeyring, KeyringLockedError } = await import("@pi-aura/shared/keyring");
           try {
             const keyring = await createKeyring();
-            const current = await keyring.getSecret(AURA_PAT_KEY);
-            await handleEdit(ctx.ui, () => Promise.resolve(keyring), current);
+            await handleSecretEdit(ctx.ui, () => Promise.resolve(keyring));
           } catch (error) {
             if (error instanceof KeyringLockedError) {
               ctx.ui.notify(error.message, "error");
