@@ -154,10 +154,27 @@ export interface ActionClickPayload {
   aura_use_case: string;
 }
 
+/** Wire shape for a scheduler progress node, mirroring the scheduler's
+ *  ProgressEvent (slice 1). The browser renders these as a live tree. */
+export interface ProgressPayload {
+  id: string;
+  label: string;
+  parentId?: string;
+  status: "running" | "done" | "error";
+  startedAt: number;
+  endedAt?: number;
+  kind: string;
+}
+
+/** Wire shape for a free-form agent log line rendered below the tree. */
+export interface AgentLogPayload {
+  message: string;
+}
+
 export interface StateEvent {
   id: number;
   ts: string;
   dir: "page→agent" | "agent→page";
-  type: "action_click" | "ack" | "update_view";
-  payload: ActionClickPayload | unknown;
+  type: "action_click" | "ack" | "update_view" | "progress" | "agent_log";
+  payload: ActionClickPayload | ProgressPayload | AgentLogPayload | unknown;
 }
