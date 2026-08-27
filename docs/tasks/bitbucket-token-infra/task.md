@@ -4,7 +4,7 @@ type: feature
 slug: bitbucket-token-infra
 title: Add the bitbucket_token SecretKey + Bitbucket credential reader
 map: atlassian-bitbucket-token
-status: ready
+status: done
 slices:
 - bitbucket-token-key-and-reader
 ---
