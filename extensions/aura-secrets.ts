@@ -327,17 +327,50 @@ async function resolveEmptyGuard(
   return decision.value;
 }
 
+/** The default walkthrough-doc path the guided mode reads at run time. */
+export const WALKTHROUGH_DOC_PATH =
+  "docs/atlassian-api-token-walkthrough.md";
+
 /** Chooser → edit orchestrator for `/aura secrets edit`.
  *
- *  Shows a `ctx.ui.select` chooser listing the editable secrets. Aura PAT
- *  routes through the existing `handleEdit` (unchanged). The two Atlassian
- *  token labels route through `handleAtlassianPatEdit` (the combined
- *  email+token flow). Cancel (select returns undefined) exits with "no
- *  change" and no keyring write. */
+ *  Slice 3: first asks a yes/no "guided walkthrough?" prompt.
+ *  - **Yes** → the guided mode (runGuidedWalkthrough), which steps through
+ *    the walkthrough doc.
+ *  - **No** (confirm returns false) → the chooser (slice 2, unchanged).
+ *    The prompt is clearly "guided walkthrough?" so false means "just the
+ *    chooser".
+ *
+ *  When the chooser is shown, Aura PAT routes through the existing
+ *  `handleEdit` (unchanged). The two Atlassian token labels route through
+ *  `handleAtlassianPatEdit` (the combined email+token flow). Cancel (select
+ *  returns undefined) exits with "no change" and no keyring write. */
 export async function handleSecretEdit(
   ui: Pick<ExtensionUIContext, "notify" | "editor" | "confirm" | "select">,
   keyringFactory: () => Promise<Keyring>
 ): Promise<void> {
+  // Slice 3: yes/no "guided walkthrough?" prompt BEFORE the chooser.
+  const guided = await ui.confirm(
+    "Guided walkthrough?",
+    "Yes to step through creating both Atlassian tokens from the walkthrough doc. No to pick a single secret to edit."
+  );
+  if (guided) {
+    const { runGuidedWalkthrough } = await import("./atlassian-provision.ts");
+    const { loadSettings } = await import("../scripts/src/settings.ts");
+    const settings = loadSettings();
+    const digest = settings.digest;
+    await runGuidedWalkthrough(
+      ui,
+      keyringFactory,
+      WALKTHROUGH_DOC_PATH,
+      {
+        jiraCloudId: digest?.jiraCloudId ?? "",
+        bitbucketWorkspace: digest?.bitbucket?.workspace ?? "",
+      }
+    );
+    return;
+  }
+
+  // No → the chooser (slice 2, unchanged).
   const choice = await ui.select("Edit which secret?", [...SECRET_LABELS]);
   const key = pickSecretKey(choice);
   if (key === null) {
