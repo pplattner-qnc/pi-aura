@@ -199,4 +199,35 @@ Out of scope (see map.md "Out of scope"):
   tests passed; `npx vitest run` 12 files / 81 tests passed; `npx tsc --noEmit -p
   scripts/tsconfig.json` clean. No blockers from verification.
 
+### slice: digest-script-own-credential (landed)
+
+- `readOAuthTokenFromKeyring` and the entire pi-mcp-adapter OAuth keyring-read
+  path (the `@napi-rs/keyring` dynamic import, `createHash` import, and the
+  chunked-reassembly logic) were deleted from `scripts/src/clients.ts`. The
+  `atlassianClient` now exclusively uses `readAtlassianCredentials(keyring)`
+  (from slice 2) to read the email + API token from the `@pi-aura/shared`
+  keyring and sends HTTP Basic auth. `devlinks.ts` call sites are unchanged.
+- The module comment in `clients.ts` was updated to remove the "kept below for
+  slice 4 to delete" note, and the `node:crypto` import was removed (no longer
+  needed after deleting the sha256 account-name computation).
+- `scripts/src/keyring.ts`: a comment that referenced `@napi-rs/keyring` by
+  name was generalized to "other keyring libs" since the project no longer
+  depends on that library directly.
+- New tests in `test/atlassian-keyring-auth/clients.test.ts` (slice 4 block,
+  5 tests): assert `readOAuthTokenFromKeyring` is no longer exported from
+  `clients.ts`; verify `atlassianClient` throws a `/aura secrets edit` message
+  when the keyring is empty; verify wrapping that error yields a warning
+  containing `Teamwork Graph dev-links layer skipped` and `/aura secrets edit`;
+  verify the warning does NOT contain `invalid_token`; verify the exact warning
+  format matches
+  `Teamwork Graph dev-links layer skipped: No Atlassian credential in keyring (run \`/aura secrets edit\`)`.
+- The grep sweep (`grep -rn "readOAuthTokenFromKeyring\|pi-mcp-adapter.oauth\|sha256-" scripts/src`)
+  was performed by the TDD worker; no remaining references to the old path
+  were found in `scripts/src` or the digest-dashboard extension.
+- TDD worker divergence notes: the missing-credential tests replicate the
+  try/catch wrapping shape from `devlinks.ts`'s `buildAtlassianClient` rather
+  than injecting a fake keyring into `buildAtlassianClient` directly, because
+  `buildAtlassianClient` does not accept an injectable keyring seam. This is
+  a test-level choice and does not affect production behavior.
+
 

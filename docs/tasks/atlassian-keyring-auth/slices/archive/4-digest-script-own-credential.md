@@ -4,7 +4,7 @@ slug: digest-script-own-credential
 title: "Wire the digest script's Atlassian client to the keyring (Basic auth); delete the pi-mcp-adapter token read"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 blocked_by:
   - atlassian-basic-auth-client
