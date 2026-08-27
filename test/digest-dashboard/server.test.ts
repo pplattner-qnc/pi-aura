@@ -317,4 +317,195 @@ describe("digest-dashboard server", () => {
     expect(state.server_started).toBe(initial.server_started);
     expect(state.events).toHaveLength(1);
   });
+
+  it("emits a state-change SSE event when a progress event is POSTed", async () => {
+    // Seed state.json so the /events watcher has a file to watch from the start.
+    writeFileSync(statePath, JSON.stringify({ pid: null, server_started: null, events: [] }));
+    writeFileSync(dashboardPath, JSON.stringify(createFixtureDigest()));
+
+    const opts: StartServerOptions = {
+      dashboardPath,
+      statePath,
+      serverUrlPath,
+      openBrowser: false,
+    };
+    server = await startServer(opts);
+
+    const receivedEvents: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const req = http.request(`${server.url}events`, { method: "GET" }, (res) => {
+        expect(res.statusCode).toBe(200);
+        res.on("data", (chunk: Buffer) => {
+          const text = chunk.toString("utf-8");
+          receivedEvents.push(text);
+          if (text.includes("event: state-change")) {
+            req.destroy();
+            resolve();
+          }
+        });
+      });
+      req.on("error", reject);
+      req.on("close", () => resolve());
+      req.end();
+
+      // Allow the watcher to attach, then POST a progress event.
+      setTimeout(async () => {
+        await request(
+          `${server.url}api/state`,
+          "POST",
+          JSON.stringify({
+            id: 1,
+            ts: new Date().toISOString(),
+            dir: "agent→page",
+            type: "progress",
+            payload: {
+              id: "node-1",
+              label: "Fetching tasks",
+              status: "running",
+              startedAt: Date.now(),
+              kind: "start",
+            },
+          }),
+        );
+      }, 80);
+    });
+
+    expect(receivedEvents.some((e) => e.includes("event: state-change"))).toBe(true);
+    // The state-change data should carry the new event's id and type.
+    const stateChangeChunk = receivedEvents.find((e) => e.includes("event: state-change"))!;
+    expect(stateChangeChunk).toContain('"id":1');
+    expect(stateChangeChunk).toContain('"type":"progress"');
+
+    // The event should also land in state.json.
+    const state = JSON.parse(readFileSync(statePath, "utf-8"));
+    expect(state.events).toHaveLength(1);
+    expect(state.events[0].type).toBe("progress");
+  });
+
+  it("emits a state-change SSE event when an agent_log event is POSTed", async () => {
+    writeFileSync(statePath, JSON.stringify({ pid: null, server_started: null, events: [] }));
+    writeFileSync(dashboardPath, JSON.stringify(createFixtureDigest()));
+
+    const opts: StartServerOptions = {
+      dashboardPath,
+      statePath,
+      serverUrlPath,
+      openBrowser: false,
+    };
+    server = await startServer(opts);
+
+    const receivedEvents: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const req = http.request(`${server.url}events`, { method: "GET" }, (res) => {
+        res.on("data", (chunk: Buffer) => {
+          const text = chunk.toString("utf-8");
+          receivedEvents.push(text);
+          if (text.includes("event: state-change")) {
+            req.destroy();
+            resolve();
+          }
+        });
+      });
+      req.on("error", reject);
+      req.on("close", () => resolve());
+      req.end();
+
+      setTimeout(async () => {
+        await request(
+          `${server.url}api/state`,
+          "POST",
+          JSON.stringify({
+            id: 1,
+            ts: new Date().toISOString(),
+            dir: "agent→page",
+            type: "agent_log",
+            payload: { message: "Augmenting AURA-42…" },
+          }),
+        );
+      }, 80);
+    });
+
+    expect(receivedEvents.some((e) => e.includes("event: state-change"))).toBe(true);
+    const stateChangeChunk = receivedEvents.find((e) => e.includes("event: state-change"))!;
+    expect(stateChangeChunk).toContain('"id":1');
+    expect(stateChangeChunk).toContain('"type":"agent_log"');
+
+    const state = JSON.parse(readFileSync(statePath, "utf-8"));
+    expect(state.events[0].type).toBe("agent_log");
+  });
+
+  it("still emits digest.json change events alongside state-change (regression)", async () => {
+    writeFileSync(statePath, JSON.stringify({ pid: null, server_started: null, events: [] }));
+    writeFileSync(dashboardPath, JSON.stringify(createFixtureDigest()));
+
+    const opts: StartServerOptions = {
+      dashboardPath,
+      statePath,
+      serverUrlPath,
+      openBrowser: false,
+    };
+    server = await startServer(opts);
+
+    const receivedEvents: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const req = http.request(`${server.url}events`, { method: "GET" }, (res) => {
+        res.on("data", (chunk: Buffer) => {
+          const text = chunk.toString("utf-8");
+          receivedEvents.push(text);
+          if (receivedEvents.some((e) => e.includes("event: change"))) {
+            req.destroy();
+            resolve();
+          }
+        });
+      });
+      req.on("error", reject);
+      req.on("close", () => resolve());
+      req.end();
+
+      setTimeout(() => {
+        appendFileSync(dashboardPath, "\n");
+      }, 80);
+    });
+
+    expect(receivedEvents.some((e) => e.includes("event: change"))).toBe(true);
+  });
+
+  it("serializes concurrent progress POSTs with monotonic ids", async () => {
+    writeFileSync(statePath, JSON.stringify({ pid: null, server_started: null, events: [] }));
+
+    const opts: StartServerOptions = {
+      dashboardPath,
+      statePath,
+      serverUrlPath,
+      openBrowser: false,
+    };
+    server = await startServer(opts);
+
+    const posts = Array.from({ length: 5 }, (_, i) =>
+      request(
+        `${server.url}api/state`,
+        "POST",
+        JSON.stringify({
+          id: i + 1,
+          ts: new Date().toISOString(),
+          dir: "agent→page",
+          type: "progress",
+          payload: {
+            id: `node-${i}`,
+            label: `node ${i}`,
+            status: "running",
+            startedAt: i,
+            kind: "start",
+          },
+        }),
+      ),
+    );
+
+    await Promise.all(posts);
+
+    const state = JSON.parse(readFileSync(statePath, "utf-8"));
+    expect(state.events).toHaveLength(5);
+    const ids = state.events.map((e: { id: number }) => e.id).sort((a: number, b: number) => a - b);
+    expect(ids).toEqual([1, 2, 3, 4, 5]);
+  });
 });
