@@ -242,3 +242,41 @@ Out of scope (see map.md):
   `make` unavailable in the sandbox; equivalent `tsc` + `esbuild.config.mjs`
   commands (what `make build` runs) were run directly and passed.
 - This was the last slice; the task is complete.
+
+### Coherence refactor + whole-task code review (post-landing)
+
+- Extracted `makeMcpProbeClient(creds)` in `extensions/atlassian-provision.ts`:
+  the `McpClient` factory closure was duplicated verbatim in both the initial
+  probe and the re-probe path (the review's clearest Duplicated-Code smell).
+  One factory, two call sites.
+- Aligned `probeTeamworkGraph`'s `callTool` arg from `workItemKey` to
+  `objectIdentifier`, matching the real `getTeamworkGraphContext` tool signature
+  (cosmetic — the probe's success criterion is reaching the API, but
+  correctness matters).
+- Advisory whole-task code review (`code-reviewer`): no documented-standard
+  breach; all spec criteria met. Judgement-call smells left as-is: the
+  `KNOWN_SECRET_KEYS` array duplicated across the 3 keyring backends
+  (intentional — each backend is independent), the `ProbeFunctions` test seam
+  (justifiable boundary abstraction), and the `{email, token}` data clump
+  (a small `Credentials` type is a future-refactor candidate, not this task).
+
+### Notable implementation deviations (documented for future readers)
+
+- **Slice 2 (`handleAtlassianPatEdit`)** deliberately composes `decideEditAction`
+  + a `resolveEmptyGuard` + an atomic double-write instead of calling
+  `handleEdit` twice. `handleEdit` writes immediately on save, so calling it
+  for the email then checking for a token cancel would leave a
+  half-provisioned PAT. The atomicity contract (cancel mid-flow → no partial
+  write) — the slice's explicitly-called-out key UX decision — was prioritized
+  over the literal "call `handleEdit` twice" phrasing. `handleEdit` /
+  `decideEditAction` remain unchanged per-secret primitives.
+- **Slice 3 (`runGuidedWalkthrough`)** inlines its own email+token atomic-write
+  rather than calling slice 2's `handleAtlassianPatEdit`, because the guided
+  mode needs the stored creds for the post-store probe (`handleAtlassianPatEdit`
+  returns `void`). The atomicity contract is preserved and tested. A shared
+  `storeEmailAndTokenAtomically` helper is a future-refactor candidate (≥2 call
+  sites would then exist).
+- **Slice 3 module split**: the guided-mode machinery (probes + parser +
+  orchestrator) lives in a new sibling `extensions/atlassian-provision.ts`
+  (489 lines) rather than growing `aura-secrets.ts` to ~1000 lines, per the
+  code-quality rule's "split proactively" guidance.
