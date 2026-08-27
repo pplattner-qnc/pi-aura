@@ -10,7 +10,28 @@
 // Done when the queue is empty, nothing is in flight, and the drain is idle.
 // Returns the final state.
 //
-// Synchronization guarantees (the point of this revision):
+// Progress model (imperative, task-driven):
+//   - Each task receives `ctx.progress` and `ctx.node` (its own attachment;
+//     undefined for the root `start` task).
+//   - `ctx.progress.create(parent?, label)` opens a node (spinner, "running")
+//     and returns an opaque NodeHandle. Nodes are append-only: they STAY
+//     ON SCREEN until the end of the run — never removed mid-run.
+//   - `ctx.progress.finish(node)` marks the node "done" right now (spinner→✓).
+//     The node stays visible; only its status changes.
+//   - `ctx.progress.finish(node, { deferCloseForChildren: true })` opts into
+//     "close when all my child-nodes are terminal": the parent keeps spinning
+//     until the last child-node is done (→ done) or any child-node errors
+//     (→ error). A deferred node with no children becomes done immediately.
+//     Child-nodes are dynamic — ones created after the finish still count.
+//   - `ctx.progress.setStatus(node, "running"|"done"|"error")` mutates a
+//     node's status directly.
+//   - `TaskRef.node` carries a parent-created NodeHandle; the scheduler
+//     threads it to the child as `ctx.node`.
+//   - The scheduler's only auto-close is an end-of-run sweep: any node still
+//     "running" (never finished, or deferred-and-unresolved) → "error".
+//     No per-task auto-close, no close-on-throw.
+//
+// Synchronization guarantees (unchanged from the original scheduler):
 //   - At most ONE reducer runs at a time. Completed tasks hand (kind, output)
 //     to a single FIFO; one synchronous drain processes them, so reduces
 //     never overlap. This is structural, not a run-to-completion convention.
@@ -19,6 +40,9 @@
 //     interleave and tear state, so it is treated as a programming error.
 //   - spawn runs AFTER that task's reduce, inside the same drain, so a spawn
 //     that reads ctx.state sees the post-fold view.
+//   - onProgress fires for every status transition; calls are synchronous and
+//     serialized (single-threaded JS + the synchronous drain), so they never
+//     overlap with each other or with a reduce.
 //
 // Failure posture (loud vs degrade):
 //   - run() failure is graceful: it is caught, no reduce happens, the task
@@ -70,10 +94,65 @@ function canonicalize(v: Hashable): string {
 /** A reference to a task — just a kind + its hashable input. Identity for
  *  dedup is `${kind}\u0000${keyOf(input)}`; first-seen wins, later duplicates
  *  are dropped (not run). Carrying only kind+input (no closure) is what makes
- *  cross-parent dedup sound: two identical refs always mean the same work. */
+ *  cross-parent dedup sound: two identical refs always mean the same work.
+ *  `node` optionally carries a parent-created progress node that the scheduler
+ *  threads to the child as `ctx.node` (its attachment in the progress tree). */
 export interface TaskRef {
   readonly kind: string;
   readonly input: Hashable;
+  /** Parent-created progress node the child attaches to. The scheduler
+   *  threads this to the child as `ctx.node`. Purely presentational — does
+   *  not affect dedup or execution. */
+  readonly node?: NodeHandle;
+}
+
+/** Opaque handle to a progress node. Callers receive these only from
+ *  `ctx.progress.create` — they can't forge one. At runtime it's a plain
+ *  object with a numeric `id`; the `_nodeHandleBrand` field is a literal-type
+ *  marker that makes accidental construction structurally unlikely. */
+export interface NodeHandle {
+  /** @internal Brand marker — do not construct manually. */
+  readonly _nodeHandleBrand: true;
+  /** @internal Unique node id within this run. */
+  readonly id: number;
+}
+
+/** Status of a progress node, pushed to onProgress as it changes. */
+export type ProgressStatus = "running" | "done" | "error";
+
+/** A progress event the scheduler pushes to the onProgress hook. The hook
+ *  owns delivery (e.g. POST to the dashboard). `id`/`parentId` are string
+ *  projections of the internal numeric node ids; `kind` is the kind of the
+ *  task that created this node (handy for debugging). */
+export interface ProgressEvent {
+  id: string;
+  label: string;
+  parentId?: string;
+  status: ProgressStatus;
+  startedAt: number;
+  endedAt?: number;
+  /** Kind that owns this node — handy for debugging. */
+  kind: string;
+}
+
+/** Imperative progress API handed to each task via `ctx.progress`. Tasks
+ *  drive the live tree themselves: create nodes, finish them (immediately or
+ *  deferred until child-nodes close), and set status directly. The scheduler
+ *  never auto-opens or auto-closes nodes around `run` — it only sweeps
+ *  still-running nodes to "error" at the end of the whole run. */
+export interface Progress {
+  /** Open a new node under `parent` (or root level if undefined). Returns
+   *  an opaque NodeHandle. A "running" ProgressEvent fires immediately. The
+   *  node stays on screen until the end of the run — it is never removed. */
+  create(parent: NodeHandle | undefined, label: string): NodeHandle;
+  /** Mark `node` done right now (spinner→✓). The node stays visible; only
+   *  its status changes. With `deferCloseForChildren: true`, does nothing
+   *  to the status now — instead the node resolves to done (all children
+   *  done) or error (any child error) once all child-nodes are terminal.
+   *  A deferred node with no children becomes done immediately. */
+  finish(node: NodeHandle, opts?: { deferCloseForChildren?: boolean }): void;
+  /** Mutate a node's status directly (e.g. mark it error before returning). */
+  setStatus(node: NodeHandle, status: ProgressStatus): void;
 }
 
 /** Per-run context handed to run/spawn. `state` is the live global state —
@@ -81,13 +160,22 @@ export interface TaskRef {
  *  under a long-running task as siblings complete and reduce. It is a LIVE
  *  VIEW, not a snapshot: if a task needs a stable reading, it must copy the
  *  fields it reads. Mutate S only by returning a value your kind's reduce
- *  folds in. */
+ *  folds in.
+ *
+ *  `progress` is the imperative node API. `node` is this task's own
+ *  attachment — the parent-created node threaded from `TaskRef.node`, or
+ *  `undefined` for the root `start` task (root level). */
 export interface Ctx<S> {
   readonly state: Readonly<S>;
   /** True once the run hit its task cap and started dropping overflow. A task
    *  can read this to cheaply skip work whose only purpose was to spawn more
    *  (no point producing children that will be dropped). */
   readonly capped: boolean;
+  /** Imperative progress-tree API. */
+  readonly progress: Progress;
+  /** This task's attachment in the progress tree — the parent-created node
+   *  threaded from `TaskRef.node`, or `undefined` for the root task. */
+  readonly node: NodeHandle | undefined;
 }
 
 /** A kind of task: `run` does the work, `spawn` (optional) derives child
@@ -133,6 +221,12 @@ export interface SchedulerOptions {
    *  setMaxTasks replaces this for the rest of the run; later attempts are
    *  ignored and recorded in runWarnings. */
   initialMaxTasks?: number;
+  /** Live-progress hook. The scheduler calls it with a ProgressEvent for
+   *  every status transition (node open, finish, status change, end-of-run
+   *  sweep). The hook owns delivery (e.g. POST to the dashboard). Calls are
+   *  synchronous and serialized (single-threaded JS + the synchronous drain),
+   *  so they never overlap with each other or with a reduce. */
+  onProgress?: (event: ProgressEvent) => void;
 }
 
 /** Returned run metadata. `capped` is true iff the task cap was hit and
@@ -164,6 +258,7 @@ export async function runTasks<S>(
   opts: SchedulerOptions = {},
 ): Promise<RunResult<S>> {
   const concurrency = Math.max(1, opts.concurrency ?? 8);
+  const onProgress = opts.onProgress;
   // Start conservative; the first base-data reducer replaces this with the
   // real ceiling once it knows the fan-out shape. This unbounded-by-default
   // value would let a runaway spawn loop forever, so it stays finite.
@@ -176,6 +271,119 @@ export async function runTasks<S>(
   // once it exceeds maxTasks, overflow is dropped and `capped` flips.
   let taskCount = 0;
 
+  // --- progress node tracking ----------------------------------------------
+  // Internal state for the imperative progress model. Nodes are append-only
+  // (never removed); the scheduler tracks parent→child relationships to
+  // honor deferCloseForChildren, and sweeps still-running nodes to "error"
+  // at the end of the run.
+  interface NodeRecord {
+    label: string;
+    parentId: number | null; // null = root-level node
+    status: ProgressStatus;
+    children: Set<number>; // child node ids
+    deferCloseForChildren: boolean;
+    startedAt: number;
+    endedAt?: number;
+    kind: string;
+  }
+  const nodes = new Map<number, NodeRecord>();
+  let nextNodeId = 0;
+
+  const emit = (nodeId: number, status: ProgressStatus): void => {
+    if (!onProgress) return;
+    const rec = nodes.get(nodeId);
+    if (!rec) return;
+    onProgress({
+      id: String(nodeId),
+      label: rec.label,
+      parentId: rec.parentId !== null ? String(rec.parentId) : undefined,
+      status,
+      startedAt: rec.startedAt,
+      endedAt: rec.endedAt,
+      kind: rec.kind,
+    });
+  };
+
+  // Transition a node to a new status. No-op if the status hasn't changed.
+  // After the transition, if this node has a deferred parent, check whether
+  // the parent should now resolve (cascade up the tree).
+  const transition = (nodeId: number, status: ProgressStatus): void => {
+    const rec = nodes.get(nodeId);
+    if (!rec || rec.status === status) return;
+    rec.status = status;
+    if (status !== "running") rec.endedAt = Date.now();
+    emit(nodeId, status);
+    if (rec.parentId !== null) checkDeferred(rec.parentId);
+  };
+
+  // Check whether a deferred parent should resolve: done iff all child-nodes
+  // are terminal (and all done); error if any child-node errored. Cascades
+  // upward via `transition` → `checkDeferred`.
+  const checkDeferred = (parentId: number): void => {
+    const parent = nodes.get(parentId);
+    if (!parent || !parent.deferCloseForChildren || parent.status !== "running") return;
+    let allTerminal = true;
+    let anyError = false;
+    for (const childId of parent.children) {
+      const child = nodes.get(childId);
+      if (!child) continue;
+      if (child.status === "running") { allTerminal = false; break; }
+      if (child.status === "error") anyError = true;
+    }
+    if (allTerminal) transition(parentId, anyError ? "error" : "done");
+  };
+
+  const createNode = (parentId: number | null, label: string, kind: string): NodeHandle => {
+    const id = nextNodeId++;
+    nodes.set(id, {
+      label,
+      parentId,
+      status: "running",
+      children: new Set(),
+      deferCloseForChildren: false,
+      startedAt: Date.now(),
+      kind,
+    });
+    if (parentId !== null) {
+      const parent = nodes.get(parentId);
+      if (parent) parent.children.add(id);
+    }
+    emit(id, "running");
+    return { _nodeHandleBrand: true, id } as NodeHandle;
+  };
+
+  const makeProgress = (kind: string): Progress => ({
+    create: (parent, label) => createNode(parent ? parent.id : null, label, kind),
+    finish: (node, opts) => {
+      const rec = nodes.get(node.id);
+      if (!rec) return;
+      if (opts?.deferCloseForChildren) {
+        rec.deferCloseForChildren = true;
+        if (rec.children.size === 0) {
+          // No children → done immediately.
+          transition(node.id, "done");
+        } else {
+          // Children exist — resolve if they're all already terminal.
+          checkDeferred(node.id);
+        }
+      } else {
+        transition(node.id, "done");
+      }
+    },
+    setStatus: (node, status) => transition(node.id, status),
+  });
+
+  // Per-task context: `state`/`capped` are live getters (shared); `progress`
+  // and `node` are per-task (the progress closure captures the task's kind;
+  // `node` is threaded from `TaskRef.node`).
+  const makeCtx = (taskKind: string, taskNode: NodeHandle | undefined): Ctx<S> => ({
+    get state() { return state; },
+    get capped() { return capped; },
+    progress: makeProgress(taskKind),
+    node: taskNode,
+  });
+
+  // --- enqueue + dedup ------------------------------------------------------
   const queue: TaskRef[] = [];
   const seen = new Set<string>();
   const identity = (ref: TaskRef) => `${ref.kind}\u0000${keyOf(ref.input)}`;
@@ -206,14 +414,16 @@ export async function runTasks<S>(
     }
   };
 
-  // Serialized completion drain: at most one reduce (and its spawn) runs at
-  // a time. Because reduce is synchronous, the drain processes the whole
-  // FIFO in one synchronous pass; the `draining` flag guards against the
-  // (impossible-but-defensive) re-entrant call.
+  // --- serialized completion drain -----------------------------------------
+  // At most one reduce (and its spawn) runs at a time. Because reduce is
+  // synchronous, the drain processes the whole FIFO in one synchronous pass;
+  // the `draining` flag guards against the (impossible-but-defensive)
+  // re-entrant call.
   interface CompletionJob {
     ref: TaskRef;
     kind: Kind<Hashable, unknown, S>;
     output: unknown;
+    ctx: Ctx<S>;
   }
   const completionQueue: CompletionJob[] = [];
   let draining = false;
@@ -239,14 +449,13 @@ export async function runTasks<S>(
     }
   };
 
-  const ctx: Ctx<S> = { get state() { return state; }, get capped() { return capped; } };
   const drainCompletions = (): void => {
     if (draining) return; // defensive: sync code can't actually re-enter.
     draining = true;
     try {
       while (completionQueue.length > 0) {
         if (settled) return;
-        const { ref, kind, output } = completionQueue.shift()!;
+        const { ref, kind, output, ctx: taskCtx } = completionQueue.shift()!;
         // Reducer + spawn run under a try so a throw fails the run loudly
         // (via fail) instead of escaping as an unhandled rejection out of
         // the .then callback. An async reducer (thenable return) is also a
@@ -275,7 +484,7 @@ export async function runTasks<S>(
           }
           if (kind.spawn) {
             // spawn runs after this task's reduce, so it sees the post-fold S.
-            const children = kind.spawn(output, ref.input, ctx);
+            const children = kind.spawn(output, ref.input, taskCtx);
             enqueue(children);
           }
         } catch (e) {
@@ -288,6 +497,7 @@ export async function runTasks<S>(
     }
   };
 
+  // --- pump -----------------------------------------------------------------
   let inFlight = 0;
   const pump = (): void => {
     if (settled) return;
@@ -301,20 +511,25 @@ export async function runTasks<S>(
         return;
       }
       inFlight++;
+      // Per-task context: threads the parent-created node as ctx.node and
+      // captures the kind for progress events.
+      const taskCtx = makeCtx(ref.kind, ref.node);
       Promise.resolve()
-        .then(() => kind.run(ref.input, ctx))
+        .then(() => kind.run(ref.input, taskCtx))
         .then(
           (output) => {
             // Hand the result to the serialized drain. reduce + spawn happen
             // there, so at most one reducer runs at a time and spawn sees the
             // post-fold state.
-            completionQueue.push({ ref, kind, output });
+            completionQueue.push({ ref, kind, output, ctx: taskCtx });
             drainCompletions();
           },
           () => {
             // run() failed: graceful degradation. No reduce, no spawn. The
             // task just contributes nothing — by design, so an external
             // failure (a downed API) doesn't abort the whole digest.
+            // Per the imperative progress model, no per-task auto-close of
+            // nodes happens here — only the end-of-run sweep closes them.
           },
         )
         .finally(() => {
@@ -332,5 +547,26 @@ export async function runTasks<S>(
   pump();
 
   await done;
+
+  // --- end-of-run sweep -----------------------------------------------------
+  // Safety net: any node still "running" (never finished, or deferred-and-
+  // unresolved) → "error". First try to resolve deferred parents whose
+  // children may all be terminal (in case a child terminalized without
+  // triggering the check), then mark any still-running node as "error".
+  // `transition` cascades upward so a child's error can resolve a deferred
+  // parent to "error" before the parent itself is swept.
+  for (const id of [...nodes.keys()]) {
+    const rec = nodes.get(id)!;
+    if (rec.status === "running" && rec.deferCloseForChildren) {
+      checkDeferred(id);
+    }
+  }
+  for (const id of [...nodes.keys()]) {
+    const rec = nodes.get(id)!;
+    if (rec.status === "running") {
+      transition(id, "error");
+    }
+  }
+
   return { state, capped, taskCount, runWarnings, maxTasks };
 }
