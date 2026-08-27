@@ -7620,9 +7620,9 @@ var require_content_type = __commonJS({
 });
 
 // src/aura-digest.ts
-import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync5, rmSync, existsSync as existsSync4 } from "node:fs";
-import { resolve, join as join6 } from "node:path";
-import { tmpdir, homedir as homedir6 } from "node:os";
+import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync4, rmSync, existsSync as existsSync4 } from "node:fs";
+import { resolve, join as join5 } from "node:path";
+import { tmpdir, homedir as homedir5 } from "node:os";
 import { randomBytes as randomBytes2 } from "node:crypto";
 
 // ../node_modules/@hey-api/client-fetch/dist/index.js
@@ -19314,24 +19314,15 @@ async function atlassianClient(serverName = "atlassian", opts) {
 }
 
 // src/bitbucket.ts
-import { readFileSync as readFileSync3 } from "node:fs";
-import { homedir as homedir4 } from "node:os";
-import { join as join4 } from "node:path";
-var MCP_CONFIG_PATH2 = join4(homedir4(), ".config", "mcp", "mcp.json");
-function loadCreds(serverName = "atlassian-bitbucket") {
-  const config2 = JSON.parse(readFileSync3(MCP_CONFIG_PATH2, "utf8"));
-  const env = config2.mcpServers[serverName]?.env;
-  if (!env) throw new Error(`${serverName} server not found in mcp.json`);
-  const email2 = env.ATLASSIAN_USER_EMAIL;
-  const token = env.ATLASSIAN_API_TOKEN;
-  const defaultWorkspace = env.BITBUCKET_DEFAULT_WORKSPACE;
-  if (!email2 || !token || !defaultWorkspace) {
-    throw new Error(`${serverName} env missing ATLASSIAN_USER_EMAIL/ATLASSIAN_API_TOKEN/BITBUCKET_DEFAULT_WORKSPACE`);
+async function loadCreds(keyring, defaultWorkspace) {
+  const { email: email2, token } = await readAtlassianCredentials(keyring);
+  if (!defaultWorkspace) {
+    throw new Error("Bitbucket workspace not set in settings (configure settings.aura.digest.bitbucket.workspace)");
   }
   return { email: email2, token, defaultWorkspace };
 }
-async function bbFetch(path, query, serverName = "atlassian-bitbucket") {
-  const creds = loadCreds(serverName);
+async function bbFetch(path, query, keyring, defaultWorkspace) {
+  const creds = await loadCreds(keyring, defaultWorkspace);
   const url2 = new URL(`https://api.bitbucket.org/2.0${path}`);
   for (const [k2, v2] of Object.entries(query)) url2.searchParams.set(k2, v2);
   const res = await fetch(url2, {
@@ -19346,14 +19337,15 @@ async function bbFetch(path, query, serverName = "atlassian-bitbucket") {
   }
   return await res.json();
 }
-async function listWorkspaceRepos(workspace, serverName = "atlassian-bitbucket") {
+async function listWorkspaceRepos(workspace, keyring) {
   const slugs = [];
   let page = 1;
   for (let safety = 0; safety < 10; safety++) {
     const data = await bbFetch(
       `/repositories/${workspace}`,
       { pagelen: "100", page: String(page), sort: "updated_on", fields: "values.slug,pagelen,page,next" },
-      serverName
+      keyring,
+      workspace
     );
     slugs.push(...data.values.map((v2) => v2.slug));
     if (!data.next) break;
@@ -19361,19 +19353,21 @@ async function listWorkspaceRepos(workspace, serverName = "atlassian-bitbucket")
   }
   return slugs;
 }
-async function searchRepoPRs(workspace, repo, q2, serverName = "atlassian-bitbucket") {
+async function searchRepoPRs(workspace, repo, q2, keyring) {
   const data = await bbFetch(
     `/repositories/${workspace}/${repo}/pullrequests`,
     { pagelen: "50", q: q2, fields: "values.id,values.title,values.state,values.source.branch.name,values.destination.branch.name,values.links.html.href" },
-    serverName
+    keyring,
+    workspace
   );
   return data.values;
 }
-async function searchRepoBranches(workspace, repo, q2, serverName = "atlassian-bitbucket") {
+async function searchRepoBranches(workspace, repo, q2, keyring) {
   const data = await bbFetch(
     `/repositories/${workspace}/${repo}/refs/branches`,
     { pagelen: "50", q: q2, fields: "values.name,values.target.hash" },
-    serverName
+    keyring,
+    workspace
   );
   return data.values;
 }
@@ -19411,7 +19405,7 @@ function topReposBySimilarity(allRepos, taskText2, n) {
 function taskText(task, jiraSummaries) {
   return [task.title, task.description ?? "", ...jiraSummaries].join(" ");
 }
-async function fetchTaskDevLinks(task, settings, mcpServers, atlassian) {
+async function fetchTaskDevLinks(task, settings, keyring, atlassian) {
   const taskKey = task.human_key;
   const jiraKeys = (task.jira_issues ?? []).map((j2) => j2.issue_key);
   const errors = [];
@@ -19512,36 +19506,49 @@ async function fetchTaskDevLinks(task, settings, mcpServers, atlassian) {
   }
   const ws = settings.bitbucket.workspace;
   const preferred = settings.bitbucket.preferredRepos;
-  const prQ = `title~"${taskKey}" or source.branch.name~"${taskKey}"`;
-  const brQ = `name~"${taskKey}"`;
-  const tryRepo = async (repo) => {
-    try {
-      const [repoPrs, repoBranches] = await Promise.all([
-        searchRepoPRs(ws, repo, prQ, mcpServers.atlassianBitbucket),
-        searchRepoBranches(ws, repo, brQ, mcpServers.atlassianBitbucket)
-      ]);
-      for (const p of repoPrs) addBbPr(p, repo, prs, seenPrUrls);
-      for (const b of repoBranches) addBbBranch(b, repo, branches);
-      return repoPrs.length > 0 || repoBranches.length > 0;
-    } catch (e) {
-      errors.push(`bitbucket/${repo}: ${e instanceof Error ? e.message : String(e)}`);
-      return false;
+  let bbCreds = null;
+  try {
+    const { email: email2, token } = await readAtlassianCredentials(keyring);
+    if (!ws) {
+      throw new Error("Bitbucket workspace not set in settings (configure settings.aura.digest.bitbucket.workspace)");
     }
-  };
-  let found = false;
-  for (const repo of preferred) {
-    if (await tryRepo(repo)) found = true;
+    bbCreds = { email: email2, token, defaultWorkspace: ws };
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    errors.push(`Bitbucket dev-links layer skipped: ${reason}`);
   }
-  if (!found) {
-    try {
-      const allRepos = await listWorkspaceRepos(ws, mcpServers.atlassianBitbucket);
-      const jiraSummaries = (task.jira_issues ?? []).map((j2) => j2.summary ?? "");
-      const candidates = topReposBySimilarity(allRepos, taskText(task, jiraSummaries), 5).filter((r) => !preferred.includes(r));
-      for (const repo of candidates) {
-        await tryRepo(repo);
+  if (bbCreds) {
+    const prQ = `title~"${taskKey}" or source.branch.name~"${taskKey}"`;
+    const brQ = `name~"${taskKey}"`;
+    const tryRepo = async (repo) => {
+      try {
+        const [repoPrs, repoBranches] = await Promise.all([
+          searchRepoPRs(ws, repo, prQ, keyring),
+          searchRepoBranches(ws, repo, brQ, keyring)
+        ]);
+        for (const p of repoPrs) addBbPr(p, repo, prs, seenPrUrls);
+        for (const b of repoBranches) addBbBranch(b, repo, branches);
+        return repoPrs.length > 0 || repoBranches.length > 0;
+      } catch (e) {
+        errors.push(`bitbucket/${repo}: ${e instanceof Error ? e.message : String(e)}`);
+        return false;
       }
-    } catch (e) {
-      errors.push(`bitbucket/similarity: ${e instanceof Error ? e.message : String(e)}`);
+    };
+    let found = false;
+    for (const repo of preferred) {
+      if (await tryRepo(repo)) found = true;
+    }
+    if (!found) {
+      try {
+        const allRepos = await listWorkspaceRepos(ws, keyring);
+        const jiraSummaries = (task.jira_issues ?? []).map((j2) => j2.summary ?? "");
+        const candidates = topReposBySimilarity(allRepos, taskText(task, jiraSummaries), 5).filter((r) => !preferred.includes(r));
+        for (const repo of candidates) {
+          await tryRepo(repo);
+        }
+      } catch (e) {
+        errors.push(`bitbucket/similarity: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
   }
   return { task_key: taskKey, jira_keys: jiraKeys, pull_requests: prs, branches, errors };
@@ -19582,10 +19589,10 @@ async function buildAtlassianClient(serverName = "atlassian") {
 }
 
 // src/settings.ts
-import { readFileSync as readFileSync4, existsSync as existsSync3 } from "node:fs";
-import { homedir as homedir5 } from "node:os";
-import { join as join5 } from "node:path";
-var SETTINGS_PATH2 = join5(homedir5(), ".pi", "agent", "settings.json");
+import { readFileSync as readFileSync3, existsSync as existsSync3 } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { join as join4 } from "node:path";
+var SETTINGS_PATH2 = join4(homedir4(), ".pi", "agent", "settings.json");
 var DEFAULT_MCP_SERVERS = {
   aura: "aura-mcp-dev",
   atlassian: "atlassian",
@@ -19595,7 +19602,7 @@ function loadSettings(settingsPath = SETTINGS_PATH2) {
   const defaults = { mcpServers: { ...DEFAULT_MCP_SERVERS }, digest: null };
   if (!existsSync3(settingsPath)) return defaults;
   try {
-    const raw = readFileSync4(settingsPath, "utf8");
+    const raw = readFileSync3(settingsPath, "utf8");
     const settings = JSON.parse(raw);
     const aura = settings.aura;
     if (!aura) return defaults;
@@ -19771,8 +19778,8 @@ var USAGE = `Usage:
   node aura.mjs save <dir>            save <dir>/digest.json as the last presented digest
   node aura.mjs diff <dir>            print what changed since the last saved digest (JSON)
   node aura.mjs last                  print the last saved digest (JSON)`;
-var LAST_DIGEST_PATH = join6(homedir6(), ".pi", "aura", "last-digest.json");
-var DASHBOARD_DIGEST_PATH = join6(homedir6(), ".pi", "aura", "digest.json");
+var LAST_DIGEST_PATH = join5(homedir5(), ".pi", "aura", "last-digest.json");
+var DASHBOARD_DIGEST_PATH = join5(homedir5(), ".pi", "aura", "digest.json");
 var LAST_DIGEST_SCHEMA_VERSION = 1;
 var ACTIVE_STATUS_TYPES = /* @__PURE__ */ new Set([
   "ACTIVE"
@@ -19838,7 +19845,7 @@ async function fetchNotifications(aura, lastFetchedAt, warnings) {
   return { since, older };
 }
 async function fetchAction() {
-  const outDir = join6(tmpdir(), `aura-morning-${randomBytes2(6).toString("hex")}`);
+  const outDir = join5(tmpdir(), `aura-morning-${randomBytes2(6).toString("hex")}`);
   mkdirSync2(outDir, { recursive: true });
   const aura = await createDefaultAuraClient();
   const warnings = [];
@@ -20026,6 +20033,7 @@ async function fetchAction() {
   } else {
     const { client: atlassian, warning: atlWarning } = await buildAtlassianClient(settings.mcpServers.atlassian);
     if (atlWarning) warnings.push(atlWarning);
+    const keyring = await createKeyring();
     try {
       const taskDetails = await Promise.all(
         queueRows.map(
@@ -20046,7 +20054,7 @@ async function fetchAction() {
             detail.jira_issues = [...detail.jira_issues ?? [], ...childJira];
           }
         }
-        devLinks.push(await fetchTaskDevLinks(detail, settings.digest, settings.mcpServers, atlassian));
+        devLinks.push(await fetchTaskDevLinks(detail, settings.digest, keyring, atlassian));
       }
     } finally {
       if (atlassian) await atlassian.close();
@@ -20490,11 +20498,11 @@ function renderAction() {
   const dir = process.argv[3];
   const outPath = process.argv[4];
   if (!dir) fail("render: missing <dir> argument", USAGE);
-  const digestPath = join6(dir, "digest.json");
+  const digestPath = join5(dir, "digest.json");
   if (!existsSync4(digestPath)) fail(`render: ${digestPath} not found`);
   let d;
   try {
-    d = JSON.parse(readFileSync5(digestPath, "utf8"));
+    d = JSON.parse(readFileSync4(digestPath, "utf8"));
   } catch (e) {
     fail(`render: failed to parse ${digestPath}: ${e instanceof Error ? e.message : String(e)}`, void 0, 1);
   }
@@ -20516,7 +20524,7 @@ function cleanupAction() {
 function loadLastDigest() {
   if (!existsSync4(LAST_DIGEST_PATH)) return null;
   try {
-    return JSON.parse(readFileSync5(LAST_DIGEST_PATH, "utf8"));
+    return JSON.parse(readFileSync4(LAST_DIGEST_PATH, "utf8"));
   } catch (e) {
     console.error(`warning: could not parse ${LAST_DIGEST_PATH}: ${e instanceof Error ? e.message : String(e)}`);
     return null;
@@ -20525,9 +20533,9 @@ function loadLastDigest() {
 function saveAction() {
   const dir = process.argv[3];
   if (!dir) fail("save: missing <dir> argument", USAGE);
-  const digestPath = join6(dir, "digest.json");
+  const digestPath = join5(dir, "digest.json");
   if (!existsSync4(digestPath)) fail(`save: ${digestPath} not found`);
-  const digest = JSON.parse(readFileSync5(digestPath, "utf8"));
+  const digest = JSON.parse(readFileSync4(digestPath, "utf8"));
   const presentedAt = (/* @__PURE__ */ new Date()).toISOString();
   const store = {
     schema_version: LAST_DIGEST_SCHEMA_VERSION,
@@ -20535,7 +20543,7 @@ function saveAction() {
     fetched_at: digest.meta?.generated_at ?? presentedAt,
     digest
   };
-  mkdirSync2(join6(homedir6(), ".pi", "aura"), { recursive: true });
+  mkdirSync2(join5(homedir5(), ".pi", "aura"), { recursive: true });
   writeFileSync2(LAST_DIGEST_PATH, JSON.stringify(store, null, 2) + "\n", "utf8");
   console.error(`saved last digest to ${LAST_DIGEST_PATH} (presented ${presentedAt})`);
 }
@@ -20595,7 +20603,7 @@ function computeDiff(prev, cur) {
 function diffAction() {
   const dir = process.argv[3];
   if (!dir) fail("diff: missing <dir> argument", USAGE);
-  const curPath = join6(dir, "digest.json");
+  const curPath = join5(dir, "digest.json");
   if (!existsSync4(curPath)) fail(`diff: ${curPath} not found`);
   const last = loadLastDigest();
   if (!last) {
@@ -20603,7 +20611,7 @@ function diffAction() {
     process.stdout.write(JSON.stringify({ first_run: true }, null, 2) + "\n");
     return;
   }
-  const cur = JSON.parse(readFileSync5(curPath, "utf8"));
+  const cur = JSON.parse(readFileSync4(curPath, "utf8"));
   const diff = computeDiff(last.digest, cur);
   process.stdout.write(JSON.stringify(diff, null, 2) + "\n");
 }
