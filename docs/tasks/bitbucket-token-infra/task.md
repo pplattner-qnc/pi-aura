@@ -72,3 +72,14 @@ Out of scope (see map.md):
 - The Bitbucket reader is a sibling to `readAtlassianCredentials`; the email
   read is the shared part (`readAtlassianEmail`).
 - Keep `SecretKey` a closed union (extend, don't switch to `string`).
+
+## Implementation notes
+
+### slice: bitbucket-token-key-and-reader (landed)
+
+- Added `{ service: "atlassian"; name: "bitbucket_token" }` to the `SecretKey` union in `packages/shared/src/keyring/keyring.ts` and to `KNOWN_SECRET_KEYS` in all three backends (`file-keyring.ts`, `macos-keyring.ts`, `secret-service-keyring.ts`), each a single `+` line mirroring `atlassian/api_token`.
+- Factored `readAtlassianEmail(keyring)` out of `readAtlassianCredentials` in `scripts/src/clients.ts`; it trims and returns `""` silently when the email is missing/empty. Both `readAtlassianCredentials` (refactored, behavior-preserving — same signature, same message) and the new `readBitbucketCredentials` call it.
+- `readBitbucketCredentials(keyring)` reads `atlassian/email` + `atlassian/bitbucket_token`, trims, and throws `"no Bitbucket credential in keyring (run \`/aura secrets edit\`)"` when either is missing/empty/whitespace — same message shape as `readAtlassianCredentials` (which says "no Atlassian credential"). Each reader keeps its own throw site; the email read is the shared part.
+- Tests: `packages/shared/test/keyring.test.ts` gained a `bitbucket_token` round-trip block (set/get/overwrite/delete/empty-string) + updated `listSecrets` expectation to 4 keys; new `test/bitbucket-token-infra/clients.test.ts` with a fake `Keyring` covers `readAtlassianEmail` (5 tests) and `readBitbucketCredentials` (8 tests) — no live network call.
+- Validation: keyring tests 30 pass, vitest 14 files/108 tests pass, `packages/shared` + `scripts` typecheck clean, `scripts` build succeeds. No regressions — existing `readAtlassianCredentials` tests pass unchanged.
+- No consumer uses the new reader yet (`bitbucket.ts` and the chooser are untouched) — that is expected; the wire task and the manual provisioning session depend on this infra.

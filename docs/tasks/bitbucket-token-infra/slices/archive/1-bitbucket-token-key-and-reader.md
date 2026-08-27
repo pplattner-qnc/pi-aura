@@ -4,7 +4,7 @@ slug: bitbucket-token-key-and-reader
 title: "Add the bitbucket_token SecretKey + readBitbucketCredentials + shared readAtlassianEmail"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: s
 blocked_by: []
 ---
