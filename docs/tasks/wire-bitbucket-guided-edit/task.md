@@ -104,3 +104,28 @@ Out of scope (see map.md):
   of truth and the feature replays it.
 - Per-layer independence: the two dev-links layers keep separate missing-token
   warnings; no shared "no Atlassian credential" message that conflates them.
+
+## Implementation notes
+
+### slice: wire-bitbucket-reader (landed)
+
+- `scripts/src/bitbucket.ts`'s `loadCreds` swapped `readAtlassianCredentials` →
+  `readBitbucketCredentials` (reads `atlassian/email` + `atlassian/bitbucket_token`);
+  Basic-auth header (`Buffer.from(`${email}:${token}`)`) and all REST paths
+  (`/2.0/repositories`, `/pullrequests`, `/refs/branches`) are byte-identical — only
+  the token *source* changed. `atlassianClient` / `readAtlassianCredentials`
+  (Teamwork Graph, `api_token`) is untouched (`clients.ts` empty diff).
+- `scripts/src/devlinks.ts` Layer 3 pre-check swapped to `readBitbucketCredentials`;
+  on throw it pushes `Bitbucket dev-links layer skipped: <reason>`. The Teamwork
+  Graph layer's `buildAtlassianClient` (unchanged) yields
+  `Teamwork Graph dev-links layer skipped: <reason>`. The two warnings are
+  distinguishable and independent — no shared message.
+- Tests: new `test/wire-bitbucket-reader/wire-bitbucket-reader.test.ts` (12 tests)
+  covers `loadCreds` reading `bitbucket_token` (not `api_token`) and the per-layer
+  independence (both present / only-bitbucket / only-TWG / both-missing / email-
+  missing); pre-existing `test/atlassian-keyring-auth/bitbucket.test.ts` updated to
+  use `bitbucket_token` (would otherwise fail against the swapped reader).
+- Validation: `scripts` typecheck clean, `packages/shared` typecheck clean, build
+  succeeds (dist committed), `vitest run` green — 15 files / 120 tests pass.
+- No out-of-scope changes: chooser, guided mode, `aura-secrets.ts`, `settings.ts`,
+  keyring package untouched — those are later slices.

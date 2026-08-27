@@ -1,2 +1,2 @@
-task: None
-slice: None
+task: wire-bitbucket-guided-edit
+slice: wire-bitbucket-reader

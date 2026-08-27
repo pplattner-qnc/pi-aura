@@ -4,7 +4,7 @@ slug: wire-bitbucket-reader
 title: "bitbucket.ts reads the Bitbucket token; the two layers degrade independently"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: s
 blocked_by: []
 ---
