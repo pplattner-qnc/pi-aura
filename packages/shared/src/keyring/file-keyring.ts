@@ -14,6 +14,8 @@ const DEFAULT_STORE_PATH = join(homedir(), ".cache", NAMESPACE, "store.json");
  *  members here as the enum grows. */
 const KNOWN_SECRET_KEYS: readonly SecretKey[] = [
   { service: "aura", name: "pat" },
+  { service: "atlassian", name: "email" },
+  { service: "atlassian", name: "api_token" },
 ];
 
 /** Pack a `SecretKey` into the reversible key used inside the JSON store. */

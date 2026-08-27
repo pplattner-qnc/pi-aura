@@ -5,7 +5,14 @@ import { MacosKeyring } from "./macos-keyring.js";
 
 /** Closed enumeration of secrets this keyring can store.
  *  Add a union member to add a capable secret. */
-export type SecretKey = { service: "aura"; name: "pat" };
+export type SecretKey =
+  | { service: "aura"; name: "pat" }
+  // Atlassian account email. An empty-string stored value round-trips as ""
+  // (not null); callers must treat "" as "not set", same convention as the
+  // Aura PAT.
+  | { service: "atlassian"; name: "email" }
+  // Atlassian API token. Same empty-string contract as atlassian/email.
+  | { service: "atlassian"; name: "api_token" };
 
 /** One stored secret together with its key. */
 export interface StoredSecret {

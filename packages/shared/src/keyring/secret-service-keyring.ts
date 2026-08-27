@@ -57,6 +57,8 @@ const ITEM_INTERFACE = "org.freedesktop.Secret.Item";
  *  members here as the enum grows. */
 const KNOWN_SECRET_KEYS: readonly SecretKey[] = [
   { service: "aura", name: "pat" },
+  { service: "atlassian", name: "email" },
+  { service: "atlassian", name: "api_token" },
 ];
 
 /** Pack a `SecretKey` into the D-Bus attribute map stored on each item.
