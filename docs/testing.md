@@ -142,6 +142,14 @@ source of truth). The digest tools (`digest-dashboard-start`,
 **inactive by default** — the `session_start` handler filters `DIGEST_TOOLS` out
 of the active set; `/digest` activates them additively.
 
+### `digest-log` tool + progress events (digest-live-progress-tree)
+
+The `digest-log` pi tool (`index.ts`) and the bundle's progress emitter (`scripts/src/progress-emitter.ts`) both POST `agent→page` events to `/api/state`; the server's `appendEvent` assigns the monotonic `id` (clients send `id: 0` as a placeholder). Tests mock `fetch` and assert the POST body, not a live server. `progress-emitter.ts`'s `createProgressEmitter` accepts an injectable `fetchImpl` (and a `flush` for run-end) — the batching unit test (`scripts/src/aura-digest-progress.test.ts`) uses `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync()` + a mock `fetchImpl` so the ~50ms batch window is deterministic (real `setTimeout` + real HTTP flakes under load). The `readDashboardUrl()` helper is duplicated locally in `index.ts` because importing it from `scripts/src/progress-emitter.ts` breaks the extension's `tsc --noEmit` (TS6059: file outside `rootDir: "."`).
+
+### `createDwellManager` + the 400ms render dwell (digest-live-progress-tree)
+
+`progressTree.ts` exports a pure `createDwellManager(dwellMs, onExpire?)` (no DOM/Svelte dependency) so the dwell logic is unit-testable in `test/digest-dashboard/progressTree.test.ts`. `Digest.svelte` wires it via a reactive `dwellVersion = $state(0)` counter bumped by `onExpire`; `statusIcon()` is a **pure** render function that reads `dwellVersion` + calls `dwell.displayStatus` (no mutation during render). The dwell **observation** (`dwell.observe()`) runs in a `$effect.pre` (not `$effect`) — `$effect` runs after the DOM update, too late for the first post-transition render; `$effect.pre` runs before it, preserving the 400ms hold on a fast running→done pair. The component test (`DigestTree.test.ts`) uses `vi.useFakeTimers()` and advances time to verify the spinner holds ~400ms then flips to ✓. A node already terminal on first mount (no observed transition) renders the icon immediately — no dwell.
+
 ## Guided Atlassian PAT provisioning (`extensions/atlassian-provision.ts`)
 
 The guided `/aura secrets edit` walkthrough + the per-token access probes live
