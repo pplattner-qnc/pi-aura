@@ -169,4 +169,28 @@ describe("state.ts helpers", () => {
     const ids = state.events.map((e: { id: number }) => e.id).sort((a: number, b: number) => a - b);
     expect(ids).toEqual([1, 2, 3, 4, 5]);
   });
+
+  it("appendEvent assigns monotonic ids server-side regardless of client-supplied id", async () => {
+    // FIX 2: appendEvent must overwrite the client-supplied id with a
+    // server-assigned monotonic id so multiple events with id:0 (e.g. from
+    // digest-log) don't collide at id:0.
+    const events = Array.from({ length: 3 }, () => ({
+      id: 0,
+      ts: new Date().toISOString(),
+      dir: "agent→page" as const,
+      type: "agent_log" as const,
+      payload: { message: "log line" },
+    }));
+
+    for (const e of events) {
+      await appendEvent(statePath, e);
+    }
+
+    const state = JSON.parse(readFileSync(statePath, "utf-8"));
+    expect(state.events).toHaveLength(3);
+    // All three events should have server-assigned monotonic ids 1, 2, 3 —
+    // NOT the client-supplied id:0.
+    const ids = state.events.map((e: { id: number }) => e.id);
+    expect(ids).toEqual([1, 2, 3]);
+  });
 });

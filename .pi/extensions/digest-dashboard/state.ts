@@ -91,6 +91,13 @@ export function appendEvent(filePath: string, event: StateEvent): Promise<void> 
   return enqueue(filePath, () => {
     ensureDir(filePath);
     const state = existsSync(filePath) ? readState(filePath) : structuredClone(EMPTY_STATE);
+    // Assign a server-side monotonic id — the client-supplied id is
+    // overwritten so multiple events with the same client id (e.g.
+    // digest-log sends id:0) don't collide.
+    const maxId = state.events.length > 0
+      ? Math.max(...state.events.map((e) => e.id))
+      : 0;
+    event.id = maxId + 1;
     state.events.push(event);
     writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
   });
