@@ -4,7 +4,7 @@ slug: 5-digest-log-tool
 title: Add a digest-log pi tool that pushes an agent_log event to the dashboard
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: s
 blocked_by: [2-dashboard-event-plumbing]
 ---
