@@ -4,7 +4,7 @@ slug: 3-bundle-emits-tree
 title: Wire the bundle onProgress to POST batched events + emit phase/row nodes
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 blocked_by: [1-scheduler-progress-nodes, 2-dashboard-event-plumbing]
 ---

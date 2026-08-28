@@ -1,2 +1,2 @@
 task: digest-live-progress-tree
-slice: 2-dashboard-event-plumbing
+slice: 3-bundle-emits-tree
