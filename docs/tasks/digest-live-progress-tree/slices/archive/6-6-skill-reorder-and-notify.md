@@ -4,7 +4,7 @@ slug: 6-skill-reorder-and-notify
 title: Reorder the skill (dashboard-start first) + pi-TUI warning when dashboard absent
 task: ../task.md
 mode: hitl
-status: todo
+status: done
 size: s
 blocked_by: [3-bundle-emits-tree, 4-svelte-tree-view]
 ---

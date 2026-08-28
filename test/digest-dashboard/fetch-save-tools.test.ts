@@ -114,6 +114,21 @@ function createCtx(): ExtensionContext {
   return {} as ExtensionContext;
 }
 
+interface NotifyCall {
+  message: string;
+  severity: string;
+}
+
+function createCtxWithNotify(notifyCalls: NotifyCall[]): ExtensionContext {
+  return {
+    ui: {
+      notify: (message: string, severity: string) => {
+        notifyCalls.push({ message, severity });
+      },
+    },
+  } as unknown as ExtensionContext;
+}
+
 function findTool(pi: ExtensionAPI, name: string): RegisterToolCall {
   const calls = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls as {
     0: RegisterToolCall;
@@ -153,6 +168,8 @@ describe("digest-fetch tool", () => {
     writeFileSync(path.join(tmpDir, "digest.json"), JSON.stringify({ title: "digest fixture" }), "utf8");
     writeFileSync(path.join(tmpDir, "report.json"), JSON.stringify({ title: "report fixture" }), "utf8");
     writeFileSync(path.join(auraDir, "digest.json"), JSON.stringify({ title: "dashboard fixture" }), "utf8");
+    // Dashboard is up — write server-url.json so the absent-dashboard warning is NOT triggered
+    writeFileSync(path.join(auraDir, "server-url.json"), JSON.stringify({ url: "http://127.0.0.1:9999/" }), "utf8");
 
     nextSpawnOutcome = {
       exitCode: 0,
@@ -190,6 +207,116 @@ describe("digest-fetch tool", () => {
 
     expect(result.content[0].text).toContain("Aura PAT missing");
     expect(result.details.dir).toBeUndefined();
+  });
+});
+
+describe("digest-fetch dashboard-absent warning", () => {
+  let tmpDir: string;
+  let originalHome: string | undefined;
+  let auraDir: string;
+  let serverUrlPath: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), "digest-fetch-warning-"));
+    originalHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    auraDir = path.join(tmpDir, ".pi", "aura");
+    mkdirSync(auraDir, { recursive: true });
+    serverUrlPath = path.join(auraDir, "server-url.json");
+  });
+
+  afterEach(() => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("shows a single warning (notify + result text) when dashboard was not running", async () => {
+    const pi = createFakePi();
+    installExtension(pi);
+    const tool = findTool(pi, "digest-fetch");
+
+    writeFileSync(path.join(tmpDir, "digest.json"), JSON.stringify({ title: "digest fixture" }), "utf8");
+    writeFileSync(path.join(tmpDir, "report.json"), JSON.stringify({ title: "report fixture" }), "utf8");
+    writeFileSync(path.join(auraDir, "digest.json"), JSON.stringify({ title: "dashboard fixture" }), "utf8");
+    // server-url.json deliberately NOT written (dashboard down)
+
+    nextSpawnOutcome = {
+      exitCode: 0,
+      stdoutLines: [`output directory: ${tmpDir}/`],
+      stderrLines: [],
+    };
+
+    const notifyCalls: NotifyCall[] = [];
+    const result = (await tool.execute(
+      "call-1",
+      {},
+      undefined,
+      undefined,
+      createCtxWithNotify(notifyCalls),
+    )) as {
+      content: Array<{ type: string; text: string }>;
+      details: { dir: string };
+    };
+
+    // Fetch succeeded — dir is returned
+    expect(result.details.dir).toBe(tmpDir);
+
+    // The digest JSON is still present in the result text (after the warning line)
+    expect(result.content[0].text).toContain('"digest"');
+
+    // A SINGLE warning notify was fired with "warning" severity (one-shot, not per-event)
+    const warningNotifies = notifyCalls.filter((n) => n.severity === "warning");
+    expect(warningNotifies).toHaveLength(1);
+    expect(warningNotifies[0].message).toContain("dashboard was not running");
+
+    // The result text contains the warning line
+    expect(result.content[0].text).toContain("dashboard was not running");
+  });
+
+  it("shows no warning when dashboard is running", async () => {
+    const pi = createFakePi();
+    installExtension(pi);
+    const tool = findTool(pi, "digest-fetch");
+
+    writeFileSync(path.join(tmpDir, "digest.json"), JSON.stringify({ title: "digest fixture" }), "utf8");
+    writeFileSync(path.join(tmpDir, "report.json"), JSON.stringify({ title: "report fixture" }), "utf8");
+    writeFileSync(path.join(auraDir, "digest.json"), JSON.stringify({ title: "dashboard fixture" }), "utf8");
+    // Dashboard is up — server-url.json is present
+    writeFileSync(serverUrlPath, JSON.stringify({ url: "http://127.0.0.1:9999/" }), "utf8");
+
+    nextSpawnOutcome = {
+      exitCode: 0,
+      stdoutLines: [`output directory: ${tmpDir}/`],
+      stderrLines: [],
+    };
+
+    const notifyCalls: NotifyCall[] = [];
+    const result = (await tool.execute(
+      "call-1",
+      {},
+      undefined,
+      undefined,
+      createCtxWithNotify(notifyCalls),
+    )) as {
+      content: Array<{ type: string; text: string }>;
+      details: { dir: string };
+    };
+
+    // No warning notify fired
+    const warningNotifies = notifyCalls.filter((n) => n.severity === "warning");
+    expect(warningNotifies).toHaveLength(0);
+
+    // No warning line in the result text
+    expect(result.content[0].text).not.toContain("dashboard was not running");
+
+    // JSON is clean and parseable
+    const parsed = JSON.parse(result.content[0].text) as { digest: unknown; report: unknown };
+    expect(parsed.digest).toEqual({ title: "digest fixture" });
+    expect(parsed.report).toEqual({ title: "report fixture" });
   });
 });
 

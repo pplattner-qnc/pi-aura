@@ -6,33 +6,48 @@ disable-model-invocation: true
 
 # Aura — Digest
 
-**Run the digest now.** Start at Step 1 (Fetch) immediately and drive the
-whole pipeline through to the dashboard — do not ask the user for
+**Run the digest now.** Start at Step 1 (Start the dashboard) immediately and
+drive the whole pipeline through to the dashboard — do not ask the user for
 confirmation, do not summarize the plan first. This skill was invoked
 explicitly (via `/aura-digest`), so the user already wants the flow to run.
 
 Inline, tool-driven pipeline. The heavy lifting still happens in the compiled
 `aura-digest.mjs` script, but this skill drives the flow through typed tools:
-`digest-fetch` → augment → `digest-save` → `digest-dashboard-start` → wait for
+`digest-dashboard-start` (ready state) → `digest-fetch` (streams the live tree) →
+augment (agent calls `digest-log` per sub-step) → `digest-save` → wait for
 clicks → act on one via the `aura` skill → `ack` + clear →
 `digest-dashboard-stop`. The orchestrator (you) does the judgment work — filling
 the situation summary, surfacing corrections, and ranking suggested actions —
 between `digest-fetch` and `digest-save`.
 
 ```
- ┌─────────────────┐  {digest, report}   ┌──────────────┐  corrected digest   ┌──────────────┐
- │  digest-fetch   │ ───────────────────→ │  orchestrator │ ──────────────────→ │  digest-save  │
- │  (wraps         │  details.dir        │  fill summary + │  (pass details.dir) │  (last-digest  │
- │   aura-digest   │                     │  corrections + │                     │   store)      │
- │   .mjs fetch)   │                     │  re-rank actions │                   └──────────────┘
- └─────────────────┘                     └──────┬───────┘
-                                                │
-                                                ↓
-                                         ┌─────────────────┐
-                                         │ digest-dashboard- │
-                                         │ start             │
-                                         └─────────────────┘
+ ┌─────────────────────┐  ┌─────────────────┐  {digest, report}   ┌──────────────┐
+ │ digest-dashboard-  │→ │  digest-fetch    │ ───────────────────→ │  orchestrator │
+ │ start (ready      │  │  (wraps          │  details.dir        │  fill summary + │
+ │  state, browser)  │  │   aura-digest   │                     │  corrections + │
+ └─────────────────────┘  │   .mjs fetch)   │                     │  re-rank actions │
+                           │  (streams live  │                     │  (digest-log    │
+                           │   tree to the  │                     │   per sub-step)  │
+                           │   dashboard)   │                     └──────┬───────┘
+                           └─────────────────┘                            │
+                                                       corrected digest    │
+                                                                ─────────→│
+                                                                           ↓
+                                                                 ┌──────────────┐
+                                                                 │  digest-save  │
+                                                                 │  (pass        │
+                                                                 │  details.dir) │
+                                                                 │  (last-digest │
+                                                                 │   store)      │
+                                                                 └──────────────┘
 ```
+
+Starting the dashboard first means the live progress tree (from `progress`
+events) and the augment log (from `digest-log` calls) stream into the browser
+while the fetch runs. If `digest-fetch` detects that the dashboard was never
+started (`~/.pi/aura/server-url.json` absent), the fetch still succeeds and
+writes the digest — a one-shot warning is shown at the end instead of a live
+tree.
 
 The interactive dashboard reads `~/.pi/aura/digest.json` (actions + followup)
 and `~/.pi/aura/state.json` (ack events), and is started/stopped via the
@@ -72,7 +87,24 @@ skip — no setup skill is required.
 
 ---
 
-## Step 1: Fetch
+## Step 1: Start the dashboard
+
+Call the `digest-dashboard-start` tool (params: `{ openBrowser?: true }`). It
+spawns the dashboard server and opens the browser to a ready state. It returns
+`{ ok, message, url }`. If the dashboard is already running, it is a no-op —
+call it without worrying about double-starts.
+
+Starting the dashboard first means the live progress tree (notifications,
+tasks, reviews phase nodes streamed from the running fetch) and the augment
+log (`digest-log` calls) appear in the browser as they happen, instead of a
+blank screen.
+
+If `digest-dashboard-start` fails (e.g. the server bundle is missing), surface
+the message to the user and stop — do not continue the pipeline.
+
+---
+
+## Step 2: Fetch
 
 Call the `digest-fetch` tool. It runs `aura-digest.mjs fetch` under the hood,
 creates its own random temp directory (`/tmp/aura-morning-<hex>/`), fetches all
@@ -85,6 +117,12 @@ objects and `details.dir`.
 
 `digest-fetch` also writes `~/.pi/aura/digest.json` for the dashboard (including
 `actions[]` + `followup`).
+
+While the fetch runs, the bundle emits `progress` events to the dashboard's
+`/api/state` so the browser shows a live tree of operations. If the dashboard
+was not running when `digest-fetch` started (no `~/.pi/aura/server-url.json`),
+the fetch still succeeds and writes the digest — a one-shot pi-TUI warning is
+shown at the end instead of a live tree.
 
 The `report` object is the orchestrator's research basis, including:
 - `artifacts_to_verify` (artifact IDs + reported versions + reported decisions,
@@ -101,7 +139,7 @@ do not continue the pipeline.
 
 ---
 
-## Step 2: Augment (orchestrator judgment)
+## Step 3: Augment (orchestrator judgment, with `digest-log`)
 
 `digest-fetch` has already done the verification — no MCP calls needed. Read
 `report` from the tool result and use `verifications` directly:
@@ -130,6 +168,14 @@ Write the corrected `digest` back to `<dir>/digest.json` (where `<dir>` is the
 `details.dir` from the `digest-fetch` result). This ensures the subsequent
 `digest-save` persists the corrected version.
 
+### `digest-log` — push status lines to the dashboard
+
+During this augment phase, call the `digest-log` tool with `{ message: "…" }`
+for each major sub-step (e.g. "Verifying review states…", "Re-ranking
+actions…"). The message appears as a status line in the dashboard's log list
+below the progress tree, so the user sees live progress. It is a no-op if the
+dashboard is not running — it never fails the agent's call.
+
 ### Diff against last digest (optional, for "what changed")
 
 The `digest-save` tool only stores the corrected digest; it does not print a
@@ -142,9 +188,10 @@ On the first run (no last digest), there is nothing to compare.
 
 ---
 
-## Step 3: Start the dashboard, then wait for clicks
+## Step 4: Save, then wait for clicks
 
-After fetch → augment (Steps 1–2), drive the interactive dashboard.
+After start → fetch → augment (Steps 1–3), save the digest and drive the
+interactive dashboard.
 
 1. **Save** the corrected digest as the last-digest store. Call the
    `digest-save` tool with the required `dir` parameter set to the
@@ -152,14 +199,12 @@ After fetch → augment (Steps 1–2), drive the interactive dashboard.
 2. **The dashboard digest is already written** — `digest-fetch` writes
    `~/.pi/aura/digest.json` (including `actions[]` + `followup`) automatically.
    No extra step.
-3. **Start the dashboard** — call the `digest-dashboard-start` tool (params:
-   `{ openBrowser?: true }`). It returns `{ ok, message, url }`.
-4. **Wait for a click.** Do not poll or prompt. The listener forwards a
+3. **Wait for a click.** Do not poll or prompt. The listener forwards a
    `page→agent` `action_click` event as a custom message
    (`customType: "aura-digest-event"`, `triggerTurn: true`) that wakes a new
    turn. The message's `content` is `action.instruction`; `details` is the full
    action object (`{ section, key, action, label, instruction, aura_use_case }`).
-5. **On a forwarded click — act on exactly one action:**
+4. **On a forwarded click — act on exactly one action:**
    - **Load the `aura` skill** (the handoff rule in "Scope and handoff" below).
    - **Route on `action.aura_use_case`** to the matching use case:
      `task-management` / `artifact-management` / `capacity-planning` /
@@ -177,10 +222,10 @@ After fetch → augment (Steps 1–2), drive the interactive dashboard.
      hot-reloads the buttons back to enabled. The exact command is documented
      in the next section.
    - **Report** the outcome concisely.
-6. **Return to step 5** (wait for the next click), unless:
+5. **Return to step 4** (wait for the next click), unless:
    - The user says "stop" / "done" / "that's all" → run the clean close below.
    - `actions[]` is empty (nothing actionable from the start) → run the clean
-     close immediately after starting.
+     close immediately after saving.
 
 The digest does not mark notifications as read automatically.
 
@@ -250,7 +295,7 @@ This table is a **reference** for which dashboard action routes to which
 ## Scope and handoff
 
 **This skill covers only the fetch + digest + verification + notification
-cleanup.** The moment a forwarded click (Step 3 step 5) asks you to act on an
+cleanup.** The moment a forwarded click (Step 4 step 4) asks you to act on an
 item — looking up tasks, posting or editing comments, reading or editing
 artifacts, capacity changes, wiki work, code search, signals, etc. — **load
 the `aura` skill** and follow its conventions for the remainder of the session.
@@ -263,7 +308,7 @@ Key conventions the `aura` skill enforces (so you don't silently miss them):
 - Prefer `mcp*` tool variants (`mcpGetArtifact`, `mcpUnifiedSearch`, …).
 - Log activity with `recordTaskProgress` when you act on a task.
 
-Interaction is via the dashboard's action buttons (Step 3); teardown is
+Interaction is via the dashboard's action buttons (Step 4); teardown is
 `digest-dashboard-stop`.
 
 ---
