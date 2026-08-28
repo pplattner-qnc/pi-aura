@@ -7623,9 +7623,9 @@ var require_content_type = __commonJS({
 });
 
 // src/aura-digest.ts
-import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync4, rmSync, existsSync as existsSync4 } from "node:fs";
-import { resolve, join as join5 } from "node:path";
-import { tmpdir, homedir as homedir5 } from "node:os";
+import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync5, rmSync, existsSync as existsSync5 } from "node:fs";
+import { resolve, join as join6 } from "node:path";
+import { tmpdir, homedir as homedir6 } from "node:os";
 import { randomBytes as randomBytes2 } from "node:crypto";
 
 // ../node_modules/@hey-api/client-fetch/dist/index.js
@@ -19635,12 +19635,99 @@ function canonicalize(v2) {
 }
 async function runTasks(root, kinds, init, opts = {}) {
   const concurrency = Math.max(1, opts.concurrency ?? 8);
+  const onProgress = opts.onProgress;
   let maxTasks = Math.max(1, opts.initialMaxTasks ?? 30);
   const state = init;
   let capped = false;
   let capSetBy = null;
   const runWarnings = [];
   let taskCount = 0;
+  const nodes = /* @__PURE__ */ new Map();
+  let nextNodeId = 0;
+  const emit = (nodeId, status) => {
+    if (!onProgress) return;
+    const rec = nodes.get(nodeId);
+    if (!rec) return;
+    onProgress({
+      id: String(nodeId),
+      label: rec.label,
+      parentId: rec.parentId !== null ? String(rec.parentId) : void 0,
+      status,
+      startedAt: rec.startedAt,
+      endedAt: rec.endedAt,
+      kind: rec.kind
+    });
+  };
+  const transition = (nodeId, status) => {
+    const rec = nodes.get(nodeId);
+    if (!rec || rec.status === status) return;
+    rec.status = status;
+    if (status !== "running") rec.endedAt = Date.now();
+    emit(nodeId, status);
+    if (rec.parentId !== null) checkDeferred(rec.parentId);
+  };
+  const checkDeferred = (parentId) => {
+    const parent = nodes.get(parentId);
+    if (!parent || !parent.deferCloseForChildren || parent.status !== "running") return;
+    let allTerminal = true;
+    let anyError = false;
+    for (const childId of parent.children) {
+      const child = nodes.get(childId);
+      if (!child) continue;
+      if (child.status === "running") {
+        allTerminal = false;
+        break;
+      }
+      if (child.status === "error") anyError = true;
+    }
+    if (allTerminal) transition(parentId, anyError ? "error" : "done");
+  };
+  const createNode = (parentId, label, kind) => {
+    const id = nextNodeId++;
+    nodes.set(id, {
+      label,
+      parentId,
+      status: "running",
+      children: /* @__PURE__ */ new Set(),
+      deferCloseForChildren: false,
+      startedAt: Date.now(),
+      kind
+    });
+    if (parentId !== null) {
+      const parent = nodes.get(parentId);
+      if (parent) parent.children.add(id);
+    }
+    emit(id, "running");
+    return { _nodeHandleBrand: true, id };
+  };
+  const makeProgress = (kind) => ({
+    create: (parent, label) => createNode(parent ? parent.id : null, label, kind),
+    finish: (node, opts2) => {
+      const rec = nodes.get(node.id);
+      if (!rec) return;
+      if (opts2?.deferCloseForChildren) {
+        rec.deferCloseForChildren = true;
+        if (rec.children.size === 0) {
+          transition(node.id, "done");
+        } else {
+          checkDeferred(node.id);
+        }
+      } else {
+        transition(node.id, "done");
+      }
+    },
+    setStatus: (node, status) => transition(node.id, status)
+  });
+  const makeCtx = (taskKind, taskNode) => ({
+    get state() {
+      return state;
+    },
+    get capped() {
+      return capped;
+    },
+    progress: makeProgress(taskKind),
+    node: taskNode
+  });
   const queue = [];
   const seen = /* @__PURE__ */ new Set();
   const identity = (ref) => `${ref.kind}\0${keyOf(ref.input)}`;
@@ -19684,18 +19771,13 @@ async function runTasks(root, kinds, init, opts = {}) {
       resolve2();
     }
   };
-  const ctx = { get state() {
-    return state;
-  }, get capped() {
-    return capped;
-  } };
   const drainCompletions = () => {
     if (draining) return;
     draining = true;
     try {
       while (completionQueue.length > 0) {
         if (settled) return;
-        const { ref, kind, output } = completionQueue.shift();
+        const { ref, kind, output, ctx: taskCtx } = completionQueue.shift();
         try {
           const r = kind.reduce(state, output, ref.input);
           if (r !== void 0 && r !== null && typeof r.then === "function") {
@@ -19713,7 +19795,7 @@ async function runTasks(root, kinds, init, opts = {}) {
             }
           }
           if (kind.spawn) {
-            const children = kind.spawn(output, ref.input, ctx);
+            const children = kind.spawn(output, ref.input, taskCtx);
             enqueue(children);
           }
         } catch (e) {
@@ -19736,9 +19818,10 @@ async function runTasks(root, kinds, init, opts = {}) {
         return;
       }
       inFlight++;
-      Promise.resolve().then(() => kind.run(ref.input, ctx)).then(
+      const taskCtx = makeCtx(ref.kind, ref.node);
+      Promise.resolve().then(() => kind.run(ref.input, taskCtx)).then(
         (output) => {
-          completionQueue.push({ ref, kind, output });
+          completionQueue.push({ ref, kind, output, ctx: taskCtx });
           drainCompletions();
         },
         () => {
@@ -19756,6 +19839,18 @@ async function runTasks(root, kinds, init, opts = {}) {
   enqueue([root], true);
   pump();
   await done;
+  for (const id of [...nodes.keys()]) {
+    const rec = nodes.get(id);
+    if (rec.status === "running" && rec.deferCloseForChildren) {
+      checkDeferred(id);
+    }
+  }
+  for (const id of [...nodes.keys()]) {
+    const rec = nodes.get(id);
+    if (rec.status === "running") {
+      transition(id, "error");
+    }
+  }
   return { state, capped, taskCount, runWarnings, maxTasks };
 }
 
@@ -19897,6 +19992,96 @@ function writeDashboardDigest(digest, dashboardPath) {
   writeFileSync(dashboardPath, JSON.stringify(digest, null, 2) + "\n", "utf8");
 }
 
+// src/progress-emitter.ts
+import { existsSync as existsSync4, readFileSync as readFileSync4 } from "node:fs";
+import { join as join5 } from "node:path";
+import { homedir as homedir5 } from "node:os";
+function defaultServerUrlPath() {
+  return join5(homedir5(), ".pi", "aura", "server-url.json");
+}
+function readDashboardUrl(serverUrlPath = defaultServerUrlPath()) {
+  if (!existsSync4(serverUrlPath)) return null;
+  try {
+    const raw = readFileSync4(serverUrlPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.url === "string" && parsed.url.length > 0) return parsed.url;
+    return null;
+  } catch {
+    return null;
+  }
+}
+var nextEventId = 0;
+function wrapEvent(payload) {
+  return {
+    id: ++nextEventId,
+    ts: (/* @__PURE__ */ new Date()).toISOString(),
+    dir: "agent\u2192page",
+    type: "progress",
+    payload
+  };
+}
+function createProgressEmitter(dashboardUrl, opts = {}) {
+  if (dashboardUrl === null) {
+    const noop2 = async () => {
+    };
+    noop2.flush = async () => {
+    };
+    return noop2;
+  }
+  const batchMs = opts.batchMs ?? 50;
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const apiUrl = joinUrl(dashboardUrl, "/api/state");
+  const pending = /* @__PURE__ */ new Map();
+  let timer = null;
+  const postEvents = async (events) => {
+    for (const payload of events) {
+      const stateEvent = wrapEvent(payload);
+      try {
+        await fetchImpl(apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(stateEvent)
+        });
+      } catch {
+      }
+    }
+  };
+  const drain = async () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    const events = [...pending.values()];
+    pending.clear();
+    await postEvents(events);
+  };
+  const hook = (event) => {
+    pending.set(event.id, event);
+    if (timer === null) {
+      timer = setTimeout(() => {
+        timer = null;
+        void drain();
+      }, batchMs);
+    }
+  };
+  let flushing = false;
+  hook.flush = async () => {
+    if (flushing) return;
+    flushing = true;
+    try {
+      await drain();
+    } finally {
+      flushing = false;
+    }
+  };
+  return hook;
+}
+function joinUrl(base, path) {
+  const b = base.endsWith("/") ? base.slice(0, -1) : base;
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${b}${p}`;
+}
+
 // src/aura-digest.ts
 var WORKDAY_HOURS = 8;
 var NOTIF_PAGE_SIZE = 50;
@@ -19949,8 +20134,8 @@ var USAGE = `Usage:
   node aura.mjs save <dir>            save <dir>/digest.json as the last presented digest
   node aura.mjs diff <dir>            print what changed since the last saved digest (JSON)
   node aura.mjs last                  print the last saved digest (JSON)`;
-var LAST_DIGEST_PATH = join5(homedir5(), ".pi", "aura", "last-digest.json");
-var DASHBOARD_DIGEST_PATH = join5(homedir5(), ".pi", "aura", "digest.json");
+var LAST_DIGEST_PATH = join6(homedir6(), ".pi", "aura", "last-digest.json");
+var DASHBOARD_DIGEST_PATH = join6(homedir6(), ".pi", "aura", "digest.json");
 var LAST_DIGEST_SCHEMA_VERSION = 1;
 var ACTIVE_STATUS_TYPES = /* @__PURE__ */ new Set([
   "ACTIVE"
@@ -20016,10 +20201,19 @@ async function fetchNotifications(aura, lastFetchedAt, warnings) {
   return { since, older };
 }
 async function fetchAction() {
-  const outDir = join5(tmpdir(), `aura-morning-${randomBytes2(6).toString("hex")}`);
+  const outDir = join6(tmpdir(), `aura-morning-${randomBytes2(6).toString("hex")}`);
   mkdirSync2(outDir, { recursive: true });
   const aura = await createDefaultAuraClient();
   const warnings = [];
+  const dashboardUrl = readDashboardUrl();
+  const progressHook = createProgressEmitter(dashboardUrl);
+  const emitPhase = (id, label, status, startedAt, endedAt) => {
+    progressHook({ id, label, status, startedAt, endedAt, kind: "fetchAction" });
+  };
+  const notifStart = Date.now();
+  emitPhase("phase-notifications", "Fetching notifications from Aura", "running", notifStart);
+  const capacityStart = Date.now();
+  emitPhase("phase-capacity", "Fetching capacity", "running", capacityStart);
   const [
     briefing,
     summary,
@@ -20050,6 +20244,7 @@ async function fetchAction() {
       limit: 5
     })
   ]);
+  emitPhase("phase-capacity", "Fetching capacity", "done", capacityStart, Date.now());
   const lastDigest = loadLastDigest();
   const lastFetchedAt = lastDigest?.fetched_at ?? null;
   const { since: sinceNotifs, older: olderNotifs } = await fetchNotifications(
@@ -20058,6 +20253,7 @@ async function fetchAction() {
     warnings
   );
   const allNotifs = [...sinceNotifs, ...olderNotifs];
+  emitPhase("phase-notifications", "Fetching notifications from Aura", "done", notifStart, Date.now());
   const fetchedAt = (/* @__PURE__ */ new Date()).toISOString();
   const date4 = fetchedAt.slice(0, 10);
   const raw = {
@@ -20235,27 +20431,31 @@ async function fetchAction() {
     const myName = "Plattner, Patric";
     const state = { devLinks: /* @__PURE__ */ new Map(), reviewsOwed: /* @__PURE__ */ new Map() };
     const devLinksRow = {
-      run: async (taskKey) => {
-        const detail = await aura.getTaskByHumanKey(taskKey).catch(() => null);
-        if (!detail) return null;
-        const childKeys = (detail.children ?? []).map((c) => c.human_key).filter(Boolean);
-        if (childKeys.length > 0) {
-          const childDetails = await Promise.all(
-            childKeys.map((k2) => aura.getTaskByHumanKey(k2).catch(() => null))
-          );
-          const childJira = childDetails.filter((c) => c !== null).flatMap((c) => c.jira_issues ?? []);
-          if (childJira.length > 0) {
-            detail.jira_issues = [...detail.jira_issues ?? [], ...childJira];
+      run: async (taskKey, ctx) => {
+        try {
+          const detail = await aura.getTaskByHumanKey(taskKey).catch(() => null);
+          if (!detail) return null;
+          const childKeys = (detail.children ?? []).map((c) => c.human_key).filter(Boolean);
+          if (childKeys.length > 0) {
+            const childDetails = await Promise.all(
+              childKeys.map((k2) => aura.getTaskByHumanKey(k2).catch(() => null))
+            );
+            const childJira = childDetails.filter((c) => c !== null).flatMap((c) => c.jira_issues ?? []);
+            if (childJira.length > 0) {
+              detail.jira_issues = [...detail.jira_issues ?? [], ...childJira];
+            }
           }
+          return await fetchTaskDevLinks(detail, digestSettings, keyring, atlassian);
+        } finally {
+          if (ctx.node) ctx.progress.finish(ctx.node);
         }
-        return await fetchTaskDevLinks(detail, digestSettings, keyring, atlassian);
       },
       reduce: (s, out) => {
         if (out) s.devLinks.set(out.task_key, out);
       }
     };
     const reviewCandidate = {
-      run: async (id) => {
+      run: async (id, ctx) => {
         try {
           const ar = await aura.getArtifactReview(id);
           const me = ar.reviewers.find(
@@ -20272,21 +20472,43 @@ async function fetchAction() {
           };
         } catch {
           return null;
+        } finally {
+          if (ctx.node) ctx.progress.finish(ctx.node);
         }
       },
       reduce: (s, out) => {
         if (out) s.reviewsOwed.set(out.artifact_id, out);
       }
     };
+    let tasksPhaseNode;
+    let reviewsPhaseNode;
+    const rowNodes = [];
+    const candidateNodes = [];
     const start = {
-      run: async () => ({ rows: queueRows.length, candidates: candidateIds.size }),
+      run: async (_input, ctx) => {
+        tasksPhaseNode = ctx.progress.create(void 0, "Fetching tasks from Aura");
+        reviewsPhaseNode = ctx.progress.create(void 0, "Fetching reviews");
+        for (const row of queueRows) {
+          const node = ctx.progress.create(tasksPhaseNode, `dev-links ${row.key}`);
+          rowNodes.push(node);
+        }
+        for (const id of [...candidateIds].sort()) {
+          const node = ctx.progress.create(reviewsPhaseNode, `review ${id}`);
+          candidateNodes.push(node);
+        }
+        for (const node of rowNodes) ctx.progress.finish(node, { deferCloseForChildren: true });
+        for (const node of candidateNodes) ctx.progress.finish(node, { deferCloseForChildren: true });
+        ctx.progress.finish(tasksPhaseNode, { deferCloseForChildren: true });
+        ctx.progress.finish(reviewsPhaseNode, { deferCloseForChildren: true });
+        return { rows: queueRows.length, candidates: candidateIds.size };
+      },
       reduce: (_s, out) => {
         const ceiling = Math.max(50, (1 + out.rows + out.candidates) * 10);
         return { setMaxTasks: ceiling };
       },
       spawn: () => [
-        ...queueRows.map((row) => ({ kind: "dev-links-row", input: row.key })),
-        ...[...candidateIds].sort().map((id) => ({ kind: "review-candidate", input: id }))
+        ...queueRows.map((row, i) => ({ kind: "dev-links-row", input: row.key, node: rowNodes[i] })),
+        ...[...candidateIds].sort().map((id, i) => ({ kind: "review-candidate", input: id, node: candidateNodes[i] }))
       ]
     };
     const kinds = {
@@ -20302,13 +20524,18 @@ async function fetchAction() {
         { kind: "start", input: null },
         kinds,
         state,
-        { concurrency: 6, initialMaxTasks: 30 }
+        {
+          concurrency: 6,
+          initialMaxTasks: 30,
+          onProgress: (e) => progressHook(e)
+        }
       );
       capped = result.capped;
       runWarnings = result.runWarnings;
       finalCap = result.maxTasks;
     } finally {
       if (atlassian) await atlassian.close();
+      await progressHook.flush();
     }
     if (capped) {
       warnings.push(
@@ -20377,6 +20604,7 @@ async function fetchAction() {
     const message = e instanceof Error ? e.message : String(e);
     warnings.push(`Could not write dashboard digest to ${DASHBOARD_DIGEST_PATH}: ${message}`);
   }
+  await progressHook.flush();
   console.log(`output directory: ${outDir}/`);
   console.error(`fetched ${fetchedAt}`);
   console.error(`  raw:     ${rawPath}`);
@@ -20715,11 +20943,11 @@ function renderAction() {
   const dir = process.argv[3];
   const outPath = process.argv[4];
   if (!dir) fail("render: missing <dir> argument", USAGE);
-  const digestPath = join5(dir, "digest.json");
-  if (!existsSync4(digestPath)) fail(`render: ${digestPath} not found`);
+  const digestPath = join6(dir, "digest.json");
+  if (!existsSync5(digestPath)) fail(`render: ${digestPath} not found`);
   let d;
   try {
-    d = JSON.parse(readFileSync4(digestPath, "utf8"));
+    d = JSON.parse(readFileSync5(digestPath, "utf8"));
   } catch (e) {
     fail(`render: failed to parse ${digestPath}: ${e instanceof Error ? e.message : String(e)}`, void 0, 1);
   }
@@ -20734,14 +20962,14 @@ function renderAction() {
 function cleanupAction() {
   const dir = process.argv[3];
   if (!dir) fail("cleanup: missing <dir> argument", USAGE);
-  if (!existsSync4(dir)) fail(`cleanup: ${dir} not found`);
+  if (!existsSync5(dir)) fail(`cleanup: ${dir} not found`);
   rmSync(dir, { recursive: true, force: true });
   console.error(`cleaned up ${dir}`);
 }
 function loadLastDigest() {
-  if (!existsSync4(LAST_DIGEST_PATH)) return null;
+  if (!existsSync5(LAST_DIGEST_PATH)) return null;
   try {
-    return JSON.parse(readFileSync4(LAST_DIGEST_PATH, "utf8"));
+    return JSON.parse(readFileSync5(LAST_DIGEST_PATH, "utf8"));
   } catch (e) {
     console.error(`warning: could not parse ${LAST_DIGEST_PATH}: ${e instanceof Error ? e.message : String(e)}`);
     return null;
@@ -20750,9 +20978,9 @@ function loadLastDigest() {
 function saveAction() {
   const dir = process.argv[3];
   if (!dir) fail("save: missing <dir> argument", USAGE);
-  const digestPath = join5(dir, "digest.json");
-  if (!existsSync4(digestPath)) fail(`save: ${digestPath} not found`);
-  const digest = JSON.parse(readFileSync4(digestPath, "utf8"));
+  const digestPath = join6(dir, "digest.json");
+  if (!existsSync5(digestPath)) fail(`save: ${digestPath} not found`);
+  const digest = JSON.parse(readFileSync5(digestPath, "utf8"));
   const presentedAt = (/* @__PURE__ */ new Date()).toISOString();
   const store = {
     schema_version: LAST_DIGEST_SCHEMA_VERSION,
@@ -20760,7 +20988,7 @@ function saveAction() {
     fetched_at: digest.meta?.generated_at ?? presentedAt,
     digest
   };
-  mkdirSync2(join5(homedir5(), ".pi", "aura"), { recursive: true });
+  mkdirSync2(join6(homedir6(), ".pi", "aura"), { recursive: true });
   writeFileSync2(LAST_DIGEST_PATH, JSON.stringify(store, null, 2) + "\n", "utf8");
   console.error(`saved last digest to ${LAST_DIGEST_PATH} (presented ${presentedAt})`);
 }
@@ -20820,15 +21048,15 @@ function computeDiff(prev, cur) {
 function diffAction() {
   const dir = process.argv[3];
   if (!dir) fail("diff: missing <dir> argument", USAGE);
-  const curPath = join5(dir, "digest.json");
-  if (!existsSync4(curPath)) fail(`diff: ${curPath} not found`);
+  const curPath = join6(dir, "digest.json");
+  if (!existsSync5(curPath)) fail(`diff: ${curPath} not found`);
   const last = loadLastDigest();
   if (!last) {
     console.error(`no previous digest found at ${LAST_DIGEST_PATH}`);
     process.stdout.write(JSON.stringify({ first_run: true }, null, 2) + "\n");
     return;
   }
-  const cur = JSON.parse(readFileSync4(curPath, "utf8"));
+  const cur = JSON.parse(readFileSync5(curPath, "utf8"));
   const diff = computeDiff(last.digest, cur);
   process.stdout.write(JSON.stringify(diff, null, 2) + "\n");
 }
