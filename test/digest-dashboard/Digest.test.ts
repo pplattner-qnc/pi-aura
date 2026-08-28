@@ -15,10 +15,20 @@ class FakeEventSource {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: (() => void) | null = null;
   static instances: FakeEventSource[] = [];
+  private listeners = new Map<string, Set<(event: MessageEvent) => void>>();
 
   constructor(url: string) {
     this.url = url;
     FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: (event: MessageEvent) => void): void {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type)!.add(listener);
+  }
+
+  removeEventListener(type: string, listener: (event: MessageEvent) => void): void {
+    this.listeners.get(type)?.delete(listener);
   }
 
   close() {
@@ -30,6 +40,16 @@ class FakeEventSource {
     for (const es of FakeEventSource.instances) {
       if (es.onmessage) {
         es.onmessage(new MessageEvent("message", { data }));
+      }
+    }
+  }
+
+  static dispatchNamed(type: string, data: unknown) {
+    const payload = typeof data === "string" ? data : JSON.stringify(data);
+    for (const es of FakeEventSource.instances) {
+      es.listeners.get(type)?.forEach((fn) => fn(new MessageEvent(type, { data: payload })));
+      if (type === "message" && es.onmessage) {
+        es.onmessage(new MessageEvent("message", { data: payload }));
       }
     }
   }
@@ -305,7 +325,7 @@ describe("Digest dashboard interactions", () => {
     btn.click();
     await new Promise((r) => setTimeout(r, 20));
 
-    const postCalls = fetchMock.mock.calls.filter((call: [string, RequestInit?]) => call[0] === "/api/state");
+    const postCalls = fetchMock.mock.calls.filter((call: [string, RequestInit?]) => call[0] === "/api/state" && call[1]?.method === "POST");
     expect(postCalls).toHaveLength(1);
     const [, options] = postCalls[0];
     expect(options?.method).toBe("POST");
@@ -321,9 +341,15 @@ describe("Digest dashboard interactions", () => {
     const firstDigest = baseDigest([action({ key: "AURA-1", label: "First" })]);
     const secondDigest = baseDigest([action({ key: "AURA-2", label: "Second" })]);
 
-    fetchMock
-      .mockResolvedValueOnce({ ok: true, json: async () => firstDigest })
-      .mockResolvedValueOnce({ ok: true, json: async () => secondDigest });
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === "/api/digest") {
+        // First call returns firstDigest; subsequent calls return secondDigest.
+        const digestCallCount = fetchMock.mock.calls.filter((c: [string, RequestInit?]) => c[0] === "/api/digest").length;
+        return { ok: true, json: async () => digestCallCount <= 1 ? firstDigest : secondDigest };
+      }
+      if (url === "/api/state") return { ok: true, json: async () => ({ pid: null, server_started: null, events: [] }) };
+      return { ok: true, json: async () => ({}) };
+    });
 
     const target = document.getElementById("app")!;
     mount(Digest, { target });
@@ -336,7 +362,9 @@ describe("Digest dashboard interactions", () => {
     FakeEventSource.dispatch({ changed: true });
     await new Promise((r) => setTimeout(r, 60));
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // /api/digest fetched twice (initial load + SSE change).
+    const digestFetchCount = fetchMock.mock.calls.filter((c: [string, RequestInit?]) => c[0] === "/api/digest").length;
+    expect(digestFetchCount).toBe(2);
     expect(target.textContent).toContain("Second");
   });
 });
