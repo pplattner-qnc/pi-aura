@@ -4,7 +4,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import type { ActionClickPayload } from "./digest-types.ts";
+import type { ActionClickPayload, ProgressPayload, AgentLogPayload } from "./digest-types.ts";
 
 export interface AckPayload {
   event_id: number;
@@ -14,24 +14,6 @@ export interface AckPayload {
 export interface UpdateViewPayload {
   // Partial digest fields used to update the client view.
   [key: string]: unknown;
-}
-
-/** Wire shape for a scheduler progress node, mirroring the scheduler's
- *  ProgressEvent (slice 1). Slice 3's onProgress hook projects a
- *  ProgressEvent into this payload before POSTing it. */
-export interface ProgressPayload {
-  id: string;
-  label: string;
-  parentId?: string;
-  status: "running" | "done" | "error";
-  startedAt: number;
-  endedAt?: number;
-  kind: string;
-}
-
-/** Wire shape for a free-form agent log line rendered below the tree. */
-export interface AgentLogPayload {
-  message: string;
 }
 
 export interface StateEvent {
@@ -91,6 +73,13 @@ export function appendEvent(filePath: string, event: StateEvent): Promise<void> 
   return enqueue(filePath, () => {
     ensureDir(filePath);
     const state = existsSync(filePath) ? readState(filePath) : structuredClone(EMPTY_STATE);
+    // Assign a server-side monotonic id — the client-supplied id is
+    // overwritten so multiple events with the same client id (e.g.
+    // digest-log sends id:0) don't collide.
+    const maxId = state.events.length > 0
+      ? Math.max(...state.events.map((e) => e.id))
+      : 0;
+    event.id = maxId + 1;
     state.events.push(event);
     writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
   });

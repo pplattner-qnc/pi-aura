@@ -649,12 +649,14 @@ async function fetchAction(): Promise<void> {
           candidateNodes.push(node);
         }
 
-        // Finish each child node with deferCloseForChildren: true BEFORE
-        // spawning. This keeps each child node spinning until the child task
-        // finishes its own ctx.node, at which point the deferred parent
-        // (the child node) resolves.
-        for (const node of rowNodes) ctx.progress.finish(node, { deferCloseForChildren: true });
-        for (const node of candidateNodes) ctx.progress.finish(node, { deferCloseForChildren: true });
+        // Leaf row/candidate nodes have NO children, so
+        // deferCloseForChildren would resolve them to "done" immediately —
+        // before the child task runs. Instead, leave them "running" (created
+        // via ctx.progress.create) and let the child task finish them plainly
+        // in its finally block (devLinksRow/reviewCandidate) so they stay
+        // spinning until the child task completes (the desired UX).
+        // The phase nodes (tasksPhaseNode/reviewsPhaseNode) DO have children,
+        // so their deferCloseForChildren: true below is correct and stays.
 
         // Finish the phase nodes with deferCloseForChildren: true so they
         // stay spinning until all their child nodes are terminal.

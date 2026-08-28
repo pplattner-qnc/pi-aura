@@ -44,6 +44,9 @@
   let fetchMode = $state(false);
   let progressNodes = $state<Map<string, ProgressNode>>(new Map());
   let agentLogLines = $state<string[]>([]);
+  // Set mirror of agentLogLines for O(1) dedup (FIX 5: avoids O(n^2)
+  // array.includes scan per new line as the log grows).
+  let seenLogLines = new Set<string>();
 
   // Dwell manager: holds a running->done (or running->error) transition for
   // ~400ms so a fast open->close pair still shows a brief check/X rather
@@ -171,13 +174,13 @@
         // Accumulate progress nodes (append-only by id).
         const merged = mergeProgressNodes(progressNodes, progressEvents);
         progressNodes = new Map(merged);
-        // Accumulate agent log lines (chronological, dedup by content+order).
+        // Accumulate agent log lines (chronological, dedup by content).
+        // O(1) dedup via the seenLogLines Set (FIX 5).
         const newLines = logEvents.map((e) => e.message);
-        // Only add lines we haven't seen (compare against the accumulated set).
-        for (const line of newLines) {
-          if (!agentLogLines.includes(line)) {
-            agentLogLines = [...agentLogLines, line];
-          }
+        const toAdd = newLines.filter((line) => !seenLogLines.has(line));
+        if (toAdd.length > 0) {
+          for (const line of toAdd) seenLogLines.add(line);
+          agentLogLines = [...agentLogLines, ...toAdd];
         }
         fetchMode = true;
       }
@@ -306,27 +309,42 @@
   // children are running. Applies the dwell hold so a fast running->done
   // transition still shows the spinner for ~400ms before flipping to check.
   //
-  // Dwell observation happens here, at render time, not in loadStateEvents.
-  // This ensures the dwell timer starts when the new status is first
-  // rendered, not when the data arrives (which is ~20ms earlier due to the
-  // 30ms debounce). Only leaf nodes (no children) are observed for dwell —
-  // parent nodes use deferCloseForChildren (effectiveStatus) as their
-  // natural hold.
+  // This is a PURE render function: it reads dwellVersion (for the reactive
+  // dependency) and calls dwell.displayStatus, but does NOT mutate the
+  // DwellManager. Dwell observation happens in a separate $effect below
+  // so the render pass stays side-effect-free.
   //
-  // Reading dwellVersion creates a reactive dependency so that when the
-  // dwell manager's onExpire callback bumps it (a dwell timer fired), this
-  // function re-evaluates and the icon updates.
+  // Only leaf nodes (no children) are observed for dwell — parent nodes
+  // use deferCloseForChildren (effectiveStatus) as their natural hold.
   function statusIcon(node: ProgressNode): string {
     void dwellVersion;
     const status = effectiveStatus(node);
-    if (node.children.length === 0) {
-      dwell.observe(node.id, status);
-    }
     const displayed = dwell.displayStatus(node.id, status);
     if (displayed === "running") return "spinner";
     if (displayed === "done") return "✓";
     return "✕";
   }
+
+  // Dwell observation: a $effect.pre that observes status transitions for
+  // leaf nodes and records them in the DwellManager BEFORE the DOM updates.
+  // Using $effect.pre (not $effect) ensures the observe call runs before the
+  // render pass, so statusIcon sees the dwell hold on the same tick the
+  // transition arrives. This keeps statusIcon a pure render function.
+  // Runs whenever progressNodes or dwellVersion changes.
+  $effect.pre(() => {
+    void dwellVersion;
+    const tree = buildProgressTree(progressNodes);
+    const visit = (nodes: ProgressNode[]): void => {
+      for (const node of nodes) {
+        if (node.children.length === 0) {
+          dwell.observe(node.id, effectiveStatus(node));
+        } else {
+          visit(node.children);
+        }
+      }
+    };
+    visit(tree);
+  });
 
   // Parse a notification summary line ("YYYY-MM-DD — <type> by ...") and return
   // the type code plus its emoji badge + plain-English label for the tooltip.

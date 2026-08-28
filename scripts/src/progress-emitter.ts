@@ -81,13 +81,12 @@ export function readDashboardUrl(serverUrlPath: string = defaultServerUrlPath())
   }
 }
 
-/** Monotonic event id counter for POSTed events. */
-let nextEventId = 0;
-
-/** Build a StateEvent wrapper around a progress payload. */
+/** Build a StateEvent wrapper around a progress payload. The id is a
+ *  placeholder (0) — the server assigns the real monotonic id in
+ *  appendEvent (FIX 2: server-side id assignment). */
 function wrapEvent(payload: ProgressEventLike): ProgressStateEvent {
   return {
-    id: ++nextEventId,
+    id: 0,
     ts: new Date().toISOString(),
     dir: "agent→page",
     type: "progress",
