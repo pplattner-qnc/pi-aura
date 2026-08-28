@@ -51,6 +51,14 @@ const saveToolParameters = Type.Object({
 
 type SaveToolParams = Static<typeof saveToolParameters>;
 
+const logToolParameters = Type.Object({
+  message: Type.String({
+    description: "A single status line to display in the dashboard's log list below the progress tree.",
+  }),
+});
+
+type LogToolParams = Static<typeof logToolParameters>;
+
 const stopToolParameters = Type.Object({});
 
 type StopToolParams = Static<typeof stopToolParameters>;
@@ -337,7 +345,31 @@ const DIGEST_TOOLS: readonly string[] = [
   "digest-dashboard-stop",
   "digest-fetch",
   "digest-save",
+  "digest-log",
 ];
+
+// Read the dashboard server URL from ~/.pi/aura/server-url.json. Returns null if
+// the file is absent or malformed — the caller treats null as "dashboard is
+// down, skip the log POST." Mirrors scripts/src/progress-emitter.ts
+// readDashboardUrl by design (a cross-project import is blocked by this
+// extension's tsconfig rootDir — see TS6059).
+function readDashboardUrl(serverUrlPath: string = defaultAuraPaths().serverUrlPath): string | null {
+  if (!existsSync(serverUrlPath)) return null;
+  try {
+    const raw = readFileSync(serverUrlPath, "utf-8");
+    const parsed = JSON.parse(raw) as { url?: string };
+    if (typeof parsed.url === "string" && parsed.url.length > 0) return parsed.url;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function joinUrl(base: string, p: string): string {
+  const b = base.endsWith("/") ? base.slice(0, -1) : base;
+  const pp = p.startsWith("/") ? p : `/${p}`;
+  return `${b}${pp}`;
+}
 
 export async function digestCommandHandler(
   pi: ExtensionAPI,
@@ -493,6 +525,64 @@ export default function (pi: ExtensionAPI): void {
         content: [{ type: "text", text: `digest-save: saved last digest from ${params.dir}` }],
         details: {},
       };
+    },
+  });
+
+  pi.registerTool({
+    name: "digest-log",
+    label: "Log a status line to the digest dashboard",
+    description:
+      "Push a single status line to the running digest dashboard's log list (below the progress tree). A no-op if the dashboard is not running — it never fails the agent's call.",
+    promptSnippet: "digest-log — append a status line to the live digest dashboard.",
+    promptGuidelines: [
+      "Use digest-log to push status lines during the augment phase so the user sees live progress in the dashboard.",
+    ],
+    parameters: logToolParameters,
+    async execute(
+      _toolCallId: string,
+      params: LogToolParams,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+    ): Promise<AgentToolResult<Record<string, never>>> {
+      const dashboardUrl = readDashboardUrl();
+      if (dashboardUrl === null) {
+        return {
+          content: [
+            { type: "text", text: "digest-log: dashboard not running, log skipped" },
+          ],
+          details: {},
+        };
+      }
+
+      const apiUrl = joinUrl(dashboardUrl, "/api/state");
+      const body = JSON.stringify({
+        id: 0,
+        ts: new Date().toISOString(),
+        dir: "agent→page",
+        type: "agent_log",
+        payload: { message: params.message },
+      });
+
+      try {
+        await fetch(apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        return {
+          content: [{ type: "text", text: `digest-log: ok (${params.message})` }],
+          details: {},
+        };
+      } catch {
+        // Best-effort: a POST failure (dashboard went down mid-run) is
+        // non-fatal — the log is a nice-to-have, not a gate.
+        return {
+          content: [
+            { type: "text", text: `digest-log: ok (post failed, non-fatal) — ${params.message}` },
+          ],
+          details: {},
+        };
+      }
     },
   });
 
