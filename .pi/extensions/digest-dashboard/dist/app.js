@@ -2248,6 +2248,10 @@
   function create_user_effect(fn) {
     return create_effect(EFFECT | USER_EFFECT, fn);
   }
+  function user_pre_effect(fn) {
+    validate_effect();
+    return create_effect(RENDER_EFFECT | USER_EFFECT, fn);
+  }
   function component_root(fn) {
     Batch.ensure();
     const effect = create_effect(ROOT_EFFECT | EFFECT_PRESERVED, fn);
@@ -4007,6 +4011,7 @@
     let fetchMode = /* @__PURE__ */ state(false);
     let progressNodes = /* @__PURE__ */ state(proxy(/* @__PURE__ */ new Map()));
     let agentLogLines = /* @__PURE__ */ state(proxy([]));
+    let seenLogLines = /* @__PURE__ */ new Set();
     let dwellVersion = /* @__PURE__ */ state(0);
     let dwell = createDwellManager(DWELL_MS, () => {
       update(dwellVersion);
@@ -4094,10 +4099,10 @@
           const merged = mergeProgressNodes(get(progressNodes), progressEvents);
           set(progressNodes, new Map(merged), true);
           const newLines = logEvents.map((e) => e.message);
-          for (const line of newLines) {
-            if (!get(agentLogLines).includes(line)) {
-              set(agentLogLines, [...get(agentLogLines), line], true);
-            }
+          const toAdd = newLines.filter((line) => !seenLogLines.has(line));
+          if (toAdd.length > 0) {
+            for (const line of toAdd) seenLogLines.add(line);
+            set(agentLogLines, [...get(agentLogLines), ...toAdd], true);
           }
           set(fetchMode, true);
         }
@@ -4185,14 +4190,25 @@
     function statusIcon(node) {
       void get(dwellVersion);
       const status = effectiveStatus(node);
-      if (node.children.length === 0) {
-        dwell.observe(node.id, status);
-      }
       const displayed = dwell.displayStatus(node.id, status);
       if (displayed === "running") return "spinner";
       if (displayed === "done") return "✓";
       return "✕";
     }
+    user_pre_effect(() => {
+      void get(dwellVersion);
+      const tree = buildProgressTree(get(progressNodes));
+      const visit = (nodes) => {
+        for (const node of nodes) {
+          if (node.children.length === 0) {
+            dwell.observe(node.id, effectiveStatus(node));
+          } else {
+            visit(node.children);
+          }
+        }
+      };
+      visit(tree);
+    });
     const NOTIF_META = {
       "task.status_changed": { emoji: "🚦", label: "Task status changed" },
       "task.member_added": { emoji: "👤", label: "Task member added" },
