@@ -44,6 +44,9 @@
   let fetchMode = $state(false);
   let progressNodes = $state<Map<string, ProgressNode>>(new Map());
   let agentLogLines = $state<string[]>([]);
+  // Set mirror of agentLogLines for O(1) dedup (FIX 5: avoids O(n^2)
+  // array.includes scan per new line as the log grows).
+  let seenLogLines = new Set<string>();
 
   // Dwell manager: holds a running->done (or running->error) transition for
   // ~400ms so a fast open->close pair still shows a brief check/X rather
@@ -171,13 +174,13 @@
         // Accumulate progress nodes (append-only by id).
         const merged = mergeProgressNodes(progressNodes, progressEvents);
         progressNodes = new Map(merged);
-        // Accumulate agent log lines (chronological, dedup by content+order).
+        // Accumulate agent log lines (chronological, dedup by content).
+        // O(1) dedup via the seenLogLines Set (FIX 5).
         const newLines = logEvents.map((e) => e.message);
-        // Only add lines we haven't seen (compare against the accumulated set).
-        for (const line of newLines) {
-          if (!agentLogLines.includes(line)) {
-            agentLogLines = [...agentLogLines, line];
-          }
+        const toAdd = newLines.filter((line) => !seenLogLines.has(line));
+        if (toAdd.length > 0) {
+          for (const line of toAdd) seenLogLines.add(line);
+          agentLogLines = [...agentLogLines, ...toAdd];
         }
         fetchMode = true;
       }
