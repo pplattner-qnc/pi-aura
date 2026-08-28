@@ -1,2 +1,2 @@
-task: digest-live-progress-tree
-slice: 5-digest-log-tool
+task: core-move
+slice: None

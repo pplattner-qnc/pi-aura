@@ -2,7 +2,7 @@
 kind: map
 slug: digest-live-progress-tree
 title: Show a live progress tree in the digest dashboard while the fetch runs
-status: active
+status: done
 tasks: [digest-live-progress-tree]
 ---
 
