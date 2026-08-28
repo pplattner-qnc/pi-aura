@@ -189,6 +189,45 @@ describe("start-dashboard", () => {
     expect(second.message).toContain("already running");
   });
 
+  it("recovers from an orphaned server: pid alive but server-url.json absent → kills orphan and respawns", async () => {
+    // Reproduces the session_shutdown teardown race: the URL file was deleted
+    // but the detached server survived, so the dashboard is alive but
+    // unfindable. A subsequent start must not report "already running" — it
+    // must reap the orphan and spawn a fresh, findable server.
+    const { pi } = createFakePi();
+    const ctx = createCtx();
+
+    const first = await startDashboard(pi, ctx);
+    expect(first.ok).toBe(true);
+    const orphanPid = readState(statePath).pid!;
+    expect(() => process.kill(orphanPid, 0)).not.toThrow();
+
+    // Simulate the orphan: delete server-url.json while the server lives.
+    rmSync(serverUrlPath, { force: true });
+    expect(existsSync(serverUrlPath)).toBe(false);
+    // state.json still records the live pid — the orphan signature.
+    expect(readState(statePath).pid).toBe(orphanPid);
+
+    const second = await startDashboard(pi, ctx);
+    expect(second.ok).toBe(true);
+    expect(second.url).toBeDefined();
+    // A fresh server-url.json is written for the new server.
+    expect(existsSync(serverUrlPath)).toBe(true);
+    const newPid = readState(statePath).pid!;
+    // The orphan was reaped.
+    await waitFor(() => {
+      try {
+        process.kill(orphanPid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+    // The new server is alive and is a different process.
+    expect(() => process.kill(newPid, 0)).not.toThrow();
+    expect(newPid).not.toBe(orphanPid);
+  });
+
   it("stop cleans up: kills PID, deletes state.json and server-url.json", async () => {
     const { pi } = createFakePi();
     const ctx = createCtx();

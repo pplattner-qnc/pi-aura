@@ -190,6 +190,12 @@ async function terminateProcess(pid: number): Promise<void> {
       }
       throw err;
     }
+    // Wait for the SIGKILL to take effect so callers can rely on the
+    // process being gone before they delete the state files that record
+    // its pid. A detached/unref'd child can take a tick to be reaped.
+    for (let i = 0; i < 20 && isProcessAlive(pid); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
   }
 }
 
@@ -256,10 +262,24 @@ export async function startDashboard(
   const state = readState(statePath);
 
   if (state.pid !== null && isProcessAlive(state.pid)) {
-    return {
-      ok: false,
-      message: "Digest dashboard already running. Use the digest-dashboard-stop tool first.",
-    };
+    // The recorded pid is alive. If server-url.json is also present, the
+    // dashboard is genuinely running — no-op. If server-url.json is ABSENT,
+    // the dashboard is an orphan: a prior teardown (e.g. session_shutdown)
+    // deleted the URL file without reaping the detached server, so the
+    // browser is still connected but digest-fetch cannot find it. Kill the
+    // orphan and respawn a fresh, findable server instead of getting stuck.
+    if (existsSync(serverUrlPath)) {
+      return {
+        ok: false,
+        message: "Digest dashboard already running. Use the digest-dashboard-stop tool first.",
+      };
+    }
+    // Orphaned: best-effort reap, then fall through to start a fresh one.
+    try {
+      await terminateProcess(state.pid);
+    } catch {
+      // Best-effort — proceed to spawn regardless.
+    }
   }
 
   // Clean up any stale listener handle before starting a fresh one.
