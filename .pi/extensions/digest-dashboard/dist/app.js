@@ -3911,7 +3911,7 @@
     return roots.some((r) => effectiveStatus(r) === "done");
   }
   const DWELL_MS = 400;
-  function createDwellManager(dwellMs = DWELL_MS, onExpire, scheduler = (fn, ms) => setTimeout(fn, ms)) {
+  function createDwellManager(dwellMs = DWELL_MS, onExpire) {
     const lastStatus = /* @__PURE__ */ new Map();
     const dwelling = /* @__PURE__ */ new Map();
     const timers = /* @__PURE__ */ new Map();
@@ -3922,7 +3922,7 @@
           const existing = timers.get(id);
           if (existing !== void 0) clearTimeout(existing);
           dwelling.set(id, status);
-          const timer = scheduler(() => {
+          const timer = setTimeout(() => {
             dwelling.delete(id);
             timers.delete(id);
             onExpire?.(id);
@@ -4008,19 +4008,9 @@
     let progressNodes = /* @__PURE__ */ state(proxy(/* @__PURE__ */ new Map()));
     let agentLogLines = /* @__PURE__ */ state(proxy([]));
     let dwellVersion = /* @__PURE__ */ state(0);
-    let dwell = createDwellManager(
-      DWELL_MS,
-      () => {
-        update(dwellVersion);
-      },
-      (fn, ms) => {
-        const observeTime = Date.now();
-        requestAnimationFrame(() => {
-          const rafDelay = Date.now() - observeTime;
-          setTimeout(fn, ms + Math.round(rafDelay / 2));
-        });
-      }
-    );
+    let dwell = createDwellManager(DWELL_MS, () => {
+      update(dwellVersion);
+    });
     let activeTab = /* @__PURE__ */ state("actions");
     let dismissedWarnings = /* @__PURE__ */ state(proxy(/* @__PURE__ */ new Set()));
     async function loadDigest() {

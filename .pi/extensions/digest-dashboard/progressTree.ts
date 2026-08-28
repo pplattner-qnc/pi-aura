@@ -179,16 +179,10 @@ export interface DwellManager {
  *  logic — no DOM or component dependency — so it is unit-testable.
  *  The optional `onExpire` callback is invoked when a dwell timer fires
  *  (before the node is removed from the dwell hold), so a caller that
- *  renders from reactive state can bump a counter and trigger a re-render.
- *  The optional `scheduler` function defaults to `setTimeout`; a caller
- *  that renders in a framework with its own timing (e.g. requestAnimationFrame)
- *  can pass a custom scheduler to defer the dwell expiry timer start so it
- *  aligns with the framework's render cycle. */
+ *  renders from reactive state can bump a counter and trigger a re-render. */
 export function createDwellManager(
   dwellMs: number = DWELL_MS,
   onExpire?: (id: string) => void,
-  scheduler: (fn: () => void, ms: number) => ReturnType<typeof setTimeout> =
-    (fn, ms) => setTimeout(fn, ms),
 ): DwellManager {
   // The last status we observed for each node (before the current one).
   const lastStatus = new Map<string, NodeStatus>();
@@ -206,11 +200,11 @@ export function createDwellManager(
         const existing = timers.get(id);
         if (existing !== undefined) clearTimeout(existing);
         // Set the dwelling flag immediately so the current render shows
-        // the spinner. The expiry timer is started via the scheduler,
-        // which may defer it (e.g. to the next animation frame) so the
-        // dwell duration is measured from the first visible render.
+        // the spinner. The expiry timer is a plain setTimeout(dwellMs)
+        // — the dwell is measured from the moment the transition is
+        // observed at render time.
         dwelling.set(id, status);
-        const timer = scheduler(() => {
+        const timer = setTimeout(() => {
           dwelling.delete(id);
           timers.delete(id);
           onExpire?.(id);

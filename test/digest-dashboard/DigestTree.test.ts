@@ -362,21 +362,27 @@ describe("fetch display mode — layered debounce", () => {
       progressEvent({ id: "root", label: "Root", status: "done" }, 1),
     ]);
     FakeEventSource.dispatchStateChange(1, "progress");
+    // Advance past the 30ms debounce so the state-change is processed,
+    // the render occurs, and the dwell is observed. At this point the
+    // dwell timer has just started (~400ms hold).
     await vi.advanceTimersByTimeAsync(50);
 
-    // Immediately after the done event: the spinner should STILL be visible
-    // (dwell holds it for ~400ms). The node must NOT show the check yet.
+    // The spinner should STILL be visible (dwell just started).
+    // The node must NOT show the check yet.
     rootEl = target.querySelector('[data-node-id="root"]');
     expect(rootEl).not.toBeNull();
     expect(rootEl!.querySelector(".loading-spinner")).not.toBeNull();
     expect(rootEl!.textContent).not.toContain("✓");
 
-    // After 399ms more: still dwelling, still spinner.
-    await vi.advanceTimersByTimeAsync(399);
+    // The dwell was observed at ~t=130 (when the 30ms debounce fired
+    // inside the advance above). ~20ms has already elapsed. Advance
+    // ~380ms more so we're just inside the 400ms dwell boundary.
+    await vi.advanceTimersByTimeAsync(379);
     rootEl = target.querySelector('[data-node-id="root"]');
     expect(rootEl!.querySelector(".loading-spinner")).not.toBeNull();
 
-    // After 401ms total (past the dwell): the check appears.
+    // 2ms later (~401ms past observation): the dwell expires and the
+    // check appears.
     await vi.advanceTimersByTimeAsync(2);
     rootEl = target.querySelector('[data-node-id="root"]');
     expect(rootEl!.textContent).toContain("✓");

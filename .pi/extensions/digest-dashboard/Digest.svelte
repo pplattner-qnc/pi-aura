@@ -53,27 +53,8 @@
   // onExpire callback so that when a dwell timer fires (mutating the
   // manager's internal, non-reactive Map) the component re-renders and
   // picks up the now-expired dwell state.
-  //
-  // The scheduler defers the dwell expiry timer to the next animation frame
-  // so the dwell duration is measured from the first visible render, not
-  // from when the data arrives (which is earlier due to the 30ms debounce).
-  // The dwelling flag is set immediately in observe() so the current render
-  // shows the spinner; the setTimeout that clears the flag is started from
-  // the rAF callback. A small buffer (half the rAF delay, rounded) is added
-  // to the setTimeout duration to compensate for the rAF deferral so the
-  // effective dwell is ~400ms from the user's perspective.
   let dwellVersion = $state(0);
-  let dwell = createDwellManager(
-    DWELL_MS,
-    () => { dwellVersion++; },
-    (fn, ms) => {
-      const observeTime = Date.now();
-      requestAnimationFrame(() => {
-        const rafDelay = Date.now() - observeTime;
-        setTimeout(fn, ms + Math.round(rafDelay / 2));
-      });
-    },
-  );
+  let dwell = createDwellManager(DWELL_MS, () => { dwellVersion++; });
 
   type TabId = "capacity" | "reviews-due" | "reviews-owed" | "actions";
   let activeTab = $state<TabId>("actions");
