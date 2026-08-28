@@ -333,10 +333,61 @@ describe("fetch display mode — layered debounce", () => {
     vi.useRealTimers();
   });
 
-  it("shows a brief check (~400ms dwell) for a fast running->done pair", async () => {
+  it("holds the spinner for ~400ms on a fast running->done transition, then shows check", async () => {
     vi.useFakeTimers();
 
-    // State with a node that went running then done very fast
+    // Phase 1: node is running.
+    const runningState = stateFile([
+      progressEvent({ id: "root", label: "Root", status: "running" }, 1),
+    ]);
+
+    let currentState = runningState;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === "/api/digest") return { ok: false, status: 404, statusText: "Not Found" };
+      if (url === "/api/state") return { ok: true, json: async () => currentState };
+      return { ok: true, json: async () => ({}) };
+    });
+
+    const target = document.getElementById("app")!;
+    mount(Digest, { target });
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Root should show spinner (running).
+    let rootEl = target.querySelector('[data-node-id="root"]');
+    expect(rootEl).not.toBeNull();
+    expect(rootEl!.querySelector(".loading-spinner")).not.toBeNull();
+
+    // Phase 2: node transitions to done on the next tick (fast pair).
+    currentState = stateFile([
+      progressEvent({ id: "root", label: "Root", status: "done" }, 1),
+    ]);
+    FakeEventSource.dispatchStateChange(1, "progress");
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Immediately after the done event: the spinner should STILL be visible
+    // (dwell holds it for ~400ms). The node must NOT show the check yet.
+    rootEl = target.querySelector('[data-node-id="root"]');
+    expect(rootEl).not.toBeNull();
+    expect(rootEl!.querySelector(".loading-spinner")).not.toBeNull();
+    expect(rootEl!.textContent).not.toContain("✓");
+
+    // After 399ms more: still dwelling, still spinner.
+    await vi.advanceTimersByTimeAsync(399);
+    rootEl = target.querySelector('[data-node-id="root"]');
+    expect(rootEl!.querySelector(".loading-spinner")).not.toBeNull();
+
+    // After 401ms total (past the dwell): the check appears.
+    await vi.advanceTimersByTimeAsync(2);
+    rootEl = target.querySelector('[data-node-id="root"]');
+    expect(rootEl!.textContent).toContain("✓");
+
+    vi.useRealTimers();
+  });
+
+  it("shows the check immediately for a node already done on first mount (no dwell)", async () => {
+    vi.useFakeTimers();
+
+    // Node is already done — no observed running->done transition.
     const state = stateFile([
       progressEvent({ id: "root", label: "Root", status: "done", startedAt: 1000, endedAt: 1100 }, 1),
     ]);
@@ -351,7 +402,8 @@ describe("fetch display mode — layered debounce", () => {
     mount(Digest, { target });
     await vi.advanceTimersByTimeAsync(100);
 
-    // The node status is "done" — it should show a check
+    // The node status is "done" with no observed running->done transition
+    // — it should show a check immediately (no dwell).
     const rootEl = target.querySelector('[data-node-id="root"]');
     expect(rootEl).not.toBeNull();
     expect(rootEl!.textContent).toContain("✓");

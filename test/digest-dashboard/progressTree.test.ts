@@ -10,6 +10,7 @@ import {
   buildProgressTree,
   effectiveStatus,
   createDebounce,
+  createDwellManager,
   isRootDone,
   type ProgressNode,
 } from "../../.pi/extensions/digest-dashboard/progressTree.ts";
@@ -249,5 +250,80 @@ describe("progressTree — isRootDone", () => {
     const map = new Map<string, ProgressNode>();
     mergeProgressNodes(map, [prog({ id: "root", label: "R", status: "error" })]);
     expect(isRootDone(buildProgressTree(map))).toBe(false);
+  });
+});
+
+describe("progressTree — createDwellManager (400ms minimum dwell)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("holds a node in running during a running->done transition for ~400ms", () => {
+    const dm = createDwellManager(400);
+    // Before any transition, no dwell.
+    expect(dm.isDwelling("a")).toBe(false);
+
+    // Node observed as running, then done on the next tick.
+    dm.observe("a", "running");
+    dm.observe("a", "done");
+
+    // Immediately after the running->done transition: node is dwelling
+    // (should still display as running).
+    expect(dm.isDwelling("a")).toBe(true);
+
+    // After 399ms: still dwelling.
+    vi.advanceTimersByTime(399);
+    expect(dm.isDwelling("a")).toBe(true);
+
+    // After 401ms total: dwell expired, no longer dwelling.
+    vi.advanceTimersByTime(2);
+    expect(dm.isDwelling("a")).toBe(false);
+  });
+
+  it("does NOT dwell when a node is already done on first observe (no observed transition)", () => {
+    const dm = createDwellManager(400);
+    dm.observe("a", "done");
+    expect(dm.isDwelling("a")).toBe(false);
+    vi.advanceTimersByTime(500);
+    expect(dm.isDwelling("a")).toBe(false);
+  });
+
+  it("does NOT dwell for a running->running transition (no terminal transition)", () => {
+    const dm = createDwellManager(400);
+    dm.observe("a", "running");
+    dm.observe("a", "running");
+    expect(dm.isDwelling("a")).toBe(false);
+  });
+
+  it("also holds dwell for a running->error transition", () => {
+    const dm = createDwellManager(400);
+    dm.observe("a", "running");
+    dm.observe("a", "error");
+    expect(dm.isDwelling("a")).toBe(true);
+    vi.advanceTimersByTime(399);
+    expect(dm.isDwelling("a")).toBe(true);
+    vi.advanceTimersByTime(2);
+    expect(dm.isDwelling("a")).toBe(false);
+  });
+
+  it("returns the dwell status as running while dwelling", () => {
+    const dm = createDwellManager(400);
+    dm.observe("a", "running");
+    dm.observe("a", "done");
+    expect(dm.displayStatus("a", "done")).toBe("running");
+    vi.advanceTimersByTime(401);
+    expect(dm.displayStatus("a", "done")).toBe("done");
+  });
+
+  it("cancel clears all active dwells", () => {
+    const dm = createDwellManager(400);
+    dm.observe("a", "running");
+    dm.observe("a", "done");
+    expect(dm.isDwelling("a")).toBe(true);
+    dm.cancel();
+    expect(dm.isDwelling("a")).toBe(false);
   });
 });
