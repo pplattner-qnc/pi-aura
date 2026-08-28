@@ -4,7 +4,7 @@ slug: 4-svelte-tree-view
 title: Render the live tree + augment log in Digest.svelte with layered debounce
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: l
 blocked_by: [2-dashboard-event-plumbing]
 ---

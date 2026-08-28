@@ -1,2 +1,2 @@
 task: digest-live-progress-tree
-slice: 3-bundle-emits-tree
+slice: 4-svelte-tree-view
