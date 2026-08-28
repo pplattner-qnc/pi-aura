@@ -144,8 +144,13 @@ async function waitForServerUrl(
     if (existsSync(serverUrlPath)) {
       try {
         const raw = readFileSync(serverUrlPath, "utf-8");
-        const parsed = JSON.parse(raw) as { url?: string };
-        if (parsed.url) {
+        const parsed = JSON.parse(raw) as { url?: string; pid?: number };
+        // Only accept the URL if THIS child wrote it. A stale server-url.json
+        // left by a previous/orphaned server can otherwise satisfy the poll
+        // immediately with a dead port — startDashboard would return a URL
+        // that the browser can't reach and digest-fetch can't POST to. The
+        // server writes { url, pid: process.pid }, so match the spawned pid.
+        if (parsed.url && parsed.pid === child.pid) {
           return { url: parsed.url };
         }
       } catch {
@@ -304,6 +309,16 @@ export async function startDashboard(
 
   if (!child.pid) {
     return { ok: false, message: "Failed to spawn digest dashboard server." };
+  }
+
+  // Clear any stale server-url.json left by a previous/orphaned server BEFORE
+  // we spawn the new one, so waitForServerUrl cannot read the stale file and
+  // return a dead port as success. The new server writes its own pid-matched
+  // server-url.json on listen; waitForServerUrl checks pid === child.pid.
+  try {
+    if (existsSync(serverUrlPath)) rmSync(serverUrlPath, { force: true });
+  } catch {
+    // Best-effort — the pid check in waitForServerUrl is the real guard.
   }
 
   try {

@@ -228,6 +228,37 @@ describe("start-dashboard", () => {
     expect(newPid).not.toBe(orphanPid);
   });
 
+  it("ignores a stale server-url.json from a previous server and waits for this server's own", async () => {
+    // Reproduces the stale-URL trap: a previous run left server-url.json
+    // pointing at a now-dead port. startDashboard must not read that stale
+    // file and return the dead URL as success — it clears the stale file and
+    // waits for the new server to write its own pid-matched server-url.json.
+    const { pi } = createFakePi();
+    const ctx = createCtx();
+
+    // Plant a stale server-url.json with a foreign pid + a dead port.
+    mkdirSync(path.dirname(serverUrlPath), { recursive: true });
+    writeFileSync(
+      serverUrlPath,
+      JSON.stringify({ url: "http://127.0.0.1:38777/", pid: 999999 }),
+      "utf-8",
+    );
+    expect(existsSync(serverUrlPath)).toBe(true);
+
+    const result = await startDashboard(pi, ctx);
+    expect(result.ok).toBe(true);
+    // The returned URL must NOT be the stale dead port.
+    expect(result.url).not.toContain("38777");
+    // server-url.json now reflects THIS server (matching pid).
+    const fresh = JSON.parse(readFileSync(serverUrlPath, "utf-8")) as {
+      url: string;
+      pid: number;
+    };
+    expect(fresh.url).toBe(result.url);
+    expect(fresh.pid).toBe(readState(statePath).pid);
+    expect(fresh.url).not.toContain("38777");
+  });
+
   it("stop cleans up: kills PID, deletes state.json and server-url.json", async () => {
     const { pi } = createFakePi();
     const ctx = createCtx();
