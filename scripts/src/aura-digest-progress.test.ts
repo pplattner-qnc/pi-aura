@@ -132,24 +132,35 @@ describe("createProgressEmitter — batching", () => {
   });
 
   it("POSTs events in a single batch within ~50ms when 10 rapid events are pushed", async () => {
-    const hook = createProgressEmitter(serverUrl);
+    // Deterministic: use fake timers + mock fetch (no real HTTP, no real
+    // setTimeout wait) so the test does not flake under load (FIX 6).
+    vi.useFakeTimers();
+    const mockPosts: { body: string }[] = [];
+    const mockFetch = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+      mockPosts.push({ body: init?.body as string });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+
+    const hook = createProgressEmitter(serverUrl, { fetchImpl: mockFetch as unknown as typeof fetch });
 
     // Push 10 rapid events (all different ids — no coalescing).
     for (let i = 0; i < 10; i++) {
       hook(makeEvent({ id: String(i), label: `node ${i}`, startedAt: i }));
     }
 
-    // Wait for the batch timer to fire (~50ms) + a small margin.
-    await new Promise((r) => setTimeout(r, 150));
+    // Advance past the ~50ms batch timer so the drain fires.
+    await vi.advanceTimersByTimeAsync(60);
 
     // Should have POSTed 10 events in one batch (all from the same ~50ms window).
     // They are individual POSTs but all arrive within the same ~50ms batch.
-    expect(receivedPosts.length).toBe(10);
+    expect(mockPosts.length).toBe(10);
 
     // All 10 payloads should be present.
-    const payloads = extractPayloads(receivedPosts);
+    const payloads = extractPayloads(mockPosts);
     const ids = payloads.map((p) => p.id).sort();
     expect(ids).toEqual(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+
+    vi.useRealTimers();
   });
 
   it("flushes remaining events at run end (final flush)", async () => {
