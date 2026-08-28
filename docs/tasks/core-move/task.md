@@ -6,7 +6,7 @@ title: Move the aura-digest core out of scripts/src into the extension/shared la
 map: in-process-aura-digest
 status: ready
 blocked_by: []
-slices: []
+slices: [1-leaf-core-to-shared, 2-aura-digest-and-deps-to-shared, 3-remove-readDashboardUrl-duplicate]
 ---
 
 ## User-visible outcome
