@@ -306,27 +306,42 @@
   // children are running. Applies the dwell hold so a fast running->done
   // transition still shows the spinner for ~400ms before flipping to check.
   //
-  // Dwell observation happens here, at render time, not in loadStateEvents.
-  // This ensures the dwell timer starts when the new status is first
-  // rendered, not when the data arrives (which is ~20ms earlier due to the
-  // 30ms debounce). Only leaf nodes (no children) are observed for dwell —
-  // parent nodes use deferCloseForChildren (effectiveStatus) as their
-  // natural hold.
+  // This is a PURE render function: it reads dwellVersion (for the reactive
+  // dependency) and calls dwell.displayStatus, but does NOT mutate the
+  // DwellManager. Dwell observation happens in a separate $effect below
+  // so the render pass stays side-effect-free.
   //
-  // Reading dwellVersion creates a reactive dependency so that when the
-  // dwell manager's onExpire callback bumps it (a dwell timer fired), this
-  // function re-evaluates and the icon updates.
+  // Only leaf nodes (no children) are observed for dwell — parent nodes
+  // use deferCloseForChildren (effectiveStatus) as their natural hold.
   function statusIcon(node: ProgressNode): string {
     void dwellVersion;
     const status = effectiveStatus(node);
-    if (node.children.length === 0) {
-      dwell.observe(node.id, status);
-    }
     const displayed = dwell.displayStatus(node.id, status);
     if (displayed === "running") return "spinner";
     if (displayed === "done") return "✓";
     return "✕";
   }
+
+  // Dwell observation: a $effect.pre that observes status transitions for
+  // leaf nodes and records them in the DwellManager BEFORE the DOM updates.
+  // Using $effect.pre (not $effect) ensures the observe call runs before the
+  // render pass, so statusIcon sees the dwell hold on the same tick the
+  // transition arrives. This keeps statusIcon a pure render function.
+  // Runs whenever progressNodes or dwellVersion changes.
+  $effect.pre(() => {
+    void dwellVersion;
+    const tree = buildProgressTree(progressNodes);
+    const visit = (nodes: ProgressNode[]): void => {
+      for (const node of nodes) {
+        if (node.children.length === 0) {
+          dwell.observe(node.id, effectiveStatus(node));
+        } else {
+          visit(node.children);
+        }
+      }
+    };
+    visit(tree);
+  });
 
   // Parse a notification summary line ("YYYY-MM-DD — <type> by ...") and return
   // the type code plus its emoji badge + plain-English label for the tooltip.
