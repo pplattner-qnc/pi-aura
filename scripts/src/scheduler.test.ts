@@ -622,4 +622,77 @@ describe("runTasks progress nodes", () => {
     expect(childRunning).toBeDefined();
     expect(childRunning?.parentId).toBe(parentNode!.id.toString());
   });
+
+  // --- FIX 1: leaf node with deferCloseForChildren is a no-op; plain finish keeps it running ---
+  // These two tests document the production pattern used by aura-digest.ts:
+  // the row/candidate leaf nodes must NOT use deferCloseForChildren (which
+  // resolves to "done" immediately since they have no children), and must
+  // instead be left "running" and finished plainly in the task's finally
+  // block so they stay spinning until the task completes.
+
+  it("leaf node finished with deferCloseForChildren: true resolves to done immediately (no children)", async () => {
+    // Documents the current scheduler behavior: a deferred leaf (no children)
+    // becomes done at the moment finish is called. This is WHY the production
+    // code must NOT use deferCloseForChildren on leaf row/candidate nodes —
+    // they would flip to "done" before the child task runs.
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          const leaf = ctx.progress.create(undefined, "leaf-defer");
+          ctx.progress.finish(leaf, { deferCloseForChildren: true });
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    // The leaf resolves to "done" immediately — there are no children to wait for.
+    const leafEvents = events.filter((e) => e.label === "leaf-defer");
+    expect(leafEvents[0].status).toBe("running");
+    expect(leafEvents[leafEvents.length - 1].status).toBe("done");
+  });
+
+  it("leaf node left running and finished later via finish(node) stays running until the finish call", async () => {
+    // The production pattern: create a leaf node (no defer), spawn a child
+    // task that threads it via TaskRef.node, and the child task finishes
+    // the node in its finally block. The node stays "running" until the
+    // child task's finish call — the desired UX.
+    let leafNode: NodeHandle | undefined;
+    const kinds: KindMap<{ dummy: number }> = {
+      start: {
+        run: async (_input, ctx) => {
+          leafNode = ctx.progress.create(undefined, "leaf-task");
+          // Do NOT finish with deferCloseForChildren — leave it running.
+          return null;
+        },
+        spawn: () => [{ kind: "child", input: 0, node: leafNode! }],
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+      child: {
+        run: async (_input: number, ctx) => {
+          // Simulate work — the node is still "running" at this point.
+          await Promise.resolve();
+          // The finally block finishes the node plainly (no defer).
+          ctx.progress.finish(ctx.node!);
+          return null;
+        },
+        reduce: () => {},
+      } as unknown as Kind<Hashable, unknown, { dummy: number }>,
+    };
+    const { events, hook } = recorder();
+    await runTasks(
+      { kind: "start", input: null }, kinds, { dummy: 0 },
+      { onProgress: hook },
+    );
+    // The leaf stays "running" until the child task finishes it.
+    const leafEvents = events.filter((e) => e.label === "leaf-task");
+    expect(leafEvents[0].status).toBe("running");
+    expect(leafEvents[leafEvents.length - 1].status).toBe("done");
+    // Exactly 2 events: running (from create) + done (from child's finish).
+    expect(leafEvents.length).toBe(2);
+  });
 });
