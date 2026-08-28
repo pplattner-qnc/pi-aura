@@ -151,3 +151,88 @@ export function isRootDone(roots: ProgressNode[]): boolean {
   // At least one root must be "done" (not just error) to transition
   return roots.some((r) => effectiveStatus(r) === "done");
 }
+
+/** Minimum dwell on a running->done (or running->error) transition so a
+ *  fast open->close pair still renders a brief check/X rather than
+ *  vanishing. The dwell only applies to an OBSERVED transition — a node
+ *  that was already terminal when first seen renders immediately. */
+export const DWELL_MS = 400;
+
+export interface DwellManager {
+  /** Record the latest status observed for a node. When a running->done
+   *  or running->error transition is observed, the node enters a dwell: it
+   *  should continue to display as "running" for ~dwellMs. */
+  observe(id: string, status: NodeStatus): void;
+  /** True if the node is currently in a dwell hold (should display as
+   *  "running" despite having a terminal real status). */
+  isDwelling(id: string): boolean;
+  /** The status to display for a node given its real (post-merge) status.
+   *  If the node is dwelling, returns "running"; otherwise returns the
+   *  real status. */
+  displayStatus(id: string, realStatus: NodeStatus): NodeStatus;
+  /** Cancel all active dwell timers (e.g. on component teardown). */
+  cancel(): void;
+}
+
+/** Create a DwellManager that holds a running->terminal transition for
+ *  `dwellMs` before allowing the terminal status to render. Pure timer
+ *  logic — no DOM or component dependency — so it is unit-testable.
+ *  The optional `onExpire` callback is invoked when a dwell timer fires
+ *  (before the node is removed from the dwell hold), so a caller that
+ *  renders from reactive state can bump a counter and trigger a re-render.
+ *  The optional `scheduler` function defaults to `setTimeout`; a caller
+ *  that renders in a framework with its own timing (e.g. requestAnimationFrame)
+ *  can pass a custom scheduler to defer the dwell expiry timer start so it
+ *  aligns with the framework's render cycle. */
+export function createDwellManager(
+  dwellMs: number = DWELL_MS,
+  onExpire?: (id: string) => void,
+  scheduler: (fn: () => void, ms: number) => ReturnType<typeof setTimeout> =
+    (fn, ms) => setTimeout(fn, ms),
+): DwellManager {
+  // The last status we observed for each node (before the current one).
+  const lastStatus = new Map<string, NodeStatus>();
+  // Nodes currently in a dwell hold, with the terminal status they'll show
+  // after the dwell expires.
+  const dwelling = new Map<string, NodeStatus>();
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  return {
+    observe(id: string, status: NodeStatus): void {
+      const prev = lastStatus.get(id);
+      // Only a running -> terminal transition triggers a dwell.
+      if (prev === "running" && (status === "done" || status === "error")) {
+        // Clear any existing timer for this node.
+        const existing = timers.get(id);
+        if (existing !== undefined) clearTimeout(existing);
+        // Set the dwelling flag immediately so the current render shows
+        // the spinner. The expiry timer is started via the scheduler,
+        // which may defer it (e.g. to the next animation frame) so the
+        // dwell duration is measured from the first visible render.
+        dwelling.set(id, status);
+        const timer = scheduler(() => {
+          dwelling.delete(id);
+          timers.delete(id);
+          onExpire?.(id);
+        }, dwellMs);
+        timers.set(id, timer);
+      }
+      lastStatus.set(id, status);
+    },
+
+    isDwelling(id: string): boolean {
+      return dwelling.has(id);
+    },
+
+    displayStatus(id: string, realStatus: NodeStatus): NodeStatus {
+      if (dwelling.has(id)) return "running";
+      return realStatus;
+    },
+
+    cancel(): void {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      dwelling.clear();
+    },
+  };
+}

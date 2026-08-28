@@ -24,8 +24,11 @@
     buildProgressTree,
     effectiveStatus,
     createDebounce,
+    createDwellManager,
     isRootDone,
+    DWELL_MS,
     type ProgressNode,
+    type NodeStatus,
   } from "./progressTree.ts";
 
   // --- State ---
@@ -41,6 +44,36 @@
   let fetchMode = $state(false);
   let progressNodes = $state<Map<string, ProgressNode>>(new Map());
   let agentLogLines = $state<string[]>([]);
+
+  // Dwell manager: holds a running->done (or running->error) transition for
+  // ~400ms so a fast open->close pair still shows a brief check/X rather
+  // than vanishing. Only applies to an OBSERVED transition — a node already
+  // terminal when first mounted renders immediately.
+  // dwellVersion is a reactive counter bumped by the dwell manager's
+  // onExpire callback so that when a dwell timer fires (mutating the
+  // manager's internal, non-reactive Map) the component re-renders and
+  // picks up the now-expired dwell state.
+  //
+  // The scheduler defers the dwell expiry timer to the next animation frame
+  // so the dwell duration is measured from the first visible render, not
+  // from when the data arrives (which is earlier due to the 30ms debounce).
+  // The dwelling flag is set immediately in observe() so the current render
+  // shows the spinner; the setTimeout that clears the flag is started from
+  // the rAF callback. A small buffer (half the rAF delay, rounded) is added
+  // to the setTimeout duration to compensate for the rAF deferral so the
+  // effective dwell is ~400ms from the user's perspective.
+  let dwellVersion = $state(0);
+  let dwell = createDwellManager(
+    DWELL_MS,
+    () => { dwellVersion++; },
+    (fn, ms) => {
+      const observeTime = Date.now();
+      requestAnimationFrame(() => {
+        const rafDelay = Date.now() - observeTime;
+        setTimeout(fn, ms + Math.round(rafDelay / 2));
+      });
+    },
+  );
 
   type TabId = "capacity" | "reviews-due" | "reviews-owed" | "actions";
   let activeTab = $state<TabId>("actions");
@@ -226,6 +259,7 @@
     return () => {
       source.close();
       stateDebounce.cancel();
+      dwell.cancel();
     };
   });
 
@@ -288,11 +322,28 @@
   // --- Fetch display mode helpers ---
   // Status icon for a progress node: spinner (running), check (done), X (error).
   // Uses the effective status so a deferred parent stays spinning while
-  // children are running.
+  // children are running. Applies the dwell hold so a fast running->done
+  // transition still shows the spinner for ~400ms before flipping to check.
+  //
+  // Dwell observation happens here, at render time, not in loadStateEvents.
+  // This ensures the dwell timer starts when the new status is first
+  // rendered, not when the data arrives (which is ~20ms earlier due to the
+  // 30ms debounce). Only leaf nodes (no children) are observed for dwell —
+  // parent nodes use deferCloseForChildren (effectiveStatus) as their
+  // natural hold.
+  //
+  // Reading dwellVersion creates a reactive dependency so that when the
+  // dwell manager's onExpire callback bumps it (a dwell timer fired), this
+  // function re-evaluates and the icon updates.
   function statusIcon(node: ProgressNode): string {
+    void dwellVersion;
     const status = effectiveStatus(node);
-    if (status === "running") return "spinner";
-    if (status === "done") return "✓";
+    if (node.children.length === 0) {
+      dwell.observe(node.id, status);
+    }
+    const displayed = dwell.displayStatus(node.id, status);
+    if (displayed === "running") return "spinner";
+    if (displayed === "done") return "✓";
     return "✕";
   }
 

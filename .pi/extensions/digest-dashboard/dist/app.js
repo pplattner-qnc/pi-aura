@@ -1818,6 +1818,12 @@
     }
     eager_effects.clear();
   }
+  function update(source2, d = 1) {
+    var value = get(source2);
+    var result = d === 1 ? value++ : value--;
+    set(source2, value);
+    return result;
+  }
   function increment(source2) {
     set(source2, source2.v + 1);
   }
@@ -3904,6 +3910,41 @@
     }
     return roots.some((r) => effectiveStatus(r) === "done");
   }
+  const DWELL_MS = 400;
+  function createDwellManager(dwellMs = DWELL_MS, onExpire, scheduler = (fn, ms) => setTimeout(fn, ms)) {
+    const lastStatus = /* @__PURE__ */ new Map();
+    const dwelling = /* @__PURE__ */ new Map();
+    const timers = /* @__PURE__ */ new Map();
+    return {
+      observe(id, status) {
+        const prev = lastStatus.get(id);
+        if (prev === "running" && (status === "done" || status === "error")) {
+          const existing = timers.get(id);
+          if (existing !== void 0) clearTimeout(existing);
+          dwelling.set(id, status);
+          const timer = scheduler(() => {
+            dwelling.delete(id);
+            timers.delete(id);
+            onExpire?.(id);
+          }, dwellMs);
+          timers.set(id, timer);
+        }
+        lastStatus.set(id, status);
+      },
+      isDwelling(id) {
+        return dwelling.has(id);
+      },
+      displayStatus(id, realStatus) {
+        if (dwelling.has(id)) return "running";
+        return realStatus;
+      },
+      cancel() {
+        for (const timer of timers.values()) clearTimeout(timer);
+        timers.clear();
+        dwelling.clear();
+      }
+    };
+  }
   var root = /* @__PURE__ */ from_html(`<p class="text-base-content/60 italic">Loading digest…</p>`);
   var root_1 = /* @__PURE__ */ from_html(`<span class="loading loading-spinner loading-xs shrink-0" aria-hidden="true"></span>`);
   var root_2 = /* @__PURE__ */ from_html(`<span class="shrink-0 text-error" aria-hidden="true">✕</span>`);
@@ -3966,6 +4007,20 @@
     let fetchMode = /* @__PURE__ */ state(false);
     let progressNodes = /* @__PURE__ */ state(proxy(/* @__PURE__ */ new Map()));
     let agentLogLines = /* @__PURE__ */ state(proxy([]));
+    let dwellVersion = /* @__PURE__ */ state(0);
+    let dwell = createDwellManager(
+      DWELL_MS,
+      () => {
+        update(dwellVersion);
+      },
+      (fn, ms) => {
+        const observeTime = Date.now();
+        requestAnimationFrame(() => {
+          const rafDelay = Date.now() - observeTime;
+          setTimeout(fn, ms + Math.round(rafDelay / 2));
+        });
+      }
+    );
     let activeTab = /* @__PURE__ */ state("actions");
     let dismissedWarnings = /* @__PURE__ */ state(proxy(/* @__PURE__ */ new Set()));
     async function loadDigest() {
@@ -4096,6 +4151,7 @@
       return () => {
         source2.close();
         stateDebounce.cancel();
+        dwell.cancel();
       };
     });
     function fmtPct(n) {
@@ -4137,9 +4193,14 @@
       return pct * WORKDAY_HOURS / 100;
     }
     function statusIcon(node) {
+      void get(dwellVersion);
       const status = effectiveStatus(node);
-      if (status === "running") return "spinner";
-      if (status === "done") return "✓";
+      if (node.children.length === 0) {
+        dwell.observe(node.id, status);
+      }
+      const displayed = dwell.displayStatus(node.id, status);
+      if (displayed === "running") return "spinner";
+      if (displayed === "done") return "✓";
       return "✕";
     }
     const NOTIF_META = {
