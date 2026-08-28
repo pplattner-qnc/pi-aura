@@ -41,11 +41,12 @@ import type {
   ArtifactListItem,
 } from "@pi-aura/shared/aura-client";
 import { buildAtlassianClient, fetchTaskDevLinks } from "./devlinks.js";
-import { runTasks, type Kind, type KindMap, type TaskRef, type Hashable } from "./scheduler.js";
+import { runTasks, type Kind, type KindMap, type TaskRef, type Hashable, type NodeHandle, type ProgressEvent } from "./scheduler.js";
 import { loadSettings } from "./settings.js";
 import { createKeyring } from "@pi-aura/shared/keyring";
 import { buildActions } from "./build-actions.js";
 import { writeDashboardDigest } from "./write-dashboard-digest.js";
+import { readDashboardUrl, createProgressEmitter } from "./progress-emitter.js";
 import type {
   ArtifactToVerify,
   ArtifactVerification,
@@ -245,6 +246,28 @@ async function fetchAction(): Promise<void> {
   const aura = await createDefaultAuraClient();
   const warnings: string[] = [];
 
+  // --- Live progress tree (slice 3) ---------------------------------------
+  // Read ~/.pi/aura/server-url.json ONCE at fetch start. If absent, the
+  // progress emitter is a no-op for the whole run (digest still writes
+  // digest.json). The hook batches events on a ~50ms timer and flushes at
+  // run end via progressHook.flush().
+  const dashboardUrl = readDashboardUrl();
+  const progressHook = createProgressEmitter(dashboardUrl);
+
+  // Emit a synthetic progress event (for inline phase nodes outside the
+  // scheduler run). Stable ids prevent coalescing across phases.
+  const emitPhase = (id: string, label: string, status: "running" | "done", startedAt: number, endedAt?: number): void => {
+    progressHook({ id, label, status, startedAt, endedAt, kind: "fetchAction" });
+  };
+
+  // --- Notifications phase node (inline, before the parallel fetch) --------
+  const notifStart = Date.now();
+  emitPhase("phase-notifications", "Fetching notifications from Aura", "running", notifStart);
+
+  // --- Capacity phase node (inline; capacity is one of the parallel fetches) -
+  const capacityStart = Date.now();
+  emitPhase("phase-capacity", "Fetching capacity", "running", capacityStart);
+
   // Parallel fetch of all base data.
   const [
     briefing,
@@ -277,6 +300,9 @@ async function fetchAction(): Promise<void> {
     }),
   ]);
 
+  // --- Finish capacity phase node (base fetch complete) ---
+  emitPhase("phase-capacity", "Fetching capacity", "done", capacityStart, Date.now());
+
   // Paginate notifications newest→oldest and split into "since last run"
   // (read + unread) and "older unread" pools.
   const lastDigest = loadLastDigest();
@@ -287,6 +313,9 @@ async function fetchAction(): Promise<void> {
     warnings
   );
   const allNotifs = [...sinceNotifs, ...olderNotifs];
+
+  // --- Finish notifications phase node (base fetch complete) ---
+  emitPhase("phase-notifications", "Fetching notifications from Aura", "done", notifStart, Date.now());
 
   const fetchedAt = new Date().toISOString();
   const date = fetchedAt.slice(0, 10);
@@ -523,22 +552,28 @@ async function fetchAction(): Promise<void> {
     // dev-links-row: fetch a queue task's detail (+ children's Jira keys),
     // then fetchTaskDevLinks. Input is just the human key (hashable).
     const devLinksRow: Kind<string, TaskDevLinks | null, FanoutState> = {
-      run: async (taskKey) => {
-        const detail = await aura.getTaskByHumanKey(taskKey).catch(() => null);
-        if (!detail) return null;
-        const childKeys = (detail.children ?? []).map((c) => c.human_key).filter(Boolean);
-        if (childKeys.length > 0) {
-          const childDetails = await Promise.all(
-            childKeys.map((k) => aura.getTaskByHumanKey(k).catch(() => null))
-          );
-          const childJira = childDetails
-            .filter((c): c is Task => c !== null)
-            .flatMap((c) => c.jira_issues ?? []);
-          if (childJira.length > 0) {
-            detail.jira_issues = [...(detail.jira_issues ?? []), ...childJira];
+      run: async (taskKey, ctx) => {
+        try {
+          const detail = await aura.getTaskByHumanKey(taskKey).catch(() => null);
+          if (!detail) return null;
+          const childKeys = (detail.children ?? []).map((c) => c.human_key).filter(Boolean);
+          if (childKeys.length > 0) {
+            const childDetails = await Promise.all(
+              childKeys.map((k) => aura.getTaskByHumanKey(k).catch(() => null))
+            );
+            const childJira = childDetails
+              .filter((c): c is Task => c !== null)
+              .flatMap((c) => c.jira_issues ?? []);
+            if (childJira.length > 0) {
+              detail.jira_issues = [...(detail.jira_issues ?? []), ...childJira];
+            }
           }
+          return await fetchTaskDevLinks(detail, digestSettings, keyring, atlassian);
+        } finally {
+          // Finish this row's progress node so the deferred parent can
+          // resolve once all rows are terminal.
+          if (ctx.node) ctx.progress.finish(ctx.node);
         }
-        return await fetchTaskDevLinks(detail, digestSettings, keyring, atlassian);
       },
       reduce: (s, out) => {
         if (out) s.devLinks.set(out.task_key, out);
@@ -548,7 +583,7 @@ async function fetchAction(): Promise<void> {
     // review-candidate: getArtifactReview + keep if my row is ASSIGNED.
     // Input is just the artifact id (hashable).
     const reviewCandidate: Kind<string, DigestReviewOwed | null, FanoutState> = {
-      run: async (id) => {
+      run: async (id, ctx) => {
         try {
           const ar = await aura.getArtifactReview(id);
           const me = ar.reviewers.find(
@@ -564,6 +599,11 @@ async function fetchAction(): Promise<void> {
             review_started_at: ar.review_started_at ?? null,
           };
         } catch { /* unreachable artifact */ return null; }
+        finally {
+          // Finish this candidate's progress node so the deferred parent
+          // can resolve once all candidates are terminal.
+          if (ctx.node) ctx.progress.finish(ctx.node);
+        }
       },
       reduce: (s, out) => {
         if (out) s.reviewsOwed.set(out.artifact_id, out);
@@ -575,12 +615,54 @@ async function fetchAction(): Promise<void> {
     // reducer to set it wins), then its spawn enqueues the rows + candidates
     // under that cap. So the cap is learned from the base data, not guessed
     // at the call site.
+    //
+    // Live progress tree (slice 3): the run also creates two phase nodes
+    // ("Fetching tasks from Aura" / "Fetching reviews") and a child node
+    // per row / candidate attached under the matching phase. Each child
+    // node is finished with deferCloseForChildren: true before spawning so
+    // it stays spinning until the child task finishes its work (and then
+    // the child task finishes its own ctx.node).
     interface StartOutput {
       rows: number;
       candidates: number;
     }
+    // Closure: the node handles created in run() are stored here so spawn()
+    // can thread them via TaskRef.node.
+    let tasksPhaseNode: NodeHandle | undefined;
+    let reviewsPhaseNode: NodeHandle | undefined;
+    const rowNodes: NodeHandle[] = [];
+    const candidateNodes: NodeHandle[] = [];
     const start: Kind<null, StartOutput, FanoutState> = {
-      run: async () => ({ rows: queueRows.length, candidates: candidateIds.size }),
+      run: async (_input, ctx) => {
+        // Create the two phase nodes at root level.
+        tasksPhaseNode = ctx.progress.create(undefined, "Fetching tasks from Aura");
+        reviewsPhaseNode = ctx.progress.create(undefined, "Fetching reviews");
+
+        // Create a child node per dev-links row under the "tasks" phase node.
+        for (const row of queueRows) {
+          const node = ctx.progress.create(tasksPhaseNode, `dev-links ${row.key}`);
+          rowNodes.push(node);
+        }
+        // Create a child node per review candidate under the "reviews" phase node.
+        for (const id of [...candidateIds].sort()) {
+          const node = ctx.progress.create(reviewsPhaseNode, `review ${id}`);
+          candidateNodes.push(node);
+        }
+
+        // Finish each child node with deferCloseForChildren: true BEFORE
+        // spawning. This keeps each child node spinning until the child task
+        // finishes its own ctx.node, at which point the deferred parent
+        // (the child node) resolves.
+        for (const node of rowNodes) ctx.progress.finish(node, { deferCloseForChildren: true });
+        for (const node of candidateNodes) ctx.progress.finish(node, { deferCloseForChildren: true });
+
+        // Finish the phase nodes with deferCloseForChildren: true so they
+        // stay spinning until all their child nodes are terminal.
+        ctx.progress.finish(tasksPhaseNode, { deferCloseForChildren: true });
+        ctx.progress.finish(reviewsPhaseNode, { deferCloseForChildren: true });
+
+        return { rows: queueRows.length, candidates: candidateIds.size };
+      },
       reduce: (_s, out) => {
         // Generous ceiling: 1 (start) + rows + candidates, times a 10x
         // buffer so the cap only trips on a real runaway spawn bug, not on
@@ -589,8 +671,8 @@ async function fetchAction(): Promise<void> {
         return { setMaxTasks: ceiling };
       },
       spawn: () => [
-        ...queueRows.map((row): TaskRef => ({ kind: "dev-links-row", input: row.key })),
-        ...[...candidateIds].sort().map((id): TaskRef => ({ kind: "review-candidate", input: id })),
+        ...queueRows.map((row, i): TaskRef => ({ kind: "dev-links-row", input: row.key, node: rowNodes[i] })),
+        ...[...candidateIds].sort().map((id, i): TaskRef => ({ kind: "review-candidate", input: id, node: candidateNodes[i] })),
       ],
     };
 
@@ -605,13 +687,19 @@ async function fetchAction(): Promise<void> {
     let finalCap = 0;
     try {
       const result = await runTasks<FanoutState>(
-        { kind: "start", input: null }, kinds, state, { concurrency: 6, initialMaxTasks: 30 },
+        { kind: "start", input: null }, kinds, state, {
+          concurrency: 6,
+          initialMaxTasks: 30,
+          onProgress: (e: ProgressEvent) => progressHook(e),
+        },
       );
       capped = result.capped;
       runWarnings = result.runWarnings;
       finalCap = result.maxTasks;
     } finally {
       if (atlassian) await atlassian.close();
+      // Flush any pending progress events at the end of the scheduler run.
+      await progressHook.flush();
     }
     if (capped) {
       warnings.push(
@@ -698,6 +786,8 @@ async function fetchAction(): Promise<void> {
   }
 
   // stdout: a single machine-parseable line. stderr: human progress.
+  // Flush any remaining progress events (inline phase nodes) at the very end.
+  await progressHook.flush();
   console.log(`output directory: ${outDir}/`);
   console.error(`fetched ${fetchedAt}`);
   console.error(`  raw:     ${rawPath}`);
