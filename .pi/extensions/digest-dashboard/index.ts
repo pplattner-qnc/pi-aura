@@ -455,7 +455,13 @@ export default function (pi: ExtensionAPI): void {
       _params: FetchToolParams,
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
+      ctx: ExtensionContext,
     ): Promise<AgentToolResult<{ dir?: string }>> {
+      // Check whether the dashboard was running before the fetch started. The
+      // flag is read once here and evaluated once at the end of the success
+      // path — a one-shot warning, never per-event.
+      const dashboardWasDown = readDashboardUrl() === null;
+
       const result = await runAuraDigest(["fetch"]);
       if (result.exitCode !== 0) {
         const errorText = result.stderr.trim() || `digest-fetch exited with code ${result.exitCode}`;
@@ -487,8 +493,21 @@ export default function (pi: ExtensionAPI): void {
             details: {},
           };
         }
+
+        let text = JSON.stringify({ digest, report });
+        // One-shot end-of-run warning when the dashboard was absent: a pi-TUI
+        // notify + a warning line prepended to the result text. The fetch
+        // still succeeds — the digest is written and returned.
+        if (dashboardWasDown) {
+          ctx.ui.notify(
+            "digest-fetch: dashboard was not running, no live tree shown",
+            "warning",
+          );
+          text = `⚠️ digest-fetch: dashboard was not running, no live tree shown.\n${text}`;
+        }
+
         return {
-          content: [{ type: "text", text: JSON.stringify({ digest, report }) }],
+          content: [{ type: "text", text }],
           details: { dir },
         };
       } catch (err) {
