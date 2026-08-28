@@ -14,12 +14,47 @@
     DevLinkPullRequest,
     DevLinkBranch,
     StateEvent,
+    ProgressPayload,
+    AgentLogPayload,
   } from "./digest-types.ts";
+  import {
+    extractProgressEvents,
+    extractAgentLogEvents,
+    mergeProgressNodes,
+    buildProgressTree,
+    effectiveStatus,
+    createDebounce,
+    createDwellManager,
+    isRootDone,
+    DWELL_MS,
+    type ProgressNode,
+    type NodeStatus,
+  } from "./progressTree.ts";
 
   // --- State ---
   let digest = $state<Digest | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
+
+  // --- Fetch display mode (slice 4) ---
+  // When progress events are present and the root fetch node is not yet
+  // done, the dashboard shows a live progress tree instead of the digest
+  // view. Once the root node is terminal (done) AND digest.json is
+  // available, the view transitions to the existing digest render.
+  let fetchMode = $state(false);
+  let progressNodes = $state<Map<string, ProgressNode>>(new Map());
+  let agentLogLines = $state<string[]>([]);
+
+  // Dwell manager: holds a running->done (or running->error) transition for
+  // ~400ms so a fast open->close pair still shows a brief check/X rather
+  // than vanishing. Only applies to an OBSERVED transition — a node already
+  // terminal when first mounted renders immediately.
+  // dwellVersion is a reactive counter bumped by the dwell manager's
+  // onExpire callback so that when a dwell timer fires (mutating the
+  // manager's internal, non-reactive Map) the component re-renders and
+  // picks up the now-expired dwell state.
+  let dwellVersion = $state(0);
+  let dwell = createDwellManager(DWELL_MS, () => { dwellVersion++; });
 
   type TabId = "capacity" | "reviews-due" | "reviews-owed" | "actions";
   let activeTab = $state<TabId>("actions");
@@ -119,13 +154,94 @@
     loadDigest();
   });
 
+  // Fetch the full state.json and accumulate progress + agent_log events.
+  // Called on SSE connect (residual risk: the state.json watcher swallows
+  // ENOENT if the file is absent at connect time) and on each state-change
+  // event (the SSE carries only the last event id+type — a hint, not a full
+  // delta — so the browser re-fetches the full state.json each time).
+  async function loadStateEvents(): Promise<void> {
+    try {
+      const res = await fetch("/api/state");
+      if (!res.ok) return;
+      const data = await res.json();
+      const events: StateEvent[] = data?.events ?? [];
+      const progressEvents = extractProgressEvents(events);
+      const logEvents = extractAgentLogEvents(events);
+      if (progressEvents.length > 0 || logEvents.length > 0) {
+        // Accumulate progress nodes (append-only by id).
+        const merged = mergeProgressNodes(progressNodes, progressEvents);
+        progressNodes = new Map(merged);
+        // Accumulate agent log lines (chronological, dedup by content+order).
+        const newLines = logEvents.map((e) => e.message);
+        // Only add lines we haven't seen (compare against the accumulated set).
+        for (const line of newLines) {
+          if (!agentLogLines.includes(line)) {
+            agentLogLines = [...agentLogLines, line];
+          }
+        }
+        fetchMode = true;
+      }
+      // Check if we should transition to the digest view.
+      maybeTransitionToDigest();
+    } catch {
+      // Best-effort: state.json fetch failure is non-fatal.
+    }
+  }
+
+  // Transition from fetch mode to the digest view when the root node is
+  // terminal (done) and digest.json is present. We re-fetch /api/digest to
+  // check availability, then switch the view.
+  async function maybeTransitionToDigest(): Promise<void> {
+    if (!fetchMode) return;
+    const tree = buildProgressTree(progressNodes);
+    if (!isRootDone(tree)) return;
+    // Root is done — check if digest.json is available.
+    try {
+      const res = await fetch("/api/digest");
+      if (res.ok) {
+        const data: Digest = await res.json();
+        digest = data;
+        error = null;
+        loading = false;
+        fetchMode = false;
+      }
+      // If digest.json is not yet present, stay in fetch mode.
+    } catch {
+      // Stay in fetch mode — will retry on next state-change.
+    }
+  }
+
+  // Debounce for state-change events: rapid bursts coalesce into one fetch.
+  // ~30ms coalescing window (layered debounce layer 1).
+  let stateDebounce = createDebounce(() => {
+    void loadStateEvents();
+  }, 30);
+
   // Hot-reload via SSE. Kept separate from the initial load so a slow initial
-  // fetch isn't raced by an onmessage re-fetch.
+  // fetch isn't raced by an onmessage re-fetch. The SSE now emits two named
+  // events: "change" (digest.json changed) and "state-change" (state.json
+  // changed — progress/agent_log events). On connect, we also re-fetch
+  // state.json (residual risk: the watcher may have swallowed ENOENT).
   $effect(() => {
     const source = new EventSource("/events");
     source.onmessage = () => loadDigest();
     source.onerror = (err) => console.error("EventSource error:", err);
-    return () => source.close();
+    // Re-fetch state.json on connect (the watcher may have missed the file
+    // if it was absent at SSE-connect time).
+    void loadStateEvents();
+    // digest.json changed — re-fetch the digest.
+    source.addEventListener("change", () => {
+      loadDigest();
+    });
+    // state.json changed — coalesce and re-fetch state events.
+    source.addEventListener("state-change", () => {
+      stateDebounce.trigger();
+    });
+    return () => {
+      source.close();
+      stateDebounce.cancel();
+      dwell.cancel();
+    };
   });
 
   // --- Section helpers ---
@@ -184,6 +300,34 @@
     return (pct * WORKDAY_HOURS) / 100;
   }
 
+  // --- Fetch display mode helpers ---
+  // Status icon for a progress node: spinner (running), check (done), X (error).
+  // Uses the effective status so a deferred parent stays spinning while
+  // children are running. Applies the dwell hold so a fast running->done
+  // transition still shows the spinner for ~400ms before flipping to check.
+  //
+  // Dwell observation happens here, at render time, not in loadStateEvents.
+  // This ensures the dwell timer starts when the new status is first
+  // rendered, not when the data arrives (which is ~20ms earlier due to the
+  // 30ms debounce). Only leaf nodes (no children) are observed for dwell —
+  // parent nodes use deferCloseForChildren (effectiveStatus) as their
+  // natural hold.
+  //
+  // Reading dwellVersion creates a reactive dependency so that when the
+  // dwell manager's onExpire callback bumps it (a dwell timer fired), this
+  // function re-evaluates and the icon updates.
+  function statusIcon(node: ProgressNode): string {
+    void dwellVersion;
+    const status = effectiveStatus(node);
+    if (node.children.length === 0) {
+      dwell.observe(node.id, status);
+    }
+    const displayed = dwell.displayStatus(node.id, status);
+    if (displayed === "running") return "spinner";
+    if (displayed === "done") return "✓";
+    return "✕";
+  }
+
   // Parse a notification summary line ("YYYY-MM-DD — <type> by ...") and return
   // the type code plus its emoji badge + plain-English label for the tooltip.
   const NOTIF_META: Record<string, { emoji: string; label: string }> = {
@@ -240,6 +384,59 @@
 
 {#if loading}
   <p class="text-base-content/60 italic">Loading digest…</p>
+{:else if fetchMode}
+  {@const tree = buildProgressTree(progressNodes)}
+  {#snippet treeNode(node: ProgressNode)}
+    <li data-node-id={node.id}>
+      <div class="flex items-center gap-2 py-1">
+        {#if statusIcon(node) === "spinner"}
+          <span class="loading loading-spinner loading-xs shrink-0" aria-hidden="true"></span>
+        {:else if statusIcon(node) === "✕"}
+          <span class="shrink-0 text-error" aria-hidden="true">✕</span>
+        {:else}
+          <span class="shrink-0 text-success" aria-hidden="true">✓</span>
+        {/if}
+        <span class="text-sm">{node.label}</span>
+      </div>
+      {#if node.children.length > 0}
+        <ul class="ml-6 flex flex-col gap-1" data-subtree>
+          {#each node.children as child (child.id)}
+            {@render treeNode(child)}
+          {/each}
+        </ul>
+      {/if}
+    </li>
+  {/snippet}
+  <div class="h-screen overflow-hidden bg-base-100 text-base-content p-4 sm:p-6">
+    <div class="h-full max-w-3xl mx-auto flex flex-col gap-4">
+      <header class="shrink-0">
+        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Fetching digest…</h1>
+      </header>
+
+      <section class="flex-1 min-h-0 overflow-auto" data-progress-tree>
+        {#if tree.length === 0}
+          <p class="text-base-content/60 italic">Preparing…</p>
+        {:else}
+          <ul class="flex flex-col gap-1">
+            {#each tree as node (node.id)}
+              {@render treeNode(node)}
+            {/each}
+          </ul>
+        {/if}
+      </section>
+
+      {#if agentLogLines.length > 0}
+        <section class="shrink-0 max-h-[35%] overflow-auto border-t border-base-300 pt-3" data-agent-log>
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-base-content/70 mb-2">Agent log</h2>
+          <ul class="space-y-0.5 text-sm">
+            {#each agentLogLines as line, i (i)}
+              <li class="text-base-content/80" data-log-line>{line}</li>
+            {/each}
+          </ul>
+        </section>
+      {/if}
+    </div>
+  </div>
 {:else if error}
   <p class="text-error">Error: {error}</p>
 {:else if digest}

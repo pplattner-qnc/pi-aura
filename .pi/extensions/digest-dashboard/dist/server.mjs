@@ -178,8 +178,38 @@ async function startServer(opts) {
           }
         });
         watchers.push(watcher);
+        let stateWatcher;
+        const openStateWatcher = () => {
+          if (stateWatcher) return;
+          try {
+            stateWatcher = watch(opts.statePath, (eventType) => {
+              if (eventType !== "change") return;
+              let latest;
+              try {
+                const state = readState(opts.statePath);
+                latest = state.events[state.events.length - 1];
+              } catch {
+                return;
+              }
+              if (latest) {
+                res.write(`event: state-change
+data: {"id":${latest.id},"type":"${latest.type}"}
+
+`);
+              }
+            });
+            watchers.push(stateWatcher);
+          } catch {
+          }
+        };
+        openStateWatcher();
         req.on("close", () => {
           watcher.close();
+          if (stateWatcher) {
+            stateWatcher.close();
+            const idx2 = watchers.indexOf(stateWatcher);
+            if (idx2 !== -1) watchers.splice(idx2, 1);
+          }
           const idx = watchers.indexOf(watcher);
           if (idx !== -1) watchers.splice(idx, 1);
         });

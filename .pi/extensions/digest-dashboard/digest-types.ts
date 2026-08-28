@@ -154,10 +154,28 @@ export interface ActionClickPayload {
   aura_use_case: string;
 }
 
+/** Wire shape for a scheduler progress node, mirroring the server-side
+ *  ProgressPayload in state.ts (which mirrors the scheduler's ProgressEvent).
+ *  Slice 3's onProgress hook POSTs these as `type: "progress"` events. */
+export interface ProgressPayload {
+  id: string;
+  label: string;
+  parentId?: string;
+  status: "running" | "done" | "error";
+  startedAt: number;
+  endedAt?: number;
+  kind: string;
+}
+
+/** Wire shape for a free-form agent log line rendered below the tree. */
+export interface AgentLogPayload {
+  message: string;
+}
+
 export interface StateEvent {
   id: number;
   ts: string;
   dir: "page→agent" | "agent→page";
-  type: "action_click" | "ack" | "update_view";
-  payload: ActionClickPayload | unknown;
+  type: "action_click" | "ack" | "update_view" | "progress" | "agent_log";
+  payload: ActionClickPayload | ProgressPayload | AgentLogPayload | unknown;
 }

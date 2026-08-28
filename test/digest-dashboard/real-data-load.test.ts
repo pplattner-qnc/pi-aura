@@ -18,10 +18,20 @@ class FakeEventSource {
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: (() => void) | null = null;
   static instances: FakeEventSource[] = [];
+  private listeners = new Map<string, Set<(event: MessageEvent) => void>>();
 
   constructor(url: string) {
     this.url = url;
     FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: (event: MessageEvent) => void): void {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type)!.add(listener);
+  }
+
+  removeEventListener(type: string, listener: (event: MessageEvent) => void): void {
+    this.listeners.get(type)?.delete(listener);
   }
 
   close() {
