@@ -10,6 +10,6 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["test/**/*.test.ts", "scripts/src/scheduler.test.ts"],
+    include: ["test/**/*.test.ts", "scripts/src/scheduler.test.ts", "scripts/src/aura-digest-progress.test.ts"],
   },
 });
