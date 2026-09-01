@@ -125,7 +125,7 @@ All tools are prefixed with `aura_2d_mcp_2d_dev_`. There are two families:
   `rest call <opId> [--param ...] [--body-file F]` to invoke, and `rest
   search "<intent>"` to find an operation by meaning. The semantic search leg
   is **on by default** via a local, CPU-only embedding model
-  (`Xenova/multilingual-e5-small`) that auto-caches to
+  (`Xenova/multilingual-e5-base`) that auto-caches to
   `~/.pi/aura/huggingface` on first use — no API key, no cloud, no GPU needed.
   `aura.embed.*` settings can override this with a cloud provider if desired.
   See [resources/rest-api.md](resources/rest-api.md) for the full operation

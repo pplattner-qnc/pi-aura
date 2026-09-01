@@ -26,8 +26,8 @@ import {
 } from "../../src/embed/local-provider.js";
 
 const EXPECTED_CACHE_DIR = join(homedir(), ".pi", "aura", "huggingface");
-const MODEL_ID = "Xenova/multilingual-e5-small";
-const HIDDEN_DIM = 384; // real model dimension
+const MODEL_ID = "Xenova/multilingual-e5-base";
+const HIDDEN_DIM = 768; // real model dimension
 
 // ---------------------------------------------------------------------------
 // Fake pipeline — simulates the REAL @huggingface/transformers pipeline output.
@@ -87,7 +87,7 @@ function makeFakePipeline(hiddenDim: number = HIDDEN_DIM): {
 // ---------------------------------------------------------------------------
 
 describe("LocalEmbedProvider — construction", () => {
-  it("has modelId = 'Xenova/multilingual-e5-small'", async () => {
+  it("has modelId = 'Xenova/multilingual-e5-base'", async () => {
     const { pipelineFn } = makeFakePipeline();
     const provider = await createLocalEmbedProvider({ pipeline: pipelineFn });
     assert.equal(provider.modelId, MODEL_ID);
@@ -136,7 +136,7 @@ describe("LocalEmbedProvider — E5 prefix convention", () => {
 // ---------------------------------------------------------------------------
 
 describe("LocalEmbedProvider — real pipeline output shape (N-in → N-out)", () => {
-  it("returns 2 vectors of length 384 for a 2-text batch (real shape)", async () => {
+  it("returns 2 vectors of length 768 for a 2-text batch (real shape)", async () => {
     const { pipelineFn } = makeFakePipeline();
     const provider = await createLocalEmbedProvider({ pipeline: pipelineFn });
     const vectors = await provider.embed(["hello world", "second text"]);
@@ -147,7 +147,7 @@ describe("LocalEmbedProvider — real pipeline output shape (N-in → N-out)", (
     }
   });
 
-  it("returns 3 vectors of length 384 for a 3-text batch (off-by-one guard)", async () => {
+  it("returns 3 vectors of length 768 for a 3-text batch (off-by-one guard)", async () => {
     // This test guards the off-by-one that caused the gen-rest-index crash:
     // the old code returned 1 vector for N texts, so rawVectors[i] was
     // undefined for i>=1, crashing quantizeToInt8(undefined).

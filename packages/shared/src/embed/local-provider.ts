@@ -1,8 +1,8 @@
 // embed/local-provider — the local CPU embedding provider.
 //
 // LocalEmbedProvider implements EmbedProvider using @huggingface/transformers
-// (transformers.js) pipeline("feature-extraction", "Xenova/multilingual-e5-small").
-// The model is a 384-dim, multilingual (EN+DE), ~118MB quantized ONNX, CPU-only
+// (transformers.js) pipeline("feature-extraction", "Xenova/multilingual-e5-base").
+// The model is a 768-dim, multilingual (EN+DE), ~118MB quantized ONNX, CPU-only
 // model that auto-downloads to ~/.pi/aura/huggingface on first use.
 //
 // Key design decisions:
@@ -34,7 +34,7 @@ import type { EmbedProvider } from "./provider.js";
 // ---------------------------------------------------------------------------
 
 /** The model id (matches the build-time recorded id so the runtime guard passes). */
-export const LOCAL_MODEL_ID = "Xenova/multilingual-e5-small";
+export const LOCAL_MODEL_ID = "Xenova/multilingual-e5-base";
 
 /** Default cache dir for the Hugging Face model. */
 export const DEFAULT_CACHE_DIR = join(homedir(), ".pi", "aura", "huggingface");

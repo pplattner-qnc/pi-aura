@@ -362,7 +362,7 @@ export async function genRestIndex(): Promise<void> {
   const openApiPath = existsSync(repoRoot) ? repoRoot : scriptsRoot;
 
   // Create an embedding provider. By default (no aura.embed.* settings) →
-  // LocalEmbedProvider (always-on local CPU model, Xenova/multilingual-e5-small).
+  // LocalEmbedProvider (always-on local CPU model, Xenova/multilingual-e5-base).
   // When aura.embed.provider is set → cloud provider (optional override).
   // Build-time: if the provider fails to init, the build FAILS LOUDLY (correct —
   // the committed index must have real vectors).

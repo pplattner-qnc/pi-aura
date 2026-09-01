@@ -23,7 +23,7 @@ import type { OutSink } from "./rest-list-describe.js";
 import type { EmbedProvider } from "@pi-aura/shared/embed/provider.js";
 
 // LOCAL_MODEL_ID must match packages/shared/src/embed/local-provider.ts.
-const LOCAL_MODEL_ID = "Xenova/multilingual-e5-small";
+const LOCAL_MODEL_ID = "Xenova/multilingual-e5-base";
 
 const FIXTURE = join(
   import.meta.dirname,

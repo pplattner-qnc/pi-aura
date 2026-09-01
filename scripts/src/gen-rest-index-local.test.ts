@@ -22,7 +22,7 @@ import type { EmbedProvider } from "@pi-aura/shared/embed/provider.js";
 // LOCAL_MODEL_ID must match packages/shared/src/embed/local-provider.ts.
 // Hardcoded here (not imported) to avoid --experimental-strip-types resolution
 // issues with value imports from @pi-aura/shared subpaths.
-const LOCAL_MODEL_ID = "Xenova/multilingual-e5-small";
+const LOCAL_MODEL_ID = "Xenova/multilingual-e5-base";
 
 const FIXTURE = join(
   import.meta.dirname,
@@ -87,7 +87,7 @@ describe("buildRestIndexAsync — local provider passage: prefixing", () => {
     );
   });
 
-  it("records embedModelId = 'Xenova/multilingual-e5-small' in the blob", async () => {
+  it("records embedModelId = 'Xenova/multilingual-e5-base' in the blob", async () => {
     const mockProvider = makeMockLocalProvider(4);
     const blob = await buildRestIndexAsync(
       FIXTURE,
