@@ -645,8 +645,13 @@ async function main(): Promise<void> {
           const query = rest[0];
           if (!query) fail("rest search: missing <query>", true);
           const flags = parseFlags(rest.slice(1));
-          restSearch(REST_INDEX, query, console, {
+          // Create an embed provider at runtime (null when not configured → FTS-only)
+          const { createEmbedProvider, loadEmbedSettings } = await import("@pi-aura/shared/embed/provider");
+          const embedSettings = loadEmbedSettings();
+          const embedProvider = await createEmbedProvider(embedSettings);
+          await restSearch(REST_INDEX, query, console, {
             limit: flags.limit ? Number(flags.limit) : undefined,
+            embedProvider,
           });
           return;
         }

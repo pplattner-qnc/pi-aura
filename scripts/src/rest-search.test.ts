@@ -48,9 +48,9 @@ const blob: RestIndexBlob = buildRestIndex(FIXTURE, CODE_TAGS, resolveCodeTags);
 // ---------------------------------------------------------------------------
 
 describe("restSearch", () => {
-  it("ranks updateTaskMemberCapacity first for 'set my capacity commitment'", () => {
+  it("ranks updateTaskMemberCapacity first for 'set my capacity commitment'", async () => {
     const sink = makeSink();
-    restSearch(blob, "set my capacity commitment", sink);
+    await restSearch(blob, "set my capacity commitment", sink);
     assert.ok(sink.out.length > 0, "has output");
     // First result line should mention updateTaskMemberCapacity
     const firstLine = sink.out.find((l) => l.includes("updateTaskMemberCapacity"));
@@ -65,18 +65,18 @@ describe("restSearch", () => {
     }
   });
 
-  it("includes a score and matched terms in the rationale", () => {
+  it("includes a score and matched terms in the rationale", async () => {
     const sink = makeSink();
-    restSearch(blob, "capacity", sink);
+    await restSearch(blob, "capacity", sink);
     assert.ok(sink.out.length > 0);
     // At least one line should contain 'capacity' as a matched term
     const rationaleLine = sink.out.find((l) => l.includes("capacity"));
     assert.ok(rationaleLine, "rationale mentions capacity");
   });
 
-  it("prints the 'semantic leg skipped' note (no embedding provider)", () => {
+  it("prints the 'semantic leg skipped' note (no embedding provider)", async () => {
     const sink = makeSink();
-    restSearch(blob, "capacity", sink);
+    await restSearch(blob, "capacity", sink);
     const allOutput = [...sink.out, ...sink.err];
     assert.ok(
       allOutput.some((l) => l.includes("semantic leg skipped") && l.includes("no embedding provider")),
@@ -84,9 +84,9 @@ describe("restSearch", () => {
     );
   });
 
-  it("prints 'FTS-only results' note", () => {
+  it("prints 'FTS-only results' note", async () => {
     const sink = makeSink();
-    restSearch(blob, "capacity", sink);
+    await restSearch(blob, "capacity", sink);
     const allOutput = [...sink.out, ...sink.err];
     assert.ok(
       allOutput.some((l) => l.toLowerCase().includes("fts-only")),
@@ -94,9 +94,9 @@ describe("restSearch", () => {
     );
   });
 
-  it("handles a query with no matching terms (empty results + note, not crash)", () => {
+  it("handles a query with no matching terms (empty results + note, not crash)", async () => {
     const sink = makeSink();
-    restSearch(blob, "zzzznonexistent", sink);
+    await restSearch(blob, "zzzznonexistent", sink);
     const allOutput = [...sink.out, ...sink.err];
     // Should not crash, should have some output
     assert.ok(allOutput.length > 0);
@@ -112,9 +112,9 @@ describe("restSearch", () => {
     );
   });
 
-  it("respects a --limit option to cap the number of results", () => {
+  it("respects a --limit option to cap the number of results", async () => {
     const sink = makeSink();
-    restSearch(blob, "task", sink, { limit: 1 });
+    await restSearch(blob, "task", sink, { limit: 1 });
     // Count the result lines (those with a score/rank prefix)
     const resultLines = sink.out.filter((l) => l.match(/^\s*(?:\d+\.?\s+)?[\w]/) && !l.includes("semantic") && !l.includes("FTS"));
     // Should have at most 1 result
