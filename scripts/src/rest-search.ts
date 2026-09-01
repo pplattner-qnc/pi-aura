@@ -76,8 +76,9 @@ export async function restSearch(
     );
   } else {
     // Semantic leg active — embed the query (one call)
+    // E5 PREFIX CONVENTION: prefix the query with "query: " for best retrieval.
     try {
-      const queryVec = await provider.embed([query]);
+      const queryVec = await provider.embed([`query: ${query}`]);
       const dtype = index.dtype ?? "f32";
       const opVecs = index.vectors.map((v) => ({
         operationId: v.operationId,

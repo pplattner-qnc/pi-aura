@@ -2,8 +2,13 @@
 //
 // EmbedProvider is a small interface: modelId + embed(texts).
 // createEmbedProvider(config?) reads aura.embed.* settings (or accepts
-// injected config) and returns a provider or null. When no provider is
-// configured → null (graceful: the caller falls back to FTS-only).
+// injected config) and returns a provider.
+//
+// SLICE 5 DEFAULT-FLIP: when no `aura.embed.provider` is set, returns a
+// LocalEmbedProvider (modelId = "Xenova/multilingual-e5-base") — the
+// always-on local CPU model. When `aura.embed.provider` IS set, returns the
+// cloud provider (OpenAI-style /v1/embeddings). `null` is only returned on
+// local-init failure the caller degrades from.
 //
 // The provider uses its OWN apiKey (NOT the Aura PAT). The Aura PAT is for
 // REST API auth; embeddings are a separate service with separate credentials.
@@ -14,6 +19,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createLocalEmbedProvider } from "./local-provider.js";
 
 export interface EmbedProvider {
   /** The model id this provider uses (for the model-id guard). */
@@ -78,10 +84,17 @@ export function loadEmbedSettings(
 /**
  * Create an embedding provider from the given config.
  *
- * Returns null when the config is absent or incomplete (no provider / model /
- * apiKey), so callers can gracefully fall back to FTS-only search.
+ * SLICE 5 DEFAULT-FLIP:
+ * - When `config.provider` is NOT set → return a LocalEmbedProvider (the
+ *   always-on local CPU model, Xenova/multilingual-e5-base). This is the new
+ *   default — the semantic leg is always on, no configuration needed.
+ * - When `config.provider` IS set → return the cloud provider (OpenAI-style
+ *   /v1/embeddings). This is now an optional override, not the enable switch.
+ * - `null` is only returned when the cloud provider config is incomplete (set
+ *   but missing model/apiKey/baseURL), or on local-init failure the caller
+ *   degrades from.
  *
- * The returned provider's embed() calls the OpenAI-style /v1/embeddings
+ * The cloud provider's embed() calls the OpenAI-style /v1/embeddings
  * endpoint via fetch, sending the model id + API key + texts.
  */
 export async function createEmbedProvider(
@@ -90,46 +103,51 @@ export async function createEmbedProvider(
 ): Promise<EmbedProvider | null> {
   const { provider, model, apiKey, baseURL } = config;
 
-  // No provider configured → null (graceful fallback)
-  if (!provider || !model || !apiKey) {
-    return null;
+  // --- Cloud override path (aura.embed.provider is set) ---
+  if (provider) {
+    // We support "openai" (OpenAI-style /v1/embeddings). Unknown providers → null.
+    if (provider !== "openai") {
+      return null;
+    }
+
+    // Cloud provider requires model + apiKey + baseURL.
+    if (!model || !apiKey || !baseURL) {
+      return null;
+    }
+
+    const fetchImpl = opts.fetchImpl ?? fetch;
+
+    return {
+      modelId: model,
+      async embed(texts: string[]): Promise<Float32Array[]> {
+        const url = `${baseURL}/embeddings`;
+        const resp = await fetchImpl(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({ model, input: texts }),
+        });
+
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          throw new Error(
+            `embed: HTTP ${resp.status} from ${url}` +
+            (body ? ` — ${body.slice(0, 200)}` : ""),
+          );
+        }
+
+        const json = (await resp.json()) as { data: { embedding: number[] }[] };
+
+        return json.data.map((d) => new Float32Array(d.embedding));
+      },
+    };
   }
 
-  // We support "openai" (OpenAI-style /v1/embeddings). Unknown providers → null.
-  if (provider !== "openai") {
-    return null;
-  }
-
-  if (!baseURL) {
-    return null;
-  }
-
-  const fetchImpl = opts.fetchImpl ?? fetch;
-
-  return {
-    modelId: model,
-    async embed(texts: string[]): Promise<Float32Array[]> {
-      const url = `${baseURL}/embeddings`;
-      const resp = await fetchImpl(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({ model, input: texts }),
-      });
-
-      if (!resp.ok) {
-        const body = await resp.text().catch(() => "");
-        throw new Error(
-          `embed: HTTP ${resp.status} from ${url}` +
-          (body ? ` — ${body.slice(0, 200)}` : ""),
-        );
-      }
-
-      const json = (await resp.json()) as { data: { embedding: number[] }[] };
-
-      return json.data.map((d) => new Float32Array(d.embedding));
-    },
-  };
+  // --- Default path: no provider set → LocalEmbedProvider (always-on) ---
+  // The local provider is lazy (pipeline loaded on first embed call), so
+  // construction never fails. If the model can't be loaded later (download
+  // blocked, ONNX missing), the embed() call throws and the caller degrades.
+  return createLocalEmbedProvider();
 }

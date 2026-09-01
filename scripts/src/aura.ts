@@ -69,7 +69,7 @@ const USAGE = `Usage:
   node aura.mjs rest describe <operationId>                  print the full shape of one REST operation
   node aura.mjs rest call <operationId> [--param name=val …] [--body-file F] [--body <json>]
                                                             invoke a REST operation by id
-  node aura.mjs rest search "<natural-language intent>"     find REST operations by full-text search`;
+  node aura.mjs rest search "<natural-language intent>"     find REST operations by semantic + full-text search (local model, on by default)`;
 
 function fail(msg: string, usage = false, code = 2): never {
   console.error(msg);
@@ -645,10 +645,19 @@ async function main(): Promise<void> {
           const query = rest[0];
           if (!query) fail("rest search: missing <query>", true);
           const flags = parseFlags(rest.slice(1));
-          // Create an embed provider at runtime (null when not configured → FTS-only)
+          // Create an embed provider at runtime. By default (no aura.embed.*
+          // settings) → LocalEmbedProvider (always-on local CPU model).
+          // When aura.embed.provider is set → cloud provider (optional override).
+          // On local-init failure → null → restSearch degrades to FTS-only.
           const { createEmbedProvider, loadEmbedSettings } = await import("@pi-aura/shared/embed/provider");
           const embedSettings = loadEmbedSettings();
-          const embedProvider = await createEmbedProvider(embedSettings);
+          let embedProvider: import("@pi-aura/shared/embed/provider").EmbedProvider | null = null;
+          try {
+            embedProvider = await createEmbedProvider(embedSettings);
+          } catch {
+            // Local provider init failure → null → FTS-only fallback
+            embedProvider = null;
+          }
           await restSearch(REST_INDEX, query, console, {
             limit: flags.limit ? Number(flags.limit) : undefined,
             embedProvider,

@@ -45,8 +45,10 @@ export type VecElementType = "f32" | "i8";
 
 export interface OpVectorEntry {
   operationId: string;
-  /** Quantized or float vector (Int8Array for i8, Float32Array for f32). */
-  vec: Int8Array | Float32Array;
+  /** Quantized or float vector (Int8Array for i8, Float32Array for f32).
+   * In the serialized JSON form (generated rest-index.ts), this is a
+   * number[] (typed arrays don't survive JSON.stringify). */
+  vec: Int8Array | Float32Array | number[];
 }
 
 export interface SemanticVectors {
@@ -110,6 +112,10 @@ export function buildSearchableText(
  * When provider is null → returns null (no vectors; FTS-only is valid).
  * When the provider's embed call fails → throws loudly naming the operation.
  *
+ * E5 PREFIX CONVENTION: op texts are prefixed with "passage: " before
+ * embedding (E5 models require this for best retrieval quality). The prefix
+ * is applied here (build-time) so callers don't have to remember.
+ *
  * Vectors are stored as Int8Array (i8 dtype) by default to fit the size
  * budget, or as Float32Array (f32 dtype) when explicitly requested.
  */
@@ -120,7 +126,8 @@ export async function buildSemanticVectors(
 ): Promise<SemanticVectors | null> {
   if (!provider) return null;
 
-  const texts = ops.map((op) => op.text);
+  // E5 PREFIX CONVENTION: prefix op texts with "passage: " for best retrieval.
+  const texts = ops.map((op) => `passage: ${op.text}`);
   let rawVectors: Float32Array[];
   try {
     rawVectors = await provider.embed(texts);
@@ -274,9 +281,24 @@ export async function buildRestIndexAsync(
 /**
  * Serialize the blob to a deterministic JSON string.
  * Used for size-budget assertion and for writing the generated .ts module.
+ *
+ * Typed arrays (Int8Array/Float32Array) are converted to plain number[]
+ * before serialization so that JSON.stringify produces `[1,2,3]` (a proper
+ * array) instead of `{"0":1,"1":2,"2":3}` (a plain object with numeric
+ * keys, which has no `.length` and breaks cosineSim at runtime).
  */
 export function serializeRestIndexBlob(blob: RestIndexBlob): string {
-  return JSON.stringify(blob);
+  // Deep-convert typed-array vec entries to plain number[] for JSON.
+  const serializable: RestIndexBlob = {
+    ...blob,
+    vectors: blob.vectors
+      ? blob.vectors.map((v) => ({
+          operationId: v.operationId,
+          vec: Array.from(v.vec),
+        }))
+      : null,
+  };
+  return JSON.stringify(serializable);
 }
 
 // ---------------------------------------------------------------------------
@@ -339,8 +361,11 @@ export async function genRestIndex(): Promise<void> {
   const scriptsRoot = resolve(import.meta.dirname, "..", "packages", "shared", "openapi", "openapi.yaml");
   const openApiPath = existsSync(repoRoot) ? repoRoot : scriptsRoot;
 
-  // Try to create an embedding provider from settings/env.
-  // When none configured → build succeeds with vectors:null (FTS-only is valid).
+  // Create an embedding provider. By default (no aura.embed.* settings) →
+  // LocalEmbedProvider (always-on local CPU model, Xenova/multilingual-e5-base).
+  // When aura.embed.provider is set → cloud provider (optional override).
+  // Build-time: if the provider fails to init, the build FAILS LOUDLY (correct —
+  // the committed index must have real vectors).
   const { createEmbedProvider, loadEmbedSettings } = await import("@pi-aura/shared/embed/provider");
   const embedSettings = loadEmbedSettings();
   const embedProvider = await createEmbedProvider(embedSettings);

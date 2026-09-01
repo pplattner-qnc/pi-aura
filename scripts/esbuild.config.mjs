@@ -20,6 +20,10 @@ const baseConfig = {
     "@napi-rs/keyring",
     "@napi-rs/keyring-linux-x64-gnu",
     "dbus-next",
+    // @huggingface/transformers: native ONNX runtime binding (like keyring).
+    // The model weights auto-download to ~/.pi/aura/huggingface; never inlined.
+    "@huggingface/transformers",
+    "onnxruntime-node",
   ],
   banner: {
     // __dirname/__filename aren't defined in ESM; banner provides them.

@@ -118,6 +118,18 @@ All tools are prefixed with `aura_2d_mcp_2d_dev_`. There are two families:
   posting as an AI agent.
 - **Progress tracking**: use `recordTaskProgress` to log agent activity on
   tasks for visibility in the Aura Timeline.
+- **REST CLI** (`node aura.mjs rest`): the `aura` skill bundles a generic
+  OpenAPI-driven REST CLI for the ~273 operations not covered by typed MCP
+  tools (capacity, notifications-write, owner/crew search, etc.). Use `rest
+  list` to browse, `rest describe <opId>` for a single operation's shape,
+  `rest call <opId> [--param ...] [--body-file F]` to invoke, and `rest
+  search "<intent>"` to find an operation by meaning. The semantic search leg
+  is **on by default** via a local, CPU-only embedding model
+  (`Xenova/multilingual-e5-base`) that auto-caches to
+  `~/.pi/aura/huggingface` on first use — no API key, no cloud, no GPU needed.
+  `aura.embed.*` settings can override this with a cloud provider if desired.
+  See [resources/rest-api.md](resources/rest-api.md) for the full operation
+  reference.
 
 ## Submitting feedback about Aura
 

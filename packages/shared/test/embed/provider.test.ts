@@ -16,14 +16,17 @@ import {
 // ---------------------------------------------------------------------------
 
 describe("createEmbedProvider", () => {
-  it("returns null when no provider is configured (no config, no env)", async () => {
+  it("returns a LocalEmbedProvider when no provider is configured (slice 5 default-flip)", async () => {
     const provider = await createEmbedProvider({});
-    assert.equal(provider, null, "null when no config");
+    assert.ok(provider, "not null — local provider by default");
+    assert.equal(provider!.modelId, "Xenova/multilingual-e5-base",
+      "default provider is the local model");
   });
 
-  it("returns null when config is empty", async () => {
+  it("returns a LocalEmbedProvider when config has no provider field", async () => {
     const provider = await createEmbedProvider({ provider: "", model: "" });
-    assert.equal(provider, null);
+    assert.ok(provider, "not null when provider field is empty");
+    assert.equal(provider!.modelId, "Xenova/multilingual-e5-base");
   });
 
   it("returns an EmbedProvider when provider + model + apiKey configured", async () => {
