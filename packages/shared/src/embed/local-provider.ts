@@ -43,16 +43,21 @@ export const DEFAULT_CACHE_DIR = join(homedir(), ".pi", "aura", "huggingface");
 // Types — the pipeline output shape (simplified from transformers.js)
 // ---------------------------------------------------------------------------
 
-/** A single "tensor" from the feature-extraction pipeline. */
+/**
+ * A single "tensor" from the feature-extraction pipeline.
+ * The real transformers.js pipeline with { pooling: 'mean', normalize: true }
+ * returns ONE Tensor (not an array) with dims [batch, hiddenDim] and flat data
+ * of length batch*hiddenDim, already mean-pooled + L2-normalized.
+ */
 export interface PipelineTensor {
-  /** Flat Float32Array of the tensor data (seq_len * hidden_dim). */
-  data: Float32Array;
-  /** Shape of the tensor: [seq_len, hidden_dim]. */
-  dims: [number, number];
+  /** Flat data (length = product of dims). Already pooled + normalized. */
+  data: Float32Array | number[];
+  /** Shape: [batch, hiddenDim] (e.g. [273, 384]). */
+  dims: number[];
 }
 
 /** The pipeline function type (what pipeline("feature-extraction", ...) returns). */
-export type LocalPipeline = (texts: string[]) => Promise<PipelineTensor[]>;
+export type LocalPipeline = (texts: string[]) => Promise<PipelineTensor>;
 
 /** Injectable transformers.js env (for cacheDir). */
 export interface TransformersEnv {
@@ -71,41 +76,6 @@ export interface LocalEmbedProviderOptions {
   env?: TransformersEnv;
   /** Override the cache dir (defaults to ~/.pi/aura/huggingface). */
   cacheDir?: string;
-}
-
-// ---------------------------------------------------------------------------
-// Mean-pool + L2-normalize (pure helpers)
-// ---------------------------------------------------------------------------
-
-/**
- * Mean-pool a [seq_len, hidden_dim] tensor over the token dimension.
- * Returns a Float32Array of length hidden_dim.
- */
-export function meanPool(tensor: PipelineTensor): Float32Array {
-  const [seqLen, hiddenDim] = tensor.dims;
-  const result = new Float32Array(hiddenDim);
-  for (let h = 0; h < hiddenDim; h++) {
-    let sum = 0;
-    for (let s = 0; s < seqLen; s++) {
-      sum += tensor.data[s * hiddenDim + h];
-    }
-    result[h] = sum / seqLen;
-  }
-  return result;
-}
-
-/**
- * L2-normalize a vector in-place (returns the same Float32Array).
- * Zero vector → stays zero (no NaN).
- */
-export function l2Normalize(vec: Float32Array): Float32Array {
-  let norm = 0;
-  for (let i = 0; i < vec.length; i++) norm += vec[i] * vec[i];
-  const l2 = Math.sqrt(norm);
-  if (l2 > 0) {
-    for (let i = 0; i < vec.length; i++) vec[i] /= l2;
-  }
-  return vec;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,23 +137,16 @@ export class LocalEmbedProvider implements EmbedProvider {
           (transformers as any).env.cacheDir = this._opts.cacheDir ?? DEFAULT_CACHE_DIR;
         }
         const pipe = await pipeline("feature-extraction", LOCAL_MODEL_ID);
-        // Adapt the real pipeline to our LocalPipeline type
+        // Adapt the real pipeline to our LocalPipeline type.
+        // The real pipeline with { pooling: 'mean', normalize: true } returns
+        // a SINGLE Tensor with dims [batch, hiddenDim] — already mean-pooled +
+        // L2-normalized. We pass it through as-is.
         this._pipeline = (async (texts: string[]) => {
           const output = await pipe(texts, { pooling: "mean", normalize: true });
-          // The real pipeline with pooling+normalize already does mean-pool + L2-norm.
-          // But to keep our code testable and independent of the exact transformers.js
-          // API version, we wrap it: if the output already has .data + .dims, use it;
-          // otherwise flatten it.
-          if (Array.isArray(output)) {
-            return output.map((t: any) => ({
-              data: new Float32Array(t.data),
-              dims: t.dims as [number, number],
-            }));
-          }
-          return [{
+          return {
             data: new Float32Array(output.data),
-            dims: output.dims as [number, number],
-          }];
+            dims: output.dims as number[],
+          };
         }) as LocalPipeline;
       }
       return this._pipeline;
@@ -220,16 +183,33 @@ export class LocalEmbedProvider implements EmbedProvider {
   }
 
   /**
-   * Internal: embed raw texts (no prefix), mean-pool, L2-normalize.
+   * Internal: embed raw texts (no prefix).
+   *
+   * The pipeline is called with { pooling: 'mean', normalize: true }, so it
+   * returns a SINGLE Tensor with dims [N, hiddenDim] — already mean-pooled +
+   * L2-normalized. We slice this single tensor into N Float32Array vectors
+   * (one per input text).
    */
   private async _embedRaw(texts: string[]): Promise<Float32Array[]> {
     const pipeline = await this.getPipeline();
-    const tensors = await pipeline(texts);
-    return tensors.map((tensor) => {
-      // Mean-pool over tokens, then L2-normalize
-      const pooled = meanPool(tensor);
-      return l2Normalize(pooled);
-    });
+    const out = await pipeline(texts);
+    // The pipeline returns a single Tensor with dims [N, hiddenDim].
+    // hiddenDim is the last dimension; N (batch) is the first.
+    const hiddenDim = out.dims[out.dims.length - 1];
+    const n = out.dims[0];
+    // Ensure data is a Float32Array (the real pipeline returns one, but
+    // number[] is allowed by the type for flexibility).
+    const data = out.data instanceof Float32Array
+      ? out.data
+      : new Float32Array(out.data);
+    const result: Float32Array[] = [];
+    for (let i = 0; i < n; i++) {
+      // Copy the i-th text's vector from the flat data buffer.
+      result.push(
+        Float32Array.from(data.subarray(i * hiddenDim, (i + 1) * hiddenDim)),
+      );
+    }
+    return result;
   }
 }
 

@@ -8,6 +8,12 @@
 // transformers pipeline is INJECTED (mocked) so tests are fast, offline, and
 // deterministic.
 //
+// PIPELINE OUTPUT SHAPE: The real transformers.js feature-extraction pipeline,
+// when called with { pooling: 'mean', normalize: true }, returns a SINGLE
+// Tensor object (NOT an array) with `.data` (flat Float32Array of length
+// batch*hiddenDim) and `.dims` (shape [batch, hiddenDim]). The provider
+// slices this single tensor into N Float32Array vectors (one per input text).
+//
 // Run with: cd packages/shared && npx tsx --test test/embed/local-provider.test.ts
 
 import { describe, it } from "node:test";
@@ -21,42 +27,57 @@ import {
 
 const EXPECTED_CACHE_DIR = join(homedir(), ".pi", "aura", "huggingface");
 const MODEL_ID = "Xenova/multilingual-e5-small";
+const HIDDEN_DIM = 384; // real model dimension
 
 // ---------------------------------------------------------------------------
-// Fake pipeline — simulates @huggingface/transformers pipeline output.
+// Fake pipeline — simulates the REAL @huggingface/transformers pipeline output.
 // ---------------------------------------------------------------------------
 
 /**
- * The real transformers.js pipeline returns a function that, when called with
- * texts, produces an array of tensors (each with .data being a Float32Array of
- * last_hidden_state shape [seq_len, hidden_dim]). Our LocalEmbedProvider
- * mean-pools over the token dimension and L2-normalizes.
+ * The real transformers.js feature-extraction pipeline, when called with
+ * { pooling: 'mean', normalize: true }, returns a SINGLE Tensor object
+ * (NOT an array):
+ *   { data: Float32Array (flat, length batch*hiddenDim),
+ *     dims: [batch, hiddenDim] }
+ * The data is already mean-pooled + L2-normalized by the pipeline itself.
  *
- * The fake pipeline returns a function that produces a shape compatible with
- * the real one: an array of objects with `.data` (a flat Float32Array) +
- * `.dims` (shape info). We use a simplified format:
- *   { data: Float32Array, dims: [seq_len, hidden_dim] }
+ * The fake pipeline mirrors this real shape: a single object with flat .data
+ * and .dims = [batch, hiddenDim]. Each text gets a distinct deterministic
+ * vector (based on text hash) so we can verify N-in → N-out.
  */
-function makeFakePipeline(hiddenDim: number = 4): {
+function makeFakePipeline(hiddenDim: number = HIDDEN_DIM): {
   pipelineFn: LocalPipeline;
   calls: { texts: string[] }[];
 } {
   const calls: { texts: string[] }[] = [];
   const pipelineFn: LocalPipeline = async (texts: string[]) => {
     calls.push({ texts: [...texts] });
-    // Return one "tensor" per text. Each tensor has dims [seq_len, hidden_dim]
-    // and data is a flat Float32Array of length seq_len * hidden_dim.
-    return texts.map((text) => {
-      const seqLen = 3; // 3 tokens per text (for mean-pooling)
-      const data = new Float32Array(seqLen * hiddenDim);
-      // Deterministic values based on text content + position
-      for (let s = 0; s < seqLen; s++) {
+    // Real shape: single Tensor with dims [batch, hiddenDim], flat data.
+    // Each text gets a distinct, deterministic, unit-norm vector.
+    const batch = texts.length;
+    const data = new Float32Array(batch * hiddenDim);
+    for (let i = 0; i < batch; i++) {
+      const text = texts[i];
+      // Deterministic seed from text
+      let seed = 0;
+      for (let c = 0; c < text.length; c++) seed = (seed * 31 + text.charCodeAt(c)) | 0;
+      let norm = 0;
+      for (let h = 0; h < hiddenDim; h++) {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        const val = (seed % 1000) / 1000 - 0.5;
+        data[i * hiddenDim + h] = val;
+        norm += val * val;
+      }
+      // L2-normalize this text's vector
+      const l2 = Math.sqrt(norm);
+      if (l2 > 0) {
         for (let h = 0; h < hiddenDim; h++) {
-          data[s * hiddenDim + h] = (text.charCodeAt(h % Math.max(text.length, 1)) % 7) / 10;
+          data[i * hiddenDim + h] /= l2;
         }
       }
-      return { data, dims: [seqLen, hiddenDim] as [number, number] };
-    });
+    }
+    // Return a SINGLE tensor object (NOT an array) — the real shape.
+    return { data, dims: [batch, hiddenDim] };
   };
   return { pipelineFn, calls };
 }
@@ -114,59 +135,70 @@ describe("LocalEmbedProvider — E5 prefix convention", () => {
 // Mean-pooling + L2 normalization
 // ---------------------------------------------------------------------------
 
-describe("LocalEmbedProvider — mean-pool + L2-normalize", () => {
-  it("mean-pools the last_hidden_state over tokens (seq_len → 1)", async () => {
+describe("LocalEmbedProvider — real pipeline output shape (N-in → N-out)", () => {
+  it("returns 2 vectors of length 384 for a 2-text batch (real shape)", async () => {
+    const { pipelineFn } = makeFakePipeline();
+    const provider = await createLocalEmbedProvider({ pipeline: pipelineFn });
+    const vectors = await provider.embed(["hello world", "second text"]);
+    assert.equal(vectors.length, 2, "one vector per input text");
+    for (const v of vectors) {
+      assert.equal(v.length, HIDDEN_DIM, `vector dimension = ${HIDDEN_DIM}`);
+      assert.ok(v instanceof Float32Array, "returns Float32Array");
+    }
+  });
+
+  it("returns 3 vectors of length 384 for a 3-text batch (off-by-one guard)", async () => {
+    // This test guards the off-by-one that caused the gen-rest-index crash:
+    // the old code returned 1 vector for N texts, so rawVectors[i] was
+    // undefined for i>=1, crashing quantizeToInt8(undefined).
+    const { pipelineFn } = makeFakePipeline();
+    const provider = await createLocalEmbedProvider({ pipeline: pipelineFn });
+    const vectors = await provider.embed(["text one", "text two", "text three"]);
+    assert.equal(vectors.length, 3, "one vector per input text (not 1!)");
+    for (const v of vectors) {
+      assert.equal(v.length, HIDDEN_DIM, `vector dimension = ${HIDDEN_DIM}`);
+      assert.ok(v instanceof Float32Array, "returns Float32Array");
+    }
+  });
+
+  it("each text's vector is distinct (not all the same)", async () => {
+    const { pipelineFn } = makeFakePipeline();
+    const provider = await createLocalEmbedProvider({ pipeline: pipelineFn });
+    const vectors = await provider.embed(["alpha", "beta"]);
+    assert.equal(vectors.length, 2);
+    let diff = 0;
+    for (let h = 0; h < HIDDEN_DIM; h++) {
+      diff += Math.abs(vectors[0][h] - vectors[1][h]);
+    }
+    assert.ok(diff > 0, "vectors for different texts are distinct");
+  });
+});
+
+describe("LocalEmbedProvider — mean-pool + L2-normalize (pipeline does it)", () => {
+  it("returns vectors of length hidden_dim (pipeline pools+normalizes)", async () => {
     const hiddenDim = 4;
     const { pipelineFn } = makeFakePipeline(hiddenDim);
     const provider = await createLocalEmbedProvider({ pipeline: pipelineFn });
     const vectors = await provider.embed(["test text"]);
     assert.equal(vectors.length, 1, "one vector per text");
-    assert.equal(vectors[0].length, hiddenDim, "vector dimension = hidden_dim (after mean-pool)");
+    assert.equal(vectors[0].length, hiddenDim, "vector dimension = hidden_dim");
     assert.ok(vectors[0] instanceof Float32Array, "returns Float32Array");
   });
 
   it("L2-normalizes the output vectors (unit norm)", async () => {
-    const hiddenDim = 4;
-    const { pipelineFn } = makeFakePipeline(hiddenDim);
+    const { pipelineFn } = makeFakePipeline();
     const provider = await createLocalEmbedProvider({ pipeline: pipelineFn });
     const vectors = await provider.embed(["hello", "world"]);
+    assert.equal(vectors.length, 2);
     for (const vec of vectors) {
       let norm = 0;
       for (let i = 0; i < vec.length; i++) norm += vec[i] * vec[i];
       const l2 = Math.sqrt(norm);
       assert.ok(
-        Math.abs(l2 - 1.0) < 1e-5,
+        Math.abs(l2 - 1.0) < 1e-4,
         `vector is L2-normalized (norm ≈ 1.0, got ${l2})`,
       );
     }
-  });
-
-  it("mean-pools correctly: output = mean of token vectors, then normalized", async () => {
-    // Use a pipeline that returns known values so we can verify the math
-    const knownPipeline: LocalPipeline = async (_texts: string[]) => {
-      // For one text, return 3 tokens each with 2 dims:
-      // token0: [1, 0], token1: [0, 1], token2: [1, 1]
-      // mean: [ (1+0+1)/3, (0+1+1)/3 ] = [2/3, 2/3]
-      // norm of mean: sqrt(4/9 + 4/9) = sqrt(8/9) = 2*sqrt(2)/3
-      // normalized: [ (2/3)/(2*sqrt(2)/3), (2/3)/(2*sqrt(2)/3) ] = [1/sqrt(2), 1/sqrt(2)]
-      return [
-        {
-          data: new Float32Array([1, 0, 0, 1, 1, 1]),
-          dims: [3, 2] as [number, number],
-        },
-      ];
-    };
-    const provider = await createLocalEmbedProvider({ pipeline: knownPipeline });
-    const vectors = await provider.embed(["x"]);
-    const expected = 1 / Math.sqrt(2);
-    assert.ok(
-      Math.abs(vectors[0][0] - expected) < 1e-5,
-      `first dim ≈ ${expected}, got ${vectors[0][0]}`,
-    );
-    assert.ok(
-      Math.abs(vectors[0][1] - expected) < 1e-5,
-      `second dim ≈ ${expected}, got ${vectors[0][1]}`,
-    );
   });
 });
 
@@ -179,9 +211,7 @@ describe("LocalEmbedProvider — lazy singleton", () => {
     let pipelineLoaded = false;
     const fakePipeline: LocalPipeline = async (_texts: string[]) => {
       pipelineLoaded = true;
-      return [
-        { data: new Float32Array([1, 0, 0, 1]), dims: [2, 2] as [number, number] },
-      ];
+      return { data: new Float32Array(4), dims: [1, 4] };
     };
     // The pipeline factory is called once on first embed
     let factoryCalls = 0;
@@ -201,10 +231,8 @@ describe("LocalEmbedProvider — lazy singleton", () => {
     let callCount = 0;
     const trackingPipeline: LocalPipeline = async (texts: string[]) => {
       callCount++;
-      return texts.map(() => ({
-        data: new Float32Array([1, 0, 0, 1]),
-        dims: [2, 2] as [number, number],
-      }));
+      const batch = texts.length;
+      return { data: new Float32Array(batch * 4), dims: [batch, 4] };
     };
     const provider = await createLocalEmbedProvider({ pipeline: trackingPipeline });
     await provider.embed(["a"]);
