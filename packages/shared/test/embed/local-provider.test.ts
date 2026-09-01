@@ -10,7 +10,7 @@
 //
 // Run with: cd packages/shared && npx tsx --test test/embed/local-provider.test.ts
 
-import { describe, it, mock, beforeEach, afterEach } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -18,7 +18,6 @@ import {
   createLocalEmbedProvider,
   type LocalPipeline,
 } from "../../src/embed/local-provider.js";
-import type { EmbedProvider } from "../../src/embed/provider.js";
 
 const EXPECTED_CACHE_DIR = join(homedir(), ".pi", "aura", "huggingface");
 const MODEL_ID = "Xenova/multilingual-e5-small";
@@ -144,7 +143,6 @@ describe("LocalEmbedProvider — mean-pool + L2-normalize", () => {
 
   it("mean-pools correctly: output = mean of token vectors, then normalized", async () => {
     // Use a pipeline that returns known values so we can verify the math
-    const hiddenDim = 2;
     const knownPipeline: LocalPipeline = async (_texts: string[]) => {
       // For one text, return 3 tokens each with 2 dims:
       // token0: [1, 0], token1: [0, 1], token2: [1, 1]
@@ -193,32 +191,30 @@ describe("LocalEmbedProvider — lazy singleton", () => {
         return fakePipeline(texts);
       },
     });
-    // Before embed, pipeline not loaded
-    // (construction does not load the pipeline — it's lazy)
     // First embed triggers the load
     await provider.embed(["test"]);
     assert.ok(factoryCalls >= 1, "pipeline loaded on first embed");
+    assert.ok(pipelineLoaded, "pipeline function was actually called");
   });
 
-  it("reuses the pipeline instance across embed calls", async () => {
-    let initCount = 0;
-    const fakePipeline: LocalPipeline = async (_texts: string[]) => {
-      return [
-        { data: new Float32Array([1, 0, 0, 1]), dims: [2, 2] as [number, number] },
-      ];
+  it("reuses the pipeline instance across embed calls (singleton)", async () => {
+    let callCount = 0;
+    const trackingPipeline: LocalPipeline = async (texts: string[]) => {
+      callCount++;
+      return texts.map(() => ({
+        data: new Float32Array([1, 0, 0, 1]),
+        dims: [2, 2] as [number, number],
+      }));
     };
-    const provider = await createLocalEmbedProvider({
-      pipeline: async (texts: string[]) => {
-        initCount++;
-        return fakePipeline(texts);
-      },
-      // Use a custom pipeline loader that tracks init
-    });
+    const provider = await createLocalEmbedProvider({ pipeline: trackingPipeline });
     await provider.embed(["a"]);
     await provider.embed(["b"]);
-    // The pipeline function should only be initialized once (singleton)
-    // Note: the provider caches the pipeline instance after first load
-    assert.ok(initCount >= 1, "pipeline initialized at least once");
+    // Both embed calls use the same pipeline instance (it's called twice,
+    // once per embed — but the instance is the same, not re-initialized)
+    assert.equal(callCount, 2, "pipeline called for each embed");
+    // The key singleton property: getPipeline() returns the cached instance.
+    // For injected pipelines, this is trivially true (the same function).
+    // For the real pipeline, it means pipeline() is called once, not per embed.
   });
 });
 
@@ -236,7 +232,7 @@ describe("LocalEmbedProvider — cacheDir", () => {
       get cacheDir() { return envSet.cacheDir; },
     };
     const { pipelineFn } = makeFakePipeline();
-    const provider = await createLocalEmbedProvider({
+    await createLocalEmbedProvider({
       pipeline: pipelineFn,
       env: mockEnv as any,
     });

@@ -344,8 +344,11 @@ export async function genRestIndex(): Promise<void> {
   const scriptsRoot = resolve(import.meta.dirname, "..", "packages", "shared", "openapi", "openapi.yaml");
   const openApiPath = existsSync(repoRoot) ? repoRoot : scriptsRoot;
 
-  // Try to create an embedding provider from settings/env.
-  // When none configured → build succeeds with vectors:null (FTS-only is valid).
+  // Create an embedding provider. By default (no aura.embed.* settings) →
+  // LocalEmbedProvider (always-on local CPU model, Xenova/multilingual-e5-small).
+  // When aura.embed.provider is set → cloud provider (optional override).
+  // Build-time: if the provider fails to init, the build FAILS LOUDLY (correct —
+  // the committed index must have real vectors).
   const { createEmbedProvider, loadEmbedSettings } = await import("@pi-aura/shared/embed/provider");
   const embedSettings = loadEmbedSettings();
   const embedProvider = await createEmbedProvider(embedSettings);

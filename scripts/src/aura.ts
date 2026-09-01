@@ -645,10 +645,19 @@ async function main(): Promise<void> {
           const query = rest[0];
           if (!query) fail("rest search: missing <query>", true);
           const flags = parseFlags(rest.slice(1));
-          // Create an embed provider at runtime (null when not configured → FTS-only)
+          // Create an embed provider at runtime. By default (no aura.embed.*
+          // settings) → LocalEmbedProvider (always-on local CPU model).
+          // When aura.embed.provider is set → cloud provider (optional override).
+          // On local-init failure → null → restSearch degrades to FTS-only.
           const { createEmbedProvider, loadEmbedSettings } = await import("@pi-aura/shared/embed/provider");
           const embedSettings = loadEmbedSettings();
-          const embedProvider = await createEmbedProvider(embedSettings);
+          let embedProvider: import("@pi-aura/shared/embed/provider").EmbedProvider | null = null;
+          try {
+            embedProvider = await createEmbedProvider(embedSettings);
+          } catch {
+            // Local provider init failure → null → FTS-only fallback
+            embedProvider = null;
+          }
           await restSearch(REST_INDEX, query, console, {
             limit: flags.limit ? Number(flags.limit) : undefined,
             embedProvider,
