@@ -414,3 +414,71 @@ so it can discover the right operation without reading the whole spec.
   bundle prints the `semantic leg skipped` note. `rest list` prints all 273
   operations; `rest describe updateTaskMemberCapacity` prints the correct
   path/method/params/body/responses from the inlined blob.
+
+### Slice 4 — semantic search leg: embeddings, cosine, RRF, model-id guard (landed)
+
+- **Embedding provider seam** (`packages/shared/src/embed/provider.ts`,
+  exported as `@pi-aura/shared/embed/provider`): `EmbedProvider` interface
+  (`{ modelId, embed(texts): Promise<Float32Array[]> }`). `createEmbedProvider(config, opts)`
+  returns a provider (OpenAI-style `/v1/embeddings` via fetch, configurable `baseURL`)
+  or `null` when no/incomplete config. Uses its OWN apiKey (NOT the Aura PAT).
+  `loadEmbedSettings()` reads the `aura.embed.*` block from `~/.pi/agent/settings.json`
+  + env overrides (`AURA_EMBED_*`); returns `{}` when absent so `createEmbedProvider`
+  returns null (graceful FTS-only fallback). The provider's `embed()` is mockable
+  via `opts.fetchImpl` for testing.
+- **cosineRank + int8 quantization** (`packages/shared/src/embed/cosine.ts`):
+  `cosineRank(queryVec, opVecs, dtype)` → ranked `{ operationId, score }[]` (pure).
+  `quantizeToInt8(vec)` does symmetric quantization (scale to [-127,127]). When the
+  index `dtype` is `"i8"` and the query is a `Float32Array`, the query is quantized
+  to `Int8Array` before comparison (the dtype guard). Zero vectors → score 0 (no NaN);
+  ties broken by `operationId` for determinism.
+- **Build-time op vectors** (`scripts/src/gen-rest-index.ts`):
+  `buildSemanticVectors(ops, provider, dtype="i8")` embeds every op's searchable
+  text (the same text slice 3 builds), returns `{ vectors, embedModelId, dims, dtype }`.
+  Null provider → `null` (no vectors; FTS-only is valid). Embed failure → throws loudly
+  naming the operations. `buildRestIndexAsync(openApiPath, codeTags, resolveFn, embedOpts?)`
+  wraps the sync `buildRestIndex` and adds the embedding step when `embedFn` +
+  `embedModelId` are provided. The committed index ships with `embedModelId: null`,
+  `vectors: null` (no provider at build → build does not fail; the semantic leg is opt-in).
+  Default `dtype` is `i8` (int8-quantized) to fit the 3 MB budget (~0.42 MB for 273 ops ×
+  1536-d i8 vs ~1.68 MB for f32).
+- **RestIndexBlob widened** (additive, backwards-compatible): `embedModelId` is now
+  `string | null`, `vectors` is `OpVectorEntry[] | null`, with new optional `dims` +
+  `dtype` fields. `OpVectorEntry = { operationId, vec: Int8Array | Float32Array }`.
+  `assertSizeBudget` error message updated with vector-aware remediation hints.
+- **`restSearch` made async** (`scripts/src/rest-search.ts`): now runs FTS + optional
+  semantic leg, merges via `rrfMerge([semanticRanking, ftsRanking])`, and USES the
+  returned fused Map to order + print results. Each result line notes which leg matched
+  (`semantic` / `FTS` / `both`) + the fused score. The slice-3 bug (rrfMerge result
+  discarded) is fixed. `RestSearchOptions` gained `embedProvider?: EmbedProvider | null`
+  (test seam). `aura.ts` lazily imports + creates the provider at runtime (only for
+  `rest search`).
+- **Model-id guard:** if `provider.modelId !== index.embedModelId` → semantic leg
+  skipped with a warning naming both models (`index built with "X", runtime
+  provider is "Y" — FTS-only results`), never a silent cross-model cosine. Index
+  with `embedModelId: null` + provider configured → skip with warning. Runtime embed
+  HTTP error → degrade to FTS-only with a one-line warning (never hard-fail search).
+- **No changes** to `rest list`/`describe`/`call`, the FTS contract, `rrfMerge`
+  signature, or the Taskfile (the `gen-rest-index` step from slice 3 is reused;
+  the provider is dynamically imported inside `genRestIndex()`).
+- **Minor divergence — `createEmbedProvider` requires `baseURL`:** the arch spec
+  listed `baseURL` as optional, but the implementation returns `null` when
+  `baseURL` is absent (stricter). A user with `provider`+`model`+`apiKey` but no
+  `baseURL` gets silent FTS-only rather than a clear "missing baseURL" error. Minor
+  UX gap, not a contract break.
+- **Minor redundancy — `buildRestIndexAsync` double-loads `openapi.yaml`:** the sync
+  `buildRestIndex` calls `loadOpenApi` and the async wrapper calls it again to
+  rebuild `searchableOps` for the embedding step. The per-process cache makes this
+  harmless; a future refactor could pass `searchableOps` through.
+- **`loadEmbedSettings` lives in `embed/provider.ts`** (not `settings.ts`): keeps
+  embed config self-contained (structurally different from Aura client settings).
+  The arch spec allowed either extending `loadAuraClientSettings` or a new
+  `loadEmbedSettings`; the latter was chosen.
+- **Verification:** `task typecheck` passes for both packages; `task build` succeeds.
+  The shared suite (131 tests, +17 embed/cosine), gen-rest-index-embed suite (9),
+  rest-search-semantic suite (9), rest-search suite (6, updated to async), and all
+  prior slice suites (6+15+7+9+6) pass; vitest 210 tests pass. `rest search` with a
+  mocked provider prints `leg: semantic`/`both` rationale; with no provider prints
+  the `semantic leg skipped (no embedding provider)` note; with a model mismatch
+  prints the warning naming both models + FTS-only. This is the final slice of the
+  task — the generic-openapi-cli-wrapper task is complete.
