@@ -45,8 +45,10 @@ export type VecElementType = "f32" | "i8";
 
 export interface OpVectorEntry {
   operationId: string;
-  /** Quantized or float vector (Int8Array for i8, Float32Array for f32). */
-  vec: Int8Array | Float32Array;
+  /** Quantized or float vector (Int8Array for i8, Float32Array for f32).
+   * In the serialized JSON form (generated rest-index.ts), this is a
+   * number[] (typed arrays don't survive JSON.stringify). */
+  vec: Int8Array | Float32Array | number[];
 }
 
 export interface SemanticVectors {
@@ -279,9 +281,24 @@ export async function buildRestIndexAsync(
 /**
  * Serialize the blob to a deterministic JSON string.
  * Used for size-budget assertion and for writing the generated .ts module.
+ *
+ * Typed arrays (Int8Array/Float32Array) are converted to plain number[]
+ * before serialization so that JSON.stringify produces `[1,2,3]` (a proper
+ * array) instead of `{"0":1,"1":2,"2":3}` (a plain object with numeric
+ * keys, which has no `.length` and breaks cosineSim at runtime).
  */
 export function serializeRestIndexBlob(blob: RestIndexBlob): string {
-  return JSON.stringify(blob);
+  // Deep-convert typed-array vec entries to plain number[] for JSON.
+  const serializable: RestIndexBlob = {
+    ...blob,
+    vectors: blob.vectors
+      ? blob.vectors.map((v) => ({
+          operationId: v.operationId,
+          vec: Array.from(v.vec),
+        }))
+      : null,
+  };
+  return JSON.stringify(serializable);
 }
 
 // ---------------------------------------------------------------------------

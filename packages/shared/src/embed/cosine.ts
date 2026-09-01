@@ -9,7 +9,7 @@
 //
 // Cosine similarity = dot(a,b) / (|a| * |b|). Zero vectors → 0 (not NaN).
 
-type Vec = Float32Array | Int8Array;
+type Vec = Float32Array | Int8Array | number[];
 
 export interface OpVector {
   operationId: string;
@@ -22,10 +22,10 @@ export interface CosineHit {
 }
 
 /**
- * Quantize a Float32Array to Int8Array using symmetric quantization:
+ * Quantize a Float32Array or number[] to Int8Array using symmetric quantization:
  * scale to [-127, 127] range, round, clamp.
  */
-export function quantizeToInt8(vec: Float32Array): Int8Array {
+export function quantizeToInt8(vec: Float32Array | number[]): Int8Array {
   let maxAbs = 0;
   for (let i = 0; i < vec.length; i++) {
     const a = Math.abs(vec[i]);
@@ -75,6 +75,9 @@ export function cosineRank(
   // Quantize the query if needed
   let q: Vec = queryVec;
   if (dtype === "i8" && queryVec instanceof Float32Array) {
+    q = quantizeToInt8(queryVec);
+  } else if (dtype === "i8" && Array.isArray(queryVec)) {
+    // number[] query → quantize to i8 to match the index dtype
     q = quantizeToInt8(queryVec);
   }
 
