@@ -16,7 +16,25 @@
 //   - unsupported query style (spaceDelimited / pipeDelimited)
 
 import type { OpMeta, Param } from "../openapi/loader.js";
-import { extractPathParamNames } from "../openapi/loader.js";
+
+const PATH_PARAM_RE = /\{([^}]+)\}/g;
+
+/**
+ * Extract path param names from a path template like "/a/{x}/b/{y}".
+ * (Kept local rather than imported from loader.js: a value import with a
+ * `.js` extension does not resolve under `node --experimental-strip-types`
+ * when this module is loaded transitively via the package path from a
+ * scripts/ test. `loader.ts` exports the same helper for its own consumers.)
+ */
+function extractPathParamNames(path: string): string[] {
+  const names: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = PATH_PARAM_RE.exec(path)) !== null) {
+    names.push(m[1]);
+  }
+  return names;
+}
+
 
 export interface BuiltRequest {
   method: string;

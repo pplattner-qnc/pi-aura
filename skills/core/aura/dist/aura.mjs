@@ -5709,7 +5709,7 @@ function rrfMerge(rankings, k = 60) {
   return scores;
 }
 
-// src/closest-match.ts
+// ../packages/shared/src/rest/closest-match.ts
 function closestMatches(fts, ids, query, max = 5) {
   if (fts) {
     const hits = bm25Search(fts, query, max);
@@ -5834,9 +5834,18 @@ function restDescribe(index, opId, out, fts) {
 import { readFileSync as readFileSync3 } from "node:fs";
 
 // ../packages/shared/src/rest/build-request.ts
+var PATH_PARAM_RE3 = /\{([^}]+)\}/g;
+function extractPathParamNames2(path) {
+  const names = [];
+  let m;
+  while ((m = PATH_PARAM_RE3.exec(path)) !== null) {
+    names.push(m[1]);
+  }
+  return names;
+}
 function buildRequest(op, params, body) {
   let urlPath = op.path;
-  const templateNames = extractPathParamNames(op.path);
+  const templateNames = extractPathParamNames2(op.path);
   const providedPathKeys = /* @__PURE__ */ new Set();
   for (const name of templateNames) {
     const val = params[name];

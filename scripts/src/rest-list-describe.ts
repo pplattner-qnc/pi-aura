@@ -7,7 +7,7 @@
 
 import type { OpenApiIndex, OpMeta } from "@pi-aura/shared/openapi/loader";
 import type { FtsIndex } from "@pi-aura/shared/rest/fts";
-import { closestMatches } from "./closest-match.js";
+import { closestMatches } from "@pi-aura/shared/rest/closest-match";
 
 export interface OutSink {
   log: (...args: unknown[]) => void;

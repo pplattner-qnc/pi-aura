@@ -13,7 +13,7 @@ import { buildRequest } from "@pi-aura/shared/rest/build-request";
 import type { OpenApiIndex } from "@pi-aura/shared/openapi/loader";
 import type { FtsIndex } from "@pi-aura/shared/rest/fts";
 import type { OutSink } from "./rest-list-describe.js";
-import { closestMatches } from "./closest-match.js";
+import { closestMatches } from "@pi-aura/shared/rest/closest-match";
 
 // ---------------------------------------------------------------------------
 // Args parsing (multi-valued --param, --body-file / --body)
