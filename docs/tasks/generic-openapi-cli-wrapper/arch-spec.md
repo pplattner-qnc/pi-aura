@@ -171,3 +171,38 @@ Conventions discovered from the repo (authoritative for all slices):
 - **Lazy client in `main()`:** slice 1 adds the `rest` branch; `rest list`/`describe` must not trigger `createDefaultAuraClient()` (eager at line 405). Either move the eager call into the branches that need it, or guard it behind `group !== "rest"`. Slice 2's `rest call` then calls `resolveAuraCredentials()` (not `createDefaultAuraClient`) lazily. **This is a refactor of `main()`'s top** — keep it minimal and note it.
 - **`resolveJsonModule`:** `scripts/tsconfig.json` **does** set `resolveJsonModule: true`, so either a generated `.json` or a `.ts` const works. Emit a `.ts` const (`export const REST_INDEX = {...}`) for determinism + explicit import graph. (The `.gitignore` does not exclude `scripts/src/generated/`, and `packages/shared/src/generated/` is committed as precedent — so committing the generated index is the established pattern.)
 - **Determinism:** `gen-rest-doc` and `gen-rest-index` output must be byte-identical across runs (sort operations/tags deterministically) so `task build` twice produces no diff — slice 1's AC requires this for `rest-api.md`; apply the same to the index.
+
+---
+
+## Slice 5 — `5-local-embeddings` (size l) — added after task rework
+
+Reverses slice 4's "opt-in cloud" default: the semantic leg is **always on** via a **local, CPU-only** model that auto-fetches to `~/.pi/aura/huggingface`. Cloud becomes an optional override.
+
+### Exports
+- `@pi-aura/shared/embed/local-provider`:
+  - `class LocalEmbedProvider implements EmbedProvider` — `modelId = "Xenova/multilingual-e5-small"`, lazy `pipeline("feature-extraction", ...)` singleton, mean-pool + L2-normalize, E5 `query:`/`passage:` prefixing (baked in), `env.cacheDir = ~/.pi/aura/huggingface`.
+  - `createLocalEmbedProvider(opts?): Promise<EmbedProvider>` — constructs the local provider (lazy init). Returns a provider (never null on success); throws on init failure (caller degrades).
+- `createEmbedProvider(config?, opts?)` (slice 4, modified) — **default flip**: returns `LocalEmbedProvider` when no `aura.embed.provider` is set; returns the cloud provider when `aura.embed.provider` is set. `null` only on local-init failure the caller chooses to degrade from.
+
+### Existing abstractions to use
+- `EmbedProvider` interface (slice 4) — unchanged; `LocalEmbedProvider` implements it.
+- `buildSemanticVectors` / `buildRestIndexAsync` (slice 4) — wire the local provider as the default `embedFn`/provider in `genRestIndex()`.
+- `cosineRank` / `rrfMerge` / `bm25Search` (slices 3–4) — unchanged.
+- `restSearch` model-id guard (slice 4) — unchanged logic; now passes by default (index + runtime both local model).
+- `scripts/esbuild.config.mjs` `external` list — add `@huggingface/transformers` + `onnxruntime-node` (native binding, like `@napi-rs/keyring`).
+
+### Do NOT reimplement
+- Do not inline the model weights into `aura.mjs` (they cache locally).
+- Do not change the FTS leg, `rrfMerge`, `cosineRank`, `RestIndexBlob` shape, or the guard logic.
+- Do not remove the cloud provider (it stays as an override).
+
+### Seams (test only at these)
+1. `LocalEmbedProvider` (mock `@huggingface/transformers` `pipeline` — **do not download a real model in unit tests**; assert modelId, `query:`/`passage:` prefixing, mean-pool, L2-normalize, cacheDir set). **Runner: `node:test`/`tsx` in `packages/shared/test/embed/`.**
+2. `createEmbedProvider` default-flip (no settings → local provider modelId; `aura.embed.provider` set → cloud provider; mock both). **Same runner.**
+3. `genRestIndex` build path (mocked local provider → `REST_INDEX` ships real `vectors` + `embedModelId`; assert 273 entries, dims, dtype; assert `passage:` prefixing applied). **Runner: `node --experimental-strip-types`/`tsx` on `scripts/src/gen-rest-index*.test.ts`.**
+4. `restSearch` always-on semantic leg (mocked provider + fixture inlined vectors; assert `rrfMerge([semantic, fts])` runs, rationale notes `semantic`; the "commit allocation" → capacity-op case against a fixture). **Runner: `node --experimental-strip-types`/`tsx` on `scripts/src/rest-search*.test.ts`.**
+5. esbuild externals + build: `task build` succeeds with the new deps external (bundle does not inline the native binding); size-budget assertion still passes. **Build gate.**
+
+### Interface contract
+- The `REST_INDEX` committed shape gains real `vectors` + `embedModelId: "Xenova/multilingual-e5-small"` (was `null`/`null` after slice 4). No downstream slice; this is the new final state.
+- `createEmbedProvider()`'s default-flip is a contract change to slice 4's export — note in the deviation report; in-scope per this slice.

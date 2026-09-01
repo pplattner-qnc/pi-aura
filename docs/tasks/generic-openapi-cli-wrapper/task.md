@@ -3,9 +3,9 @@ kind: task
 type: feature
 slug: generic-openapi-cli-wrapper
 title: Generic OpenAPI → REST-CLI wrapper in the aura CLI (generates commands + agent resources)
-status: done
+status: ready
 size: l
-slices: [1-loader-list-describe, 2-rest-call-invoker, 3-fts-search-and-inlined-index, 4-semantic-search-leg]
+slices: [1-loader-list-describe, 2-rest-call-invoker, 3-fts-search-and-inlined-index, 4-semantic-search-leg, 5-local-embeddings]
 blocked_by: []
 ---
 
