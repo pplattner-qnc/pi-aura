@@ -12,7 +12,6 @@ import {
   bm25Search,
   rrfMerge,
   type SearchableOp,
-  type FtsIndex,
 } from "../../src/rest/fts.js";
 
 // ---------------------------------------------------------------------------
