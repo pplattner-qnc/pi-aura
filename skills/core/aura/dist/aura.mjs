@@ -613,6 +613,128 @@ var init_keyring = __esm({
   }
 });
 
+// ../packages/shared/src/embed/local-provider.ts
+import { homedir as homedir3 } from "node:os";
+import { join as join3 } from "node:path";
+function meanPool(tensor) {
+  const [seqLen, hiddenDim] = tensor.dims;
+  const result = new Float32Array(hiddenDim);
+  for (let h = 0; h < hiddenDim; h++) {
+    let sum = 0;
+    for (let s = 0; s < seqLen; s++) {
+      sum += tensor.data[s * hiddenDim + h];
+    }
+    result[h] = sum / seqLen;
+  }
+  return result;
+}
+function l2Normalize(vec) {
+  let norm = 0;
+  for (let i = 0; i < vec.length; i++) norm += vec[i] * vec[i];
+  const l2 = Math.sqrt(norm);
+  if (l2 > 0) {
+    for (let i = 0; i < vec.length; i++) vec[i] /= l2;
+  }
+  return vec;
+}
+async function createLocalEmbedProvider(opts) {
+  return new LocalEmbedProvider(opts);
+}
+var LOCAL_MODEL_ID, DEFAULT_CACHE_DIR, LocalEmbedProvider;
+var init_local_provider = __esm({
+  "../packages/shared/src/embed/local-provider.ts"() {
+    "use strict";
+    LOCAL_MODEL_ID = "Xenova/multilingual-e5-small";
+    DEFAULT_CACHE_DIR = join3(homedir3(), ".pi", "aura", "huggingface");
+    LocalEmbedProvider = class {
+      modelId = LOCAL_MODEL_ID;
+      _opts;
+      _pipeline = null;
+      _pipelineInitPromise = null;
+      constructor(opts = {}) {
+        this._opts = opts;
+        const cacheDir = opts.cacheDir ?? DEFAULT_CACHE_DIR;
+        if (opts.env) {
+          opts.env.cacheDir = cacheDir;
+        }
+      }
+      /**
+       * Load the pipeline lazily (singleton). On first call, either uses the
+       * injected pipeline or loads the real one from @huggingface/transformers.
+       * Subsequent calls reuse the cached instance.
+       */
+      async getPipeline() {
+        if (this._pipeline) return this._pipeline;
+        if (this._pipelineInitPromise) return this._pipelineInitPromise;
+        this._pipelineInitPromise = (async () => {
+          if (this._opts.pipeline) {
+            this._pipeline = this._opts.pipeline;
+          } else {
+            const transformers = await import("@huggingface/transformers");
+            const { pipeline } = transformers;
+            if (this._opts.env) {
+              transformers.env.cacheDir = this._opts.cacheDir ?? DEFAULT_CACHE_DIR;
+            } else {
+              transformers.env.cacheDir = this._opts.cacheDir ?? DEFAULT_CACHE_DIR;
+            }
+            const pipe = await pipeline("feature-extraction", LOCAL_MODEL_ID);
+            this._pipeline = async (texts) => {
+              const output = await pipe(texts, { pooling: "mean", normalize: true });
+              if (Array.isArray(output)) {
+                return output.map((t) => ({
+                  data: new Float32Array(t.data),
+                  dims: t.dims
+                }));
+              }
+              return [{
+                data: new Float32Array(output.data),
+                dims: output.dims
+              }];
+            };
+          }
+          return this._pipeline;
+        })();
+        try {
+          await this._pipelineInitPromise;
+        } catch (err) {
+          this._pipelineInitPromise = null;
+          throw err;
+        }
+        return this._pipeline;
+      }
+      /**
+       * Embed texts as-is (no prefix). This is the EmbedProvider interface
+       * method, used by callers that handle E5 prefixing themselves
+       * (buildSemanticVectors applies "passage:", restSearch applies "query:").
+       * Returns L2-normalized Float32Array[] (one per text).
+       */
+      async embed(texts) {
+        return this._embedRaw(texts);
+      }
+      /**
+       * Embed passage texts with the "passage: " prefix applied (build-time path).
+       * Convenience method — callers can also apply the prefix themselves and
+       * call embed().
+       * Returns L2-normalized Float32Array[] (one per text).
+       */
+      async embedPassages(texts) {
+        return this._embedRaw(texts.map((t) => `passage: ${t}`));
+      }
+      /**
+       * Internal: embed raw texts (no prefix), mean-pool, L2-normalize.
+       */
+      async _embedRaw(texts) {
+        const pipeline = await this.getPipeline();
+        const tensors = await pipeline(texts);
+        return tensors.map((tensor) => {
+          const pooled = meanPool(tensor);
+          return l2Normalize(pooled);
+        });
+      }
+    };
+  }
+});
+
 // ../packages/shared/src/embed/provider.ts
 var provider_exports = {};
 __export(provider_exports, {
@@ -620,8 +742,8 @@ __export(provider_exports, {
   loadEmbedSettings: () => loadEmbedSettings
 });
 import { readFileSync as readFileSync4, existsSync as existsSync3 } from "node:fs";
-import { homedir as homedir3 } from "node:os";
-import { join as join3 } from "node:path";
+import { homedir as homedir4 } from "node:os";
+import { join as join4 } from "node:path";
 function loadEmbedSettings(settingsPath = SETTINGS_PATH2) {
   let settings = {};
   try {
@@ -641,51 +763,52 @@ function loadEmbedSettings(settingsPath = SETTINGS_PATH2) {
 }
 async function createEmbedProvider(config, opts = {}) {
   const { provider, model, apiKey, baseURL } = config;
-  if (!provider || !model || !apiKey) {
-    return null;
-  }
-  if (provider !== "openai") {
-    return null;
-  }
-  if (!baseURL) {
-    return null;
-  }
-  const fetchImpl = opts.fetchImpl ?? fetch;
-  return {
-    modelId: model,
-    async embed(texts) {
-      const url = `${baseURL}/embeddings`;
-      const resp = await fetchImpl(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({ model, input: texts })
-      });
-      if (!resp.ok) {
-        const body = await resp.text().catch(() => "");
-        throw new Error(
-          `embed: HTTP ${resp.status} from ${url}` + (body ? ` \u2014 ${body.slice(0, 200)}` : "")
-        );
-      }
-      const json2 = await resp.json();
-      return json2.data.map((d) => new Float32Array(d.embedding));
+  if (provider) {
+    if (provider !== "openai") {
+      return null;
     }
-  };
+    if (!model || !apiKey || !baseURL) {
+      return null;
+    }
+    const fetchImpl = opts.fetchImpl ?? fetch;
+    return {
+      modelId: model,
+      async embed(texts) {
+        const url = `${baseURL}/embeddings`;
+        const resp = await fetchImpl(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({ model, input: texts })
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => "");
+          throw new Error(
+            `embed: HTTP ${resp.status} from ${url}` + (body ? ` \u2014 ${body.slice(0, 200)}` : "")
+          );
+        }
+        const json2 = await resp.json();
+        return json2.data.map((d) => new Float32Array(d.embedding));
+      }
+    };
+  }
+  return createLocalEmbedProvider();
 }
 var SETTINGS_PATH2;
 var init_provider = __esm({
   "../packages/shared/src/embed/provider.ts"() {
     "use strict";
-    SETTINGS_PATH2 = join3(homedir3(), ".pi", "agent", "settings.json");
+    init_local_provider();
+    SETTINGS_PATH2 = join4(homedir4(), ".pi", "agent", "settings.json");
   }
 });
 
 // src/aura.ts
 import { mkdirSync, writeFileSync, readFileSync as readFileSync5, rmSync, existsSync as existsSync4, readdirSync, statSync as statSync2 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join4, resolve } from "node:path";
+import { join as join5, resolve } from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
 
 // ../packages/shared/src/generated/core/serverSentEvents.gen.ts
@@ -6103,7 +6226,7 @@ async function restSearch(index, query, out, opts = {}) {
     );
   } else {
     try {
-      const queryVec = await provider.embed([query]);
+      const queryVec = await provider.embed([`query: ${query}`]);
       const dtype = index.dtype ?? "f32";
       const opVecs = index.vectors.map((v) => ({
         operationId: v.operationId,
@@ -6186,16 +6309,16 @@ function fail(msg, usage = false, code = 2) {
 }
 var LARGE_BODY_THRESHOLD = 500;
 function freshWorkdir(prefix) {
-  const dir = join4(tmpdir(), `${prefix}-${randomBytes2(6).toString("hex")}`);
+  const dir = join5(tmpdir(), `${prefix}-${randomBytes2(6).toString("hex")}`);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
 function writeWorkdir(dir, meta, body) {
-  writeFileSync(join4(dir, "meta.json"), JSON.stringify(meta, null, 2) + "\n", "utf8");
-  writeFileSync(join4(dir, "body.md"), body, "utf8");
+  writeFileSync(join5(dir, "meta.json"), JSON.stringify(meta, null, 2) + "\n", "utf8");
+  writeFileSync(join5(dir, "body.md"), body, "utf8");
 }
 function readWorkdirMeta(dir) {
-  const p = join4(dir, "meta.json");
+  const p = join5(dir, "meta.json");
   if (!existsSync4(p)) fail(`workdir ${dir} has no meta.json`);
   return JSON.parse(readFileSync5(p, "utf8"));
 }
@@ -6208,7 +6331,7 @@ function cleanupStale() {
   let count = 0;
   for (const name of readdirSync(tmp)) {
     if (!/^aura-(artifact|wiki|upload)-[0-9a-f]+$/.test(name)) continue;
-    const p = join4(tmp, name);
+    const p = join5(tmp, name);
     try {
       if (statSync2(p).mtimeMs < cutoff) {
         rmSync(p, { recursive: true, force: true });
@@ -6236,7 +6359,7 @@ async function artifactGet(client2, id) {
 async function artifactUpdate(client2, dir, summary) {
   const meta = readWorkdirMeta(dir);
   if (meta.kind !== "artifact") fail(`workdir ${dir} is not an artifact workdir`);
-  const bodyPath = join4(dir, "body.md");
+  const bodyPath = join5(dir, "body.md");
   if (!existsSync4(bodyPath)) fail(`workdir ${dir} has no body.md`);
   const body = readFileSync5(bodyPath, "utf8");
   await client2.mcpUpdateArtifact({
@@ -6360,7 +6483,7 @@ async function wikiGet(client2, opts) {
 async function wikiSave(client2, dir, summary) {
   const meta = readWorkdirMeta(dir);
   if (meta.kind !== "wiki") fail(`workdir ${dir} is not a wiki workdir`);
-  const bodyPath = join4(dir, "body.md");
+  const bodyPath = join5(dir, "body.md");
   if (!existsSync4(bodyPath)) fail(`workdir ${dir} has no body.md`);
   const body = readFileSync5(bodyPath, "utf8");
   await client2.saveKnowledgeNodeBody({
@@ -6427,7 +6550,7 @@ ${text}
     process.stdout.write(summary);
   } else {
     const dir = freshWorkdir("aura-upload");
-    writeFileSync(join4(dir, "parsed.md"), summary, "utf8");
+    writeFileSync(join5(dir, "parsed.md"), summary, "utf8");
     console.log(`workdir: ${dir}/`);
     console.error(`  ${doc.filename}  (${summary.length} bytes) \u2014 parsed text in parsed.md`);
   }
