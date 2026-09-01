@@ -119,11 +119,13 @@ export function l2Normalize(vec: Float32Array): Float32Array {
  * call, not on construction. This keeps construction cheap and allows graceful
  * degradation if the model can't be loaded.
  *
- * E5 prefix convention is baked in:
- * - embed() (the EmbedProvider interface method) applies "query: " prefix.
- *   This is the runtime query path.
- * - embedPassages() applies "passage: " prefix. This is the build-time op text
- *   path.
+ * E5 PREFIX CONVENTION: E5 models require queries prefixed with "query: "
+ *   and passages prefixed with "passage: " for best retrieval quality. This
+ *   is baked into the CALL SITES (buildSemanticVectors applies "passage: ",
+ *   restSearch applies "query: "), NOT the provider itself. The provider's
+ *   embed() method embeds texts as-is (same as the cloud provider), so both
+ *   local and cloud providers behave consistently. embedPassages() is a
+ *   convenience that applies the prefix internally.
  */
 export class LocalEmbedProvider implements EmbedProvider {
   readonly modelId = LOCAL_MODEL_ID;
@@ -198,33 +200,31 @@ export class LocalEmbedProvider implements EmbedProvider {
   }
 
   /**
-   * Embed query texts (runtime query path).
-   * Applies the "query: " prefix per the E5 convention.
+   * Embed texts as-is (no prefix). This is the EmbedProvider interface
+   * method, used by callers that handle E5 prefixing themselves
+   * (buildSemanticVectors applies "passage:", restSearch applies "query:").
    * Returns L2-normalized Float32Array[] (one per text).
    */
   async embed(texts: string[]): Promise<Float32Array[]> {
-    return this._embedWithPrefix(texts, "query: ");
+    return this._embedRaw(texts);
   }
 
   /**
-   * Embed passage texts (build-time op text path).
-   * Applies the "passage: " prefix per the E5 convention.
+   * Embed passage texts with the "passage: " prefix applied (build-time path).
+   * Convenience method — callers can also apply the prefix themselves and
+   * call embed().
    * Returns L2-normalized Float32Array[] (one per text).
    */
   async embedPassages(texts: string[]): Promise<Float32Array[]> {
-    return this._embedWithPrefix(texts, "passage: ");
+    return this._embedRaw(texts.map((t) => `passage: ${t}`));
   }
 
   /**
-   * Internal: embed texts with the given E5 prefix, mean-pool, L2-normalize.
+   * Internal: embed raw texts (no prefix), mean-pool, L2-normalize.
    */
-  private async _embedWithPrefix(
-    texts: string[],
-    prefix: string,
-  ): Promise<Float32Array[]> {
-    const prefixed = texts.map((t) => `${prefix}${t}`);
+  private async _embedRaw(texts: string[]): Promise<Float32Array[]> {
     const pipeline = await this.getPipeline();
-    const tensors = await pipeline(prefixed);
+    const tensors = await pipeline(texts);
     return tensors.map((tensor) => {
       // Mean-pool over tokens, then L2-normalize
       const pooled = meanPool(tensor);

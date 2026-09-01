@@ -85,20 +85,20 @@ describe("LocalEmbedProvider — construction", () => {
 // ---------------------------------------------------------------------------
 
 describe("LocalEmbedProvider — E5 prefix convention", () => {
-  it("prefixes query texts with 'query: ' when embedQuery is called", async () => {
+  it("embed() does NOT apply any prefix (callers handle prefixing)", async () => {
     const { pipelineFn, calls } = makeFakePipeline();
     const provider = await createLocalEmbedProvider({ pipeline: pipelineFn });
     await provider.embed(["hello world"]);
-    // The pipeline should have received "query: hello world"
+    // The pipeline should have received the raw text (no prefix)
     assert.ok(calls.length > 0, "pipeline was called");
     assert.deepEqual(
       calls[0].texts,
-      ["query: hello world"],
-      "query text is prefixed with 'query: '",
+      ["hello world"],
+      "embed() passes texts as-is (no prefix)",
     );
   });
 
-  it("prefixes passage texts with 'passage: ' when embedPassages is called", async () => {
+  it("embedPassages() applies 'passage: ' prefix (build-time convenience)", async () => {
     const { pipelineFn, calls } = makeFakePipeline();
     const provider = await createLocalEmbedProvider({ pipeline: pipelineFn });
     await (provider as any).embedPassages(["op one", "op two"]);
@@ -106,7 +106,7 @@ describe("LocalEmbedProvider — E5 prefix convention", () => {
     assert.deepEqual(
       calls[0].texts,
       ["passage: op one", "passage: op two"],
-      "passage texts are prefixed with 'passage: '",
+      "embedPassages() prefixes texts with 'passage: '",
     );
   });
 });
