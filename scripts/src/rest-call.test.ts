@@ -11,6 +11,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { loadOpenApi } from "@pi-aura/shared/openapi/loader";
 import { buildRequest } from "@pi-aura/shared/rest/build-request";
 import { restCall, parseCallArgs, resolveBody } from "./rest-call.ts";
@@ -267,5 +269,29 @@ describe("resolveBody", () => {
       () => resolveBody({ params: {}, body: "{invalid" }),
       /not valid JSON/i,
     );
+  });
+
+  it("reads and parses --body-file as JSON", () => {
+    const tmpFile = join(tmpdir(), `rest-call-body-${Date.now()}.json`);
+    writeFileSync(tmpFile, JSON.stringify({ capacity_percent: 75 }), "utf8");
+    try {
+      const result = resolveBody({ params: {}, bodyFile: tmpFile });
+      assert.deepEqual(result, { capacity_percent: 75 });
+    } finally {
+      rmSync(tmpFile, { force: true });
+    }
+  });
+
+  it("throws clear error on invalid --body-file JSON", () => {
+    const tmpFile = join(tmpdir(), `rest-call-body-${Date.now()}.json`);
+    writeFileSync(tmpFile, "{not valid json", "utf8");
+    try {
+      assert.throws(
+        () => resolveBody({ params: {}, bodyFile: tmpFile }),
+        /not valid JSON/i,
+      );
+    } finally {
+      rmSync(tmpFile, { force: true });
+    }
   });
 });
