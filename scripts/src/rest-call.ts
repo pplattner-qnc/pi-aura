@@ -222,26 +222,16 @@ export function resolveBody(args: CallArgs): unknown | undefined {
     const raw = readFileSync(args.bodyFile, "utf8");
     try {
       return JSON.parse(raw);
-    } catch {
-      throw new Error(`rest call: --body-file "${args.bodyFile}" is not valid JSON: ${(parseError() as Error).message}`);
+    } catch (e) {
+      throw new Error(`rest call: --body-file "${args.bodyFile}" is not valid JSON: ${(e as Error).message}`);
     }
   }
   if (args.body !== undefined) {
     try {
       return JSON.parse(args.body);
-    } catch {
-      throw new Error(`rest call: --body is not valid JSON: ${(parseError() as Error).message}`);
+    } catch (e) {
+      throw new Error(`rest call: --body is not valid JSON: ${(e as Error).message}`);
     }
   }
   return undefined;
-}
-
-function parseError(): unknown {
-  // Helper to capture the JSON.parse error message cleanly.
-  try {
-    JSON.parse("{");
-  } catch (e) {
-    return e;
-  }
-  return new Error("unknown parse error");
 }
