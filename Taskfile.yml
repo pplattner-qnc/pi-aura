@@ -85,8 +85,8 @@ tasks:
       - cd {{.SCRIPTS_DIR}} && npm run build
       - >-
         for f in {{.ENTRY_OUTS}}; do
-          echo "verifying $$f exists…";
-          test -f "$$f" || { echo "ERROR: $$f was not produced"; exit 1; };
+          echo "verifying $f exists…";
+          test -f "$f" || { echo "ERROR: $f was not produced"; exit 1; };
         done
       - echo "built {{.ENTRY_OUTS}}"
 
