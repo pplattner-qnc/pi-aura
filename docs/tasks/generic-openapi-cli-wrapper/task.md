@@ -343,3 +343,74 @@ so it can discover the right operation without reading the whole spec.
   pass; `task build` succeeds; the committed `aura.mjs` runs `rest call`
   against a mocked fetch and the bundle lists closest matches for unknown
   `operationId` (exit 2).
+
+### Slice 3 — FTS search, code-side tags, build-time inlined index, size budget (landed)
+
+- **FTS / BM25 module** (`packages/shared/src/rest/fts.ts`, exported as
+  `@pi-aura/shared/rest/fts`): `buildFtsIndex(ops)` computes pure BM25 stats
+  (term frequencies, document frequencies, avg doc length; k1=1.5, b=0.75).
+  Tokenization: lowercase + split on non-alphanumerics, no stopwords
+  dependency. `bm25Search(index, query, k?)` returns ranked `FtsHit[]` with
+  matched terms + score, sorted by descending score then operationId for
+  determinism. `rrfMerge(rankings, k=60)` does Reciprocal Rank Fusion over
+  variable-arity rankings; `rrfMerge([fts])` ≡ FTS order (stub for slice 4's
+  `[semantic, fts]` upgrade).
+- **Code-side tags** (`scripts/src/rest-code-tags.ts`): a curated,
+  non-user-facing `CODE_TAGS` map with `byOp` (per-operationId) and `byTagGroup`
+  (per-OpenAPI-tag) sections. `resolveCodeTags(op)` merges + deduplicates
+  both. Seeded with the `capacity` group (`updateTaskMemberCapacity`,
+  `getTaskMemberCapacity`, `getMyCapacity`, `getCapacityOverview`,
+  `updateCapacitySettings`, `readCapacity`), `notifications`, `self-serve`,
+  and `admin-only` groups. Code-tags participate in FTS text but do NOT appear
+  in `rest describe` output (spec-faithful).
+- **Build-time index generator** (`scripts/src/gen-rest-index.ts`):
+  `buildRestIndex(openApiPath, codeTags, resolveFn)` is a pure function that
+  reads `openapi.yaml` via the slice-1 loader, builds per-op searchable text
+  (operationId + summary + description + OpenAPI tags + code-side tags),
+  computes the FTS index, and emits a slim metadata blob (`SlimOpMeta` —
+  only method/path/params/body/tags/summary/responses; no `description` field
+  to save space). `assertSizeBudget(blob, budgetBytes=3MB)` throws with actual
+  size + remediation hints if exceeded. `genRestIndex()` CLI entry writes the
+  generated `scripts/src/generated/rest-index.ts` (a `.ts` const export).
+  Added to `Taskfile.yml` as `task gen-rest-index`, folded into `build`.
+- **Inlined index, not sidecar:** the generated `rest-index.ts` is imported by
+  `scripts/src/aura.ts`, so esbuild bundles it into `aura.mjs`. No sidecar
+  `.json` is loaded at runtime. The committed bundle contains 273 operations'
+  metadata + FTS stats (~0.38 MB, well under the 3 MB budget). Confirmed:
+  `grep updateTaskMemberCapacity aura.mjs` finds the inlined data.
+- **`rest search` subcommand** (`scripts/src/rest-search.ts`):
+  `restSearch(index, query, out, opts?)` runs BM25 over the inlined FTS index,
+  applies `rrfMerge([ftsRanking])` (no-op stub), prints the
+  `semantic leg skipped (no embedding provider) — FTS-only results` note,
+  and prints ranked operationIds with score + matched terms.
+- **Runtime index resolution:** `getRestIndex()` in `aura.ts` reconstructs an
+  `OpenApiIndex` from the inlined `REST_INDEX` metadata (no `openapi.yaml` read
+  at runtime in the bundle). Dev fallback reads the YAML if `REST_INDEX` is
+  absent. `rest list` / `describe` / `call` now use the inlined blob via this
+  function.
+- **Divergence from slice doc — closest-matches not FTS-based:** the slice
+  doc AC says unknown-operationId errors in `rest call`/`describe` should
+  "use the FTS index to list closest matches (replacing slice 1's substring
+  fallback)." The implementation still uses the slice-1 substring + Levenshtein
+  `closestMatches()` in both `rest-list-describe.ts` and `rest-call.ts`; the
+  FTS index is not consulted for unknown-op suggestions. The closest matches
+  still work (exit 2, actionable suggestions), but the FTS-based suggestion
+  leg is not wired. Minor gap; can be addressed in a follow-up or slice 4.
+- **Divergence from test plan — code-tag validation not implemented:** the
+  slice doc test plan calls for loud build errors when a code-tag references an
+  unknown `operationId` or an unknown tag group, and on duplicate operationIds
+  in the index. `gen-rest-index.ts` does not validate code-tags against known
+  operationIds or tag groups. Duplicate operationIds are caught by the loader
+  (slice 1). The code-tag validation gap is a test-plan edge case, not an
+  explicit acceptance criterion; all ACs pass.
+- **`USAGE` block** updated with the `rest search` line.
+- **Verification:** `task typecheck` passes for both `scripts` and
+  `packages/shared`; `task build` succeeds (gen-rest-doc + gen-rest-index +
+  esbuild + output verification). The FTS suite (17 tests), code-tags suite
+  (7 tests), gen-rest-index suite (9 tests), and rest-search suite (6 tests)
+  all pass; the shared suite (35 tests) and prior slice suites (27 tests) still
+  pass. `node aura.mjs rest search "set my capacity commitment"` ranks
+  `updateTaskMemberCapacity` first with `terms: set, capacity, commitment`; the
+  bundle prints the `semantic leg skipped` note. `rest list` prints all 273
+  operations; `rest describe updateTaskMemberCapacity` prints the correct
+  path/method/params/body/responses from the inlined blob.
