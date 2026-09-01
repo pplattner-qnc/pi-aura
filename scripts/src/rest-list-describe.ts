@@ -6,6 +6,8 @@
 // restDescribe(index, opId, out)  → prints the full shape of one operation.
 
 import type { OpenApiIndex, OpMeta } from "@pi-aura/shared/openapi/loader";
+import type { FtsIndex } from "@pi-aura/shared/rest/fts";
+import { closestMatches } from "./closest-match.js";
 
 export interface OutSink {
   log: (...args: unknown[]) => void;
@@ -56,40 +58,11 @@ export function restList(index: OpenApiIndex, out: OutSink): void {
 // rest describe
 // ---------------------------------------------------------------------------
 
-function closestMatches(ids: string[], query: string, max = 5): string[] {
-  // Simple substring match first, then Levenshtein.
-  const lower = query.toLowerCase();
-  const substrMatches = ids.filter((id) => id.toLowerCase().includes(lower));
-  if (substrMatches.length > 0) return substrMatches.slice(0, max);
-
-  // Levenshtein distance for close matches.
-  const scored = ids.map((id) => ({ id, dist: levenshtein(id.toLowerCase(), lower) }));
-  scored.sort((a, b) => a.dist - b.dist);
-  return scored.slice(0, max).map((s) => s.id);
-}
-
-function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
-    }
-  }
-  return dp[m][n];
-}
-
-export function restDescribe(index: OpenApiIndex, opId: string, out: OutSink): void {
+export function restDescribe(index: OpenApiIndex, opId: string, out: OutSink, fts?: FtsIndex): void {
   const op = index[opId];
   if (!op) {
     const ids = Object.keys(index);
-    const matches = closestMatches(ids, opId);
+    const matches = closestMatches(fts, ids, opId);
     out.error(`Error: unknown operationId "${opId}".`);
     if (matches.length > 0) {
       out.error(`Closest matches:`);

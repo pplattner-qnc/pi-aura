@@ -624,7 +624,7 @@ async function main(): Promise<void> {
         case "describe": {
           const opId = rest[0];
           if (!opId) fail("rest describe: missing <operationId>", true);
-          restDescribe(index, opId, console);
+          restDescribe(index, opId, console, REST_INDEX.fts);
           return;
         }
         case "call": {
@@ -638,7 +638,7 @@ async function main(): Promise<void> {
             operationId: opId,
             params: callArgs.params,
             body,
-          }, console);
+          }, console, { fts: REST_INDEX.fts });
           return;
         }
         case "search": {

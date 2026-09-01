@@ -11,7 +11,9 @@
 import { readFileSync } from "node:fs";
 import { buildRequest } from "@pi-aura/shared/rest/build-request";
 import type { OpenApiIndex } from "@pi-aura/shared/openapi/loader";
+import type { FtsIndex } from "@pi-aura/shared/rest/fts";
 import type { OutSink } from "./rest-list-describe.js";
+import { closestMatches } from "./closest-match.js";
 
 // ---------------------------------------------------------------------------
 // Args parsing (multi-valued --param, --body-file / --body)
@@ -79,37 +81,6 @@ export function parseCallArgs(args: string[]): CallArgs {
 }
 
 // ---------------------------------------------------------------------------
-// Closest-match logic (reused from rest-list-describe pattern)
-// ---------------------------------------------------------------------------
-
-function closestMatches(ids: string[], query: string, max = 5): string[] {
-  const lower = query.toLowerCase();
-  const substrMatches = ids.filter((id) => id.toLowerCase().includes(lower));
-  if (substrMatches.length > 0) return substrMatches.slice(0, max);
-
-  const scored = ids.map((id) => ({ id, dist: levenshtein(id.toLowerCase(), lower) }));
-  scored.sort((a, b) => a.dist - b.dist);
-  return scored.slice(0, max).map((s) => s.id);
-}
-
-function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
-    }
-  }
-  return dp[m][n];
-}
-
-// ---------------------------------------------------------------------------
 // restCall — the main invoker function
 // ---------------------------------------------------------------------------
 
@@ -121,6 +92,8 @@ export interface RestCallArgs {
 
 export interface RestCallOptions {
   fetchImpl?: typeof fetch;
+  /** Inlined FTS index for unknown-op suggestions (undefined → fallback). */
+  fts?: FtsIndex;
 }
 
 const PRETTY_PRINT_THRESHOLD = 5000; // chars — below this, pretty-print JSON
@@ -147,7 +120,7 @@ export async function restCall(
   const op = index[args.operationId];
   if (!op) {
     const ids = Object.keys(index);
-    const matches = closestMatches(ids, args.operationId);
+    const matches = closestMatches(opts.fts, ids, args.operationId);
     out.error(`Error: unknown operationId "${args.operationId}".`);
     if (matches.length > 0) {
       out.error(`Closest matches:`);

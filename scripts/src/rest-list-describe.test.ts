@@ -12,6 +12,8 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { loadOpenApi } from "@pi-aura/shared/openapi/loader";
 import { restList, restDescribe } from "./rest-list-describe.ts";
+import { buildFtsIndex } from "@pi-aura/shared/rest/fts";
+import type { FtsIndex } from "@pi-aura/shared/rest/fts";
 
 const FIXTURE = join(
   import.meta.dirname,
@@ -153,6 +155,42 @@ describe("restDescribe", () => {
       errOutput.includes("updateTaskMemberCapacity") || errOutput.includes("getTask") ||
         errOutput.includes("unifiedSearch"),
       "lists closest matches",
+    );
+  });
+});
+
+describe("restDescribe with FTS", () => {
+  it("uses FTS ranking for unknown-op typo when fts is provided", () => {
+    const index = loadOpenApi(FIXTURE);
+    // Build a small FTS index from the fixture operations.
+    const ids = Object.keys(index);
+    const searchableOps = ids.map((id) => ({
+      operationId: id,
+      text: `${id} ${index[id].summary ?? ""} ${index[id].description ?? ""} ${(index[id].tags ?? []).join(" ")}`,
+    }));
+    const fts: FtsIndex = buildFtsIndex(searchableOps);
+
+    const sink = makeSink();
+    let exitCode = 0;
+    const origExit = process.exit;
+    (process as { exit?: (code?: number) => never }).exit = ((code?: number) => {
+      exitCode = code ?? 0;
+      throw new Error("__exit__");
+    }) as never;
+    try {
+      // Typo: "updateTaskMemberCapacit" (missing trailing y) — FTS should
+      // still surface updateTaskMemberCapacity via token overlap.
+      restDescribe(index, "updateTaskMemberCapacit", sink, fts);
+    } catch {
+      // expected — process.exit throws
+    } finally {
+      (process as { exit: (code?: number) => never }).exit = origExit;
+    }
+    assert.equal(exitCode, 2, "exit code 2 for unknown op");
+    const errOutput = sink.err.join("\n");
+    assert.ok(
+      errOutput.includes("updateTaskMemberCapacity"),
+      "FTS surfaces updateTaskMemberCapacity for the typo",
     );
   });
 });

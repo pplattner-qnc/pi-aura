@@ -16,6 +16,8 @@ import { tmpdir } from "node:os";
 import { loadOpenApi } from "@pi-aura/shared/openapi/loader";
 import { buildRequest } from "@pi-aura/shared/rest/build-request";
 import { restCall, parseCallArgs, resolveBody } from "./rest-call.ts";
+import { buildFtsIndex } from "@pi-aura/shared/rest/fts";
+import type { FtsIndex } from "@pi-aura/shared/rest/fts";
 
 const FIXTURE = join(
   import.meta.dirname,
@@ -250,6 +252,44 @@ describe("restCall", () => {
     // The fetch should have been called with an empty bearer token
     // (restCall trusts the credentials it's given; validation is upstream)
     // This proves the credential path flows through.
+  });
+});
+
+describe("restCall with FTS", () => {
+  it("uses FTS ranking for unknown-op typo when fts is provided via opts", async () => {
+    const index = loadOpenApi(FIXTURE);
+    const ids = Object.keys(index);
+    const searchableOps = ids.map((id) => ({
+      operationId: id,
+      text: `${id} ${index[id].summary ?? ""} ${index[id].description ?? ""} ${(index[id].tags ?? []).join(" ")}`,
+    }));
+    const fts: FtsIndex = buildFtsIndex(searchableOps);
+
+    const sink = makeSink();
+    const fakeFetch = makeFakeFetch(200, {}, []);
+
+    let exitCode = 0;
+    const origExit = process.exit;
+    (process as { exit?: (code?: number) => never }).exit = ((code?: number) => {
+      exitCode = code ?? 0;
+      throw new Error("__exit__");
+    }) as never;
+    try {
+      await restCall(index, CREDENTIALS, {
+        operationId: "updateTaskMemberCapacit",
+        params: {},
+      }, sink, { fetchImpl: fakeFetch, fts });
+    } catch {
+      // expected — process.exit throws
+    } finally {
+      (process as { exit: (code?: number) => never }).exit = origExit;
+    }
+    assert.equal(exitCode, 2, "exit code 2 for unknown op");
+    const errOutput = sink.err.join("\n");
+    assert.ok(
+      errOutput.includes("updateTaskMemberCapacity"),
+      "FTS surfaces updateTaskMemberCapacity for the typo",
+    );
   });
 });
 
