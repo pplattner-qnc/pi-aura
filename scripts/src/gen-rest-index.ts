@@ -20,6 +20,7 @@ import {
   type FtsIndex,
 } from "@pi-aura/shared/rest/fts";
 import type { CodeTags } from "./rest-code-tags.js";
+import { quantizeToInt8 } from "@pi-aura/shared/embed/cosine";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,16 +41,42 @@ export interface SlimOpMeta {
   // not duplicated in metadata, to fit the size budget.
 }
 
+export type VecElementType = "f32" | "i8";
+
+export interface OpVectorEntry {
+  operationId: string;
+  /** Quantized or float vector (Int8Array for i8, Float32Array for f32). */
+  vec: Int8Array | Float32Array;
+}
+
+export interface SemanticVectors {
+  /** Per-operation vectors (same order as metadata). */
+  vectors: OpVectorEntry[];
+  /** The model id used to produce these vectors. */
+  embedModelId: string;
+  /** Vector dimensionality. */
+  dims: number;
+  /** Storage dtype: "f32" (float32) or "i8" (int8-quantized). */
+  dtype: VecElementType;
+}
+
 export interface RestIndexBlob {
   version: number;
   metadata: SlimOpMeta[];
   fts: FtsIndex;
-  embedModelId: null;
-  vectors: null;
+  embedModelId: string | null;
+  vectors: OpVectorEntry[] | null;
+  dims?: number;
+  dtype?: VecElementType;
 }
 
 // Current version of the index blob format. Bump when the shape changes.
 const BLOB_VERSION = 1;
+
+// Default dtype for stored vectors: int8-quantized to fit the size budget.
+// 273 ops × 1536-dim i8 ≈ 0.42 MB (vs 1.68 MB for f32). The dtype is recorded
+// in the blob so the runtime query embedder can quantize the query to match.
+const DEFAULT_DTYPE: VecElementType = "i8";
 
 // ---------------------------------------------------------------------------
 // buildSearchableText — name + summary + description + tags + code-tags
@@ -73,8 +100,69 @@ export function buildSearchableText(
 }
 
 // ---------------------------------------------------------------------------
+// buildSemanticVectors — embed ops via a provider, return vectors + metadata
+// ---------------------------------------------------------------------------
+
+/**
+ * Embed every operation's searchable text via the given provider and return
+ * the vectors + metadata (embedModelId, dims, dtype).
+ *
+ * When provider is null → returns null (no vectors; FTS-only is valid).
+ * When the provider's embed call fails → throws loudly naming the operation.
+ *
+ * Vectors are stored as Int8Array (i8 dtype) by default to fit the size
+ * budget, or as Float32Array (f32 dtype) when explicitly requested.
+ */
+export async function buildSemanticVectors(
+  ops: readonly SearchableOp[],
+  provider: { modelId: string; embed(texts: string[]): Promise<Float32Array[]> } | null,
+  dtype: VecElementType = DEFAULT_DTYPE,
+): Promise<SemanticVectors | null> {
+  if (!provider) return null;
+
+  const texts = ops.map((op) => op.text);
+  let rawVectors: Float32Array[];
+  try {
+    rawVectors = await provider.embed(texts);
+  } catch (err) {
+    // Name every op so the build error is actionable
+    const opIds = ops.map((op) => op.operationId).join(", ");
+    throw new Error(
+      `buildSemanticVectors: embedding failed for operations [${opIds}]: ` +
+      (err instanceof Error ? err.message : String(err)),
+    );
+  }
+
+  const dims = rawVectors.length > 0 ? rawVectors[0].length : 0;
+
+  const vectors: OpVectorEntry[] = ops.map((op, i) => {
+    const raw = rawVectors[i];
+    const vec = dtype === "i8" ? quantizeToInt8(raw) : raw;
+    return { operationId: op.operationId, vec };
+  });
+
+  return {
+    vectors,
+    embedModelId: provider.modelId,
+    dims,
+    dtype,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // buildRestIndex — the pure builder
 // ---------------------------------------------------------------------------
+
+export interface BuildRestIndexOptions {
+  /** Optional embed function (injected so buildRestIndex stays testable). */
+  embedFn?: (texts: string[]) => Promise<Float32Array[]>;
+  /** Model id for the embed provider (recorded in the blob). */
+  embedModelId?: string;
+  /** Vector dimensionality (recorded in the blob). */
+  dims?: number;
+  /** Storage dtype for vectors (default: "i8"). */
+  dtype?: VecElementType;
+}
 
 export function buildRestIndex(
   openApiPath: string,
@@ -109,6 +197,14 @@ export function buildRestIndex(
     responses: op.responses,
   }));
 
+  // --- Semantic vectors (optional; injected via embedFn) ---
+  // When embedFn is provided, embed all ops and store vectors + metadata.
+  // When absent → vectors: null, embedModelId: null (FTS-only is valid).
+  // NOTE: This is the one non-pure part of buildRestIndex (it awaits an async
+  // embed call). buildRestIndex itself is async when embedOpts is provided.
+  // For synchronous use (no embed), it returns a RestIndexBlob directly.
+  // The embed step is handled by genRestIndex() at the CLI level, which calls
+  // buildSemanticVectors separately and merges the result.
   return {
     version: BLOB_VERSION,
     metadata,
@@ -116,6 +212,47 @@ export function buildRestIndex(
     embedModelId: null,
     vectors: null,
   };
+}
+
+/**
+ * Async version of buildRestIndex that optionally embeds op vectors.
+ * When embedOpts.embedFn is provided, embeds all ops and stores vectors.
+ * When absent → vectors: null, embedModelId: null.
+ */
+export async function buildRestIndexAsync(
+  openApiPath: string,
+  codeTags: CodeTags,
+  resolveFn: (op: OpMeta, tags: CodeTags) => string[],
+  embedOpts?: BuildRestIndexOptions,
+): Promise<RestIndexBlob> {
+  const blob = buildRestIndex(openApiPath, codeTags, resolveFn);
+
+  if (embedOpts?.embedFn && embedOpts?.embedModelId) {
+    const index: OpenApiIndex = loadOpenApi(openApiPath);
+    const ops = Object.values(index).sort((a, b) =>
+      a.operationId.localeCompare(b.operationId),
+    );
+    const searchableOps: SearchableOp[] = ops.map((op) => ({
+      operationId: op.operationId,
+      text: buildSearchableText(op, codeTags, resolveFn),
+    }));
+
+    const provider = {
+      modelId: embedOpts.embedModelId,
+      embed: embedOpts.embedFn,
+    };
+    const dtype = embedOpts.dtype ?? DEFAULT_DTYPE;
+    const semantic = await buildSemanticVectors(searchableOps, provider, dtype);
+
+    if (semantic) {
+      blob.embedModelId = semantic.embedModelId;
+      blob.vectors = semantic.vectors;
+      blob.dims = semantic.dims;
+      blob.dtype = semantic.dtype;
+    }
+  }
+
+  return blob;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,9 +289,10 @@ export function assertSizeBudget(
       `REST index size budget exceeded: ${size} bytes > ${budgetBytes} bytes budget ` +
       `(${(size / 1024 / 1024).toFixed(2)} MB). ` +
       `Remediation hints: ` +
-      `(1) drop long descriptions from FTS text but keep a truncated form in metadata, ` +
-      `(2) prune unused fields from the metadata blob, ` +
-      `(3) reduce metadata granularity (e.g. omit response schema refs).`,
+      `(1) use int8-quantized vectors (i8 dtype) instead of float32, ` +
+      `(2) use a lower-dimensional embedding model (e.g. 384-dim), ` +
+      `(3) drop long descriptions from FTS text but keep a truncated form in metadata, ` +
+      `(4) prune unused fields from the metadata blob.`,
     );
   }
 }
@@ -189,7 +327,17 @@ export async function genRestIndex(): Promise<void> {
   const scriptsRoot = resolve(import.meta.dirname, "..", "packages", "shared", "openapi", "openapi.yaml");
   const openApiPath = existsSync(repoRoot) ? repoRoot : scriptsRoot;
 
-  const blob = buildRestIndex(openApiPath, CODE_TAGS, resolveCodeTags);
+  // Try to create an embedding provider from settings/env.
+  // When none configured → build succeeds with vectors:null (FTS-only is valid).
+  const { createEmbedProvider, loadEmbedSettings } = await import("@pi-aura/shared/embed/provider");
+  const embedSettings = loadEmbedSettings();
+  const embedProvider = await createEmbedProvider(embedSettings);
+
+  const blob = await buildRestIndexAsync(openApiPath, CODE_TAGS, resolveCodeTags, {
+    embedFn: embedProvider?.embed.bind(embedProvider),
+    embedModelId: embedProvider?.modelId,
+    dtype: DEFAULT_DTYPE,
+  });
 
   // Assert size budget before writing
   assertSizeBudget(blob);
