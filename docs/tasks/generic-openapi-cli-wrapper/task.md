@@ -296,3 +296,50 @@ so it can discover the right operation without reading the whole spec.
   prints `/tasks/{uuid}/members/{userIdOrUuid}/capacity`, `PATCH`, path params
   `uuid` (string/uuid) and `userIdOrUuid` (string), body `TaskMemberCapacityUpdate`,
   and response codes 200/400/401/403/404/500.
+
+### Slice 2 — rest call invoker with auth reuse (landed)
+
+- **`resolveAuraCredentials()`** (`packages/shared/src/aura-credentials.ts`)
+  is the single credential resolution path: `loadAuraClientSettings()` →
+  `createKeyring().getSecret({service:"aura",name:"pat"})` → `{ baseUrl, pat }`.
+  Throws the same actionable errors as the old `createDefaultAuraClient()`
+  (missing `aura.baseUrl`, missing PAT with `/aura secrets discover` hint).
+  Accepts optional `settingsPath`/`keyring` injection for testing.
+- **`createDefaultAuraClient()` refactored** to delegate to
+  `resolveAuraCredentials()` — exactly one credential path in the codebase.
+- **`buildRequest(op, params, body)`** (`packages/shared/src/rest/build-request.ts`,
+  exported as `@pi-aura/shared/rest/build-request`) is a pure request builder:
+  path-fill `{name}` from params, query serialization (scalar as-is; array
+  `style: form` default comma-separated; `explode: true` → repeated keys),
+  JSON body with `Content-Type: application/json`. Errors loudly on missing
+  required path param, extra path param, unsupported query `style`
+  (`spaceDelimited`/`pipeDelimited`), required body omitted, body given when op
+  declares none.
+- **`restCall(index, credentials, args, out, opts?)`** (`scripts/src/rest-call.ts`)
+  resolves the op by `operationId`, builds the request, does raw `fetch()` with
+  `Authorization: Bearer <pat>`, prints raw JSON (pretty-printed if small).
+  Unknown `operationId` → closest matches (exit 2); HTTP error (≥400) →
+  status + body (exit 1). `parseCallArgs()` collects repeatable `--param
+  name=val` into arrays; `resolveBody()` reads `--body-file`/`--body` (mutually
+  exclusive) as JSON. `fetchImpl` injection makes the fetch path testable.
+- **`rest call` subcommand** wired into `aura.ts` with lazy credential
+  resolution (only `rest call` triggers `resolveAuraCredentials`); `rest
+  list`/`describe` are still credential-free (the `needsClient = group !==
+  "rest"` guard prevents eager `createDefaultAuraClient()` for the rest group).
+- **Known code duplication:** `closestMatches()` + `levenshtein()` are
+  duplicated between `rest-list-describe.ts` and `rest-call.ts` — consolidate
+  in a later coherence refactor.
+- **Exit-code nuance:** the slice doc AC says missing-path-param and
+  invalid-body errors should exit 2; in the implementation these errors
+  throw from `buildRequest`/`resolveBody` and propagate to `main()`'s
+  top-level catch (exit 1). Only unknown-`operationId` exits 2 (inside
+  `restCall`). The error *messages* are clear and actionable; the exit-code
+  gap is minor and can be harmonized later if script consumers depend on it.
+- **`packages/shared` test glob** changed from `test/*.test.ts` to
+  `test/**/*.test.ts` to discover nested `test/rest/build-request.test.ts`.
+- **Verification:** `task typecheck` passes for both packages; the shared
+  suite (97 tests including build-request 18 + aura-credentials 5), the
+  scripts `rest-call` suite (15 tests), and the slice-1 suites (6 + 6) all
+  pass; `task build` succeeds; the committed `aura.mjs` runs `rest call`
+  against a mocked fetch and the bundle lists closest matches for unknown
+  `operationId` (exit 2).
