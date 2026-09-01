@@ -3,7 +3,7 @@ kind: task
 type: feature
 slug: generic-openapi-cli-wrapper
 title: Generic OpenAPI → REST-CLI wrapper in the aura CLI (generates commands + agent resources)
-status: ready
+status: done
 size: l
 slices: [1-loader-list-describe, 2-rest-call-invoker, 3-fts-search-and-inlined-index, 4-semantic-search-leg, 5-local-embeddings]
 blocked_by: []
@@ -482,3 +482,82 @@ so it can discover the right operation without reading the whole spec.
   the `semantic leg skipped (no embedding provider)` note; with a model mismatch
   prints the warning naming both models + FTS-only. This is the final slice of the
   task — the generic-openapi-cli-wrapper task is complete.
+
+### Slice 5 — always-on local embeddings (transformers.js) replace the opt-in cloud seam (landed)
+
+- **`LocalEmbedProvider`** (`packages/shared/src/embed/local-provider.ts`):
+  implements `EmbedProvider` via `@huggingface/transformers`
+  `pipeline("feature-extraction", ...)`. **Lazy singleton** pipeline — loaded on
+  the first `embed()` call, not on construction, so construction is cheap and
+  the caller can degrade gracefully if the model can't load. `modelId =
+  "Xenova/multilingual-e5-base"` (768-dim, multilingual EN+DE, ~118 MB
+  quantized ONNX, CPU-only). Mean-pools the `last_hidden_state` over the token
+  dimension, L2-normalizes, returns `Float32Array[]`. Sets
+  `env.cacheDir = ~/.pi/aura/huggingface` so the model auto-downloads there on
+  first use (the dir already exists). The pipeline function + env object are
+  injectable via `opts` for testing — no 118 MB download in unit tests.
+- **E5 query/passage prefix convention baked into the call sites** (not the
+  provider): `embed()` (the `EmbedProvider` interface method) applies the
+  `"query: "` prefix; `embedPassages()` applies `"passage: "`. The build-time
+  op texts get `passage:` prefixed in `gen-rest-index.ts`
+  (`buildSemanticVectors`); the runtime query gets `query:` prefixed in
+  `restSearch`. Callers don't have to remember the E5 convention.
+- **`createEmbedProvider()` default flip**: returns the `LocalEmbedProvider`
+  by default (no `aura.embed.*` config needed). `aura.embed.*` settings become
+  an **optional override** to use a cloud (OpenAI-style) provider instead — it
+  is no longer the *enable switch* for the semantic leg. The model-id guard now
+  reads "index built with the local model, runtime uses the local model → match
+  → semantic runs" by default. `rest search` no longer prints the "semantic leg
+  skipped (no embedding provider)" note on a normal install.
+- **`_embedRaw` batch-shape fix** (commit fe6999a2): the initial
+  `LocalEmbedProvider` assumed the transformers.js `feature-extraction` Tensor
+  had shape `[1, seq_len, hidden_dim]` and indexed `output[0]`. The real
+  transformers.js `Tensor` for a batched input has shape `[N, seq_len, hiddenDim]`
+  and exposes a `.data` flat `Float32Array`; `output[0]` returned `undefined`.
+  Fixed to iterate the batch dimension correctly (slice each text's
+  `[seq_len, hiddenDim]` sub-tensor, mean-pool over the token axis). Without this
+  fix the model produced zero vectors and the semantic leg was inert.
+- **Typed-array serialization fix** (commit e7379380): `Int8Array`/`Float32Array`
+  vectors in the `RestIndexBlob` don't survive `JSON.stringify` — they serialize
+  as `{"0":1,"1":2,...}` (a plain object with numeric keys, no `.length`),
+  which breaks `cosineSim` at runtime (no array length). `serializeRestIndexBlob`
+  now deep-converts typed-array `vec` entries to plain `number[]` via
+  `Array.from(v.vec)` before `JSON.stringify`, producing proper `[1,2,3]` arrays.
+  The `OpVectorEntry.vec` type was widened to
+  `Int8Array | Float32Array | number[]` to reflect the serialized form.
+- **Model swap to e5-base** (commit be237384): the slice was originally specced
+  with `Xenova/multilingual-e5-small` (384-dim). After the bug fixes above, the
+  e5-small model **clustered short op summaries** — many unrelated ops received
+  near-identical semantic scores, and the motivating case
+  (`rest search "commit allocation"`) did NOT rank
+  `updateTaskMemberCapacity` #1. The swap to `Xenova/multilingual-e5-base`
+  (768-dim, larger capacity) resolved this: `rest search "commit allocation"`
+  now ranks `updateTaskMemberCapacity` #1 with `leg: semantic`, and
+  `rest search "set my capacity commitment"` ranks it #1 with `leg: both`.
+  The committed `scripts/src/generated/rest-index.ts` ships with
+  `embedModelId: "Xenova/multilingual-e5-base"`, `dims: 768`, `dtype: "i8"`.
+- **esbuild externals**: `@huggingface/transformers` and `onnxruntime-node` are
+  marked `external` in `scripts/esbuild.config.mjs` (same native-binding pattern
+  as `@napi-rs/keyring` / `dbus-next`). The model weights are **never inlined**
+  into `aura.mjs` — they auto-download to the local cache. `aura` is no longer a
+  fully self-contained single `.mjs`; it needs these installed in `node_modules`.
+- **~1 MB inlined index**: the committed `rest-index.ts` is 1,040,174 bytes
+  (~0.99 MB), well under the 3 MB size budget. It carries 273 op-vectors
+  (768-dim × int8 × 273 ≈ 0.21 MB) + FTS stats + op metadata.
+- **Graceful fallback preserved**: if the local provider fails at runtime
+  (model download blocked, ONNX runtime missing), `rest search` degrades to
+  FTS-only with a one-line actionable note (no hard-fail). If the local
+  provider fails at **build** time, the build fails loudly (correct — the
+  committed index must have real vectors).
+- **Enablement docs**: the `aura` skill (`skills/core/aura/SKILL.md`) documents
+  that the semantic leg is on by default via a local auto-cached model, and that
+  `aura.embed.*` can override it with a cloud provider.
+- **Verification**: `task typecheck` + `task build` pass. Shared suite 149/149
+  (tsx); vitest 210/210 (root, covers scheduler + aura-digest-progress); all 10
+  node `--test` scripts suites pass (rest-search 6, rest-search-local 5,
+  rest-search-semantic 9, rest-call 16, rest-list-describe 7, gen-rest-index 9,
+  gen-rest-index-local 5, gen-rest-index-embed 9, rest-code-tags 7, gen-rest-doc 6).
+  E2E: `rest search "commit allocation"` → `updateTaskMemberCapacity` #1
+  (leg: semantic); `rest search "set my capacity commitment"` → #1 (leg: both).
+  Committed `rest-index.ts` has `embedModelId: "Xenova/multilingual-e5-base"`,
+  `dims: 768`, `dtype: "i8"`, 273 vectors, 1.04 MB (under 3 MB budget).

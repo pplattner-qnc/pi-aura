@@ -4,7 +4,7 @@ slug: 5-local-embeddings
 title: Always-on local embeddings (transformers.js) replace the opt-in cloud seam as the default
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: l
 blocked_by: []
 ---
