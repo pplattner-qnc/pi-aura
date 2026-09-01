@@ -6301,7 +6301,7 @@ var USAGE = `Usage:
   node aura.mjs rest describe <operationId>                  print the full shape of one REST operation
   node aura.mjs rest call <operationId> [--param name=val \u2026] [--body-file F] [--body <json>]
                                                             invoke a REST operation by id
-  node aura.mjs rest search "<natural-language intent>"     find REST operations by full-text search`;
+  node aura.mjs rest search "<natural-language intent>"     find REST operations by semantic + full-text search (local model, on by default)`;
 function fail(msg, usage = false, code = 2) {
   console.error(msg);
   if (usage) console.error(USAGE);
@@ -6794,7 +6794,12 @@ async function main() {
           const flags = parseFlags(rest.slice(1));
           const { createEmbedProvider: createEmbedProvider2, loadEmbedSettings: loadEmbedSettings2 } = await Promise.resolve().then(() => (init_provider(), provider_exports));
           const embedSettings = loadEmbedSettings2();
-          const embedProvider = await createEmbedProvider2(embedSettings);
+          let embedProvider = null;
+          try {
+            embedProvider = await createEmbedProvider2(embedSettings);
+          } catch {
+            embedProvider = null;
+          }
           await restSearch(REST_INDEX, query, console, {
             limit: flags.limit ? Number(flags.limit) : void 0,
             embedProvider
