@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { loadOpenApi } from "@pi-aura/shared/openapi/loader";
 import { buildRequest } from "@pi-aura/shared/rest/build-request";
-import { restCall, parseCallArgs } from "./rest-call.ts";
+import { restCall, parseCallArgs, resolveBody } from "./rest-call.ts";
 
 const FIXTURE = join(
   import.meta.dirname,
@@ -248,5 +248,24 @@ describe("restCall", () => {
     // The fetch should have been called with an empty bearer token
     // (restCall trusts the credentials it's given; validation is upstream)
     // This proves the credential path flows through.
+  });
+});
+
+describe("resolveBody", () => {
+  it("parses --body JSON string", () => {
+    const result = resolveBody({ params: {}, body: '{"key":"value"}' });
+    assert.deepEqual(result, { key: "value" });
+  });
+
+  it("returns undefined when no body is provided", () => {
+    const result = resolveBody({ params: {} });
+    assert.equal(result, undefined);
+  });
+
+  it("throws clear error on invalid --body JSON", () => {
+    assert.throws(
+      () => resolveBody({ params: {}, body: "{invalid" }),
+      /not valid JSON/i,
+    );
   });
 });

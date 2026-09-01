@@ -10,7 +10,7 @@
 
 import { readFileSync } from "node:fs";
 import { buildRequest } from "@pi-aura/shared/rest/build-request";
-import type { OpenApiIndex, OpMeta } from "@pi-aura/shared/openapi/loader";
+import type { OpenApiIndex } from "@pi-aura/shared/openapi/loader";
 import type { OutSink } from "./rest-list-describe.js";
 
 // ---------------------------------------------------------------------------

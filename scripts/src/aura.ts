@@ -27,8 +27,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createDefaultAuraClient } from "@pi-aura/shared/aura-client";
+import { resolveAuraCredentials } from "@pi-aura/shared/aura-credentials";
 import { loadOpenApi } from "@pi-aura/shared/openapi/loader";
 import { restList, restDescribe } from "./rest-list-describe.js";
+import { restCall, parseCallArgs, resolveBody } from "./rest-call.js";
 import type {
   AuraClient,
   ArtifactKind,
@@ -61,7 +63,9 @@ const USAGE = `Usage:
   node aura.mjs upload create --file <path> [--mime <type>] [--filename <name>]
   node aura.mjs upload get <upload-uuid> [--out <path>]          parsed text to file (or stdout if small)
   node aura.mjs rest list                                    list all REST operations grouped by tag
-  node aura.mjs rest describe <operationId>                  print the full shape of one REST operation`;
+  node aura.mjs rest describe <operationId>                  print the full shape of one REST operation
+  node aura.mjs rest call <operationId> [--param name=val …] [--body-file F] [--body <json>]
+                                                            invoke a REST operation by id`;
 
 function fail(msg: string, usage = false, code = 2): never {
   console.error(msg);
@@ -585,6 +589,20 @@ async function main(): Promise<void> {
           const opId = rest[0];
           if (!opId) fail("rest describe: missing <operationId>", true);
           restDescribe(index, opId, console);
+          return;
+        }
+        case "call": {
+          const opId = rest[0];
+          if (!opId) fail("rest call: missing <operationId>", true);
+          const callArgs = parseCallArgs(rest.slice(1));
+          const body = resolveBody(callArgs);
+          // Resolve credentials lazily — only rest call needs them.
+          const credentials = await resolveAuraCredentials();
+          await restCall(index, credentials, {
+            operationId: opId,
+            params: callArgs.params,
+            body,
+          }, console);
           return;
         }
         default: fail(`rest: unknown subcommand "${sub}"`, true);
