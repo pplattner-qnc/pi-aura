@@ -63,11 +63,11 @@ file is committed, so end users of the pi package don't need to build — but in
 development, rebuild after editing `scripts/src/`:
 
 ```bash
-make                # from repo root: install build deps, typecheck, build, verify
-# or: make build     # typecheck + bundle (assumes `make install` was run once)
+task                # from repo root: install build deps, typecheck, build, verify
+# or: task build     # typecheck + bundle (assumes `task install` was run once)
 ```
 
-See the repo-root `Makefile`. Build tooling (esbuild, typescript, the MCP SDK)
+See the repo-root `Taskfile.yml`. Build tooling (esbuild, typescript, the MCP SDK)
 is isolated in `scripts/package.json` with its own `node_modules` (gitignored),
 keeping the published pi package manifest clean.
 
@@ -346,12 +346,12 @@ The versioned shape passed from fetch → orchestrator → save. See `src/types.
 
 ## Development
 
-Run from the repo root via `make`:
+Run from the repo root via `task`:
 
-- `make typecheck` — TypeScript type-check (no emit)
-- `make build` — esbuild bundle to `skills/core/aura-digest/dist/aura-digest.mjs`
-- `make watch` — rebuild on change
-- `make clean` — remove `scripts/node_modules` + built `dist/`
+- `task typecheck` — TypeScript type-check (no emit)
+- `task build` — esbuild bundle to `skills/core/aura-digest/dist/aura-digest.mjs`
+- `task watch` — rebuild on change
+- `task clean` — remove `scripts/node_modules` + built `dist/`
 
 The script is plain ESM. `digest-fetch` internally invokes the bundled `.mjs`,
 which uses the `@modelcontextprotocol/sdk` `StreamableHTTPClientTransport` with

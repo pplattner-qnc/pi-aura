@@ -47,6 +47,10 @@ tags:
     description: Polymorphic flat comments on artifacts and tasks
   - name: Signals
     description: Planning hints inbox (feedback and research signals)
+  - name: Feedback
+    description: Product and process feedback inbox (AURA-1761)
+  - name: UserGroups
+    description: User groups with a LEAD/MEMBER role — managed by Leadership and Admin (AURA-1722)
 
 paths:
   /search:
@@ -1810,8 +1814,12 @@ paths:
   /tasks:
     get:
       operationId: listTasks
-      summary: "Tasks: List (paginated, member-scoped)"
-      description: Returns paginated tasks the authenticated user is a member of. Defaults to OPEN tasks. Use view/role to filter by membership relationship.
+      summary: "Tasks: List (paginated)"
+      description: >-
+        Returns paginated tasks the caller can see (membership, inherited access,
+        and access grants). There is no default status filter; archived tasks are
+        hidden unless archived=all or archived=true. related_to is member-scoped
+        only and then applies status_slug, status_type, type, and archived.
       tags:
         - Tasks
       parameters:
@@ -1825,19 +1833,32 @@ paths:
             $ref: "#/components/schemas/TaskSortField"
           description: Field to sort by
         - $ref: "#/components/parameters/SortDirParam"
-        - name: status
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [OPEN, ARCHIVED, ALL]
-          description: Filter by task status (default OPEN)
         - name: status_slug
           in: query
           required: false
           schema:
             type: string
-          description: Comma-separated TaskStatus enum values to filter by (e.g. "IDEA,IN_PROGRESS")
+          description: Comma-separated TaskStatus values to filter by (e.g. "OPEN,IN_DEVELOPMENT")
+        - name: status_type
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >-
+            Filter by status activity class, not by progress. Comma-separated; values:
+            OPEN, WAITING, ACTIVE, TERMINAL. Note that OPEN is the single status OPEN
+            (nobody has picked the task up yet) — it is not a synonym for "not finished";
+            for everything that is not finished, pass OPEN,WAITING,ACTIVE. A
+            progress-based cut ("not deployed yet") cannot be expressed here, because the
+            four classes cut across the status series — use status_slug with an explicit
+            list of statuses for that. There is no value named "open": if a user asks for
+            "the open tasks", ask which of the two readings they mean instead of guessing.
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma-separated task types (FEATURE, BUG, IDEA, CHORE, DISCOVERY). Multiple values are OR.
         - name: archived
           in: query
           required: false
@@ -1966,19 +1987,12 @@ paths:
         Returns a renderer-agnostic { nodes, edges } graph for the authenticated
         user's tasks. Nodes are tasks and tags; edges are task-tag attachments and
         typed task-task relations. Honours the same filters as the task list
-        (status, q, tags, tag_match). Task nodes carry a server-computed Louvain
+        (q, tags, tag_match). Task nodes carry a server-computed Louvain
         community for cluster colouring.
       tags:
         - Tasks
       parameters:
         - $ref: "#/components/parameters/SearchParam"
-        - name: status
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [OPEN, ARCHIVED, ALL]
-          description: Filter by task status (default OPEN)
         - name: tags
           in: query
           required: false
@@ -2590,6 +2604,44 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /tasks/{uuid}/cycle-times:
+    get:
+      operationId: getTaskCycleTimes
+      summary: "Tasks: Cycle times (stays on one task)"
+      description: >-
+        Returns the derived stays of one task for the cycle-time display
+        (AURA-1654): every PHASE interval in time order with duration computed
+        at read time, the parallel owner/crew-search strand, and the reason of
+        a status change joined from ActivityEvent. Not a list endpoint — a task
+        typically has fewer than twenty intervals and the chronology needs them
+        all. Whoever can read the task can read the durations; there is no
+        extra capability.
+      tags:
+        - Tasks
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task UUID
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskCycleTimes"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /tasks/{uuid}:
     get:
       operationId: getTask
@@ -2840,6 +2892,58 @@ paths:
                 $ref: "#/components/schemas/ProblemDetail"
         "500":
           $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateOwnerSearch
+      summary: "Tasks: Update owner search"
+      description: >
+        Updates owner_goal and/or owner_goal_due_date on a running owner search
+        (AURA-1651). At least one field is required. The due date is a calendar
+        day and cannot be cleared. Leadership-gated (RELEASE_OWNER_SEARCH).
+      tags:
+        - Tasks
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OwnerSearchUpdate"
+      responses:
+        "200":
+          description: Owner search updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Task is not in owner search.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: Neither field provided, or due date cleared.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /tasks/{uuid}/owner-search/abort:
     post:
@@ -3066,6 +3170,59 @@ paths:
           $ref: "#/components/responses/NotFound"
         "422":
           description: Crew need missing or invalid.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateCrewSearch
+      summary: "Tasks: Update crew search"
+      description: >
+        Updates crew_need and/or crew_need_due_date on a running crew search
+        (AURA-1651). At least one field is required. The due date is a calendar
+        day and may be cleared. Requires task-level MANAGE access or a
+        Leadership/Admin system override.
+      tags:
+        - Tasks
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CrewSearchUpdate"
+      responses:
+        "200":
+          description: Crew search updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Task is not in crew search.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "422":
+          description: Neither field provided, or invalid due date.
           content:
             application/problem+json:
               schema:
@@ -3833,6 +3990,218 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /tasks/{uuid}/story-points:
+    get:
+      operationId: listTaskStoryPointEstimates
+      summary: "Tasks: List story-point history"
+      description: >
+        Append-only estimate history for a task, newest first. Readable with
+        task READ access. Does not change the effective value.
+      tags:
+        - Tasks
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task UUID
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+          description: Maximum number of history rows to return.
+      responses:
+        "200":
+          description: History listed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoryPointEstimateList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: setTaskStoryPoints
+      summary: "Tasks: Set or withdraw a human story-point correction"
+      description: >
+        Appends a HUMAN history row (set or withdraw) and rewrites the cached
+        effective value. Only Stories and Sub-Tasks are eligible. Requires
+        task EDIT access. `key` null withdraws the human correction so the
+        latest AI estimate with a value becomes effective again.
+      tags:
+        - Tasks
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoryPointWriteInput"
+      responses:
+        "200":
+          description: Task detail with the new effective value
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /tasks/{uuid}/story-points/estimate:
+    post:
+      operationId: estimateTaskStoryPoints
+      summary: "Tasks: Run the AI story-point estimator"
+      description: >
+        Runs the STORY_POINT_ESTIMATE agent once and appends an AI history
+        row (including a reasoned refusal). A technical abort writes no row.
+        Requires task EDIT access. Only Stories and Sub-Tasks are eligible.
+      tags:
+        - Tasks
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task UUID
+      responses:
+        "200":
+          description: Task detail after the estimate was written
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          description: The estimate could not be generated.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /tasks/{uuid}/story-points/propose:
+    post:
+      operationId: proposeTaskStoryPointEstimate
+      summary: "Tasks: Propose a story-point size without recording it"
+      description: >
+        Runs the STORY_POINT_ESTIMATE agent once and returns the result
+        without writing a history row — the caller decides whether it becomes
+        one. Requires task EDIT access. Only Stories and Sub-Tasks are
+        eligible.
+      tags:
+        - Tasks
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task UUID
+      responses:
+        "200":
+          description: The proposed size, unrecorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StoryPointProposal"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          description: The estimate could not be generated.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetail"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /tasks/{uuid}/story-points/accept:
+    post:
+      operationId: acceptTaskStoryPointEstimate
+      summary: "Tasks: Accept a chat-proposed story-point estimate"
+      description: >
+        Writes the AI estimate that `task_estimate_story_points` proposed
+        (trigger `chat`). Answers 409 HUMAN_OVERRIDE when a human correction
+        is in effect. Requires task EDIT access.
+      tags:
+        - Tasks
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task UUID (must match the proposal)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StoryPointAcceptInput"
+      responses:
+        "200":
+          description: Task detail after the estimate was accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /tasks/{uuid}/rank-lock:
     put:
       operationId: setTaskRankLock
@@ -4245,6 +4614,63 @@ paths:
                 $ref: "#/components/schemas/CapacityPersonal"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /capacity/read:
+    get:
+      operationId: readCapacity
+      summary: "Capacity: Read capacity with a scope (me, person, group, or company)"
+      description: "AURA-1722: one read tool for capacity. scope=me returns the caller's own row (one-row list, works for everyone); scope=person returns one person's row (yourself always; a foreign person requires LEAD of a common group or VIEW_CAPACITY_OVERVIEW); scope=group returns the members of a group the caller leads (omit group_uuid for 'my team' — every group where the caller is LEAD; a member with no active task appears at 0% with an empty task list); scope=company returns the firm-wide, person-centric overview (Leadership/Admin, paginated). The scope-dependent capability gate is enforced inside the operation — a refusal is a structured error, never an empty list. 'No lead role' (scope=group without group_uuid) returns NO_LEAD_ROLE, distinguishable from 'group exists but has no members' which returns an empty list."
+      tags:
+        - Capacity
+      parameters:
+        - name: scope
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [me, person, group, company]
+          description: Whose capacity to read — "me" for the caller's own row, "person" for one person (pass person_uuid), "group" for a group the caller leads (pass group_uuid, or omit for "my team"), "company" for the firm-wide overview (Leadership/Admin).
+        - name: person_uuid
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Target person UUID — required for scope=person, ignored otherwise.
+        - name: group_uuid
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Target group UUID for scope=group. Omit for "my team" — every group where the caller is LEAD. Ignored for other scopes.
+        - $ref: "#/components/parameters/PageParam"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: Items per page for scope=company (default 20, max 100). Ignored for other scopes.
+      responses:
+        "200":
+          description: A scoped capacity read — a one-row list for scope=me/person, the roster for scope=group, a paginated overview for scope=company.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapacityReadResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -5362,6 +5788,360 @@ paths:
           $ref: "#/components/responses/InternalError"
 
 
+  /feedback:
+    get:
+      operationId: listFeedback
+      summary: "Feedback: List (paginated)"
+      description: >
+        Returns paginated feedback. Default hides discarded entries.
+        Requires VIEW_FEEDBACK (Leadership/Admin). Callers without the
+        capability receive 403, not an empty list.
+      tags:
+        - Feedback
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - $ref: "#/components/parameters/SearchParam"
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/FeedbackSortField"
+          description: Field to sort by
+        - $ref: "#/components/parameters/SortDirParam"
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/FeedbackStatus"
+          description: Exact status filter. When omitted, discarded entries are hidden.
+        - name: source
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/FeedbackSource"
+          description: Filter by how the entry arrived
+        - name: tags
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma-separated tag slugs to filter by.
+        - name: tag_match
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, any]
+          description: Whether all (AND) or any (OR) of the given tag slugs must match. Default all.
+      responses:
+        "200":
+          description: Paginated feedback list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackList"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createFeedback
+      summary: "Feedback: Create"
+      description: >
+        Submits a feedback entry. Requires SUBMIT_FEEDBACK.
+        Anonymous submissions store no authorId.
+      tags:
+        - Feedback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /feedback/{uuid}:
+    get:
+      operationId: getFeedback
+      summary: "Feedback: Get detail"
+      description: Returns one feedback entry. Requires VIEW_FEEDBACK.
+      tags:
+        - Feedback
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Feedback UUID
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /feedback/confirm:
+    post:
+      operationId: confirmFeedback
+      summary: "Feedback: Confirm a chat proposal"
+      description: >
+        Creates the feedback row for a feedback_propose tool call owned by the caller.
+        Idempotent on toolCallId. Requires SUBMIT_FEEDBACK.
+      tags:
+        - Feedback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackConfirm"
+      responses:
+        "200":
+          description: Already created for this toolCallId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackConfirmResult"
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackConfirmResult"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /feedback/{uuid}/status:
+    patch:
+      operationId: changeFeedbackStatus
+      summary: "Feedback: Change status"
+      description: Triage a feedback entry. DISCARDED requires discard_reason. Requires VIEW_FEEDBACK.
+      tags:
+        - Feedback
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Feedback UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackStatusChange"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /feedback/{uuid}/related:
+    post:
+      operationId: linkRelatedFeedback
+      summary: "Feedback: Link a related entry"
+      description: Creates a canonical undirected relation. Self-links are rejected. Requires VIEW_FEEDBACK.
+      tags:
+        - Feedback
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Feedback UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackRelatedLink"
+      responses:
+        "200":
+          description: Linked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: unlinkRelatedFeedback
+      summary: "Feedback: Unlink a related entry"
+      description: Removes the canonical relation. Requires VIEW_FEEDBACK.
+      tags:
+        - Feedback
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Feedback UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackRelatedLink"
+      responses:
+        "200":
+          description: Unlinked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /feedback/{uuid}/tasks:
+    post:
+      operationId: linkFeedbackTask
+      summary: "Feedback: Link a task"
+      description: >
+        Attaches a task that addresses this feedback. Linking an already-DONE task
+        resolves the entry immediately. Requires VIEW_FEEDBACK.
+      tags:
+        - Feedback
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Feedback UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackTaskLink"
+      responses:
+        "200":
+          description: Linked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: unlinkFeedbackTask
+      summary: "Feedback: Unlink a task"
+      description: Removes the feedback-task link. Requires VIEW_FEEDBACK.
+      tags:
+        - Feedback
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Feedback UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackTaskLink"
+      responses:
+        "200":
+          description: Unlinked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /projects:
     get:
       operationId: listProjects
@@ -5749,6 +6529,248 @@ paths:
           $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /user-groups:
+    get:
+      operationId: listUserGroups
+      summary: "UserGroups: List (paginated)"
+      description: Returns paginated user groups with member and lead counts. Leadership/Admin only (MANAGE_USER_GROUPS).
+      tags:
+        - UserGroups
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/LimitParam"
+        - $ref: "#/components/parameters/SearchParam"
+        - name: sort_by
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/UserGroupSortField"
+          description: Field to sort by
+        - $ref: "#/components/parameters/SortDirParam"
+      responses:
+        "200":
+          description: Paginated list of user groups
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserGroupList"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createUserGroup
+      summary: "UserGroups: Create"
+      description: Creates a new user group. Leadership/Admin only (MANAGE_USER_GROUPS). The group grants no permissions.
+      tags:
+        - UserGroups
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserGroupCreateInput"
+      responses:
+        "200":
+          description: The created user group
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserGroupDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /user-groups/{uuid}:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: User group UUID
+    get:
+      operationId: getUserGroup
+      summary: "UserGroups: Get detail (with members)"
+      description: Returns one user group including its members (user uuid, display name, email, role). Leadership/Admin only.
+      tags:
+        - UserGroups
+      responses:
+        "200":
+          description: The user group with its members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserGroupDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateUserGroup
+      summary: "UserGroups: Update name/description"
+      description: Updates the name and/or description of a user group. Leadership/Admin only.
+      tags:
+        - UserGroups
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserGroupUpdateInput"
+      responses:
+        "200":
+          description: The updated user group with its members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserGroupDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: deleteUserGroup
+      summary: "UserGroups: Delete"
+      description: Deletes a user group and cascades its memberships (users are not affected). Leadership/Admin only.
+      tags:
+        - UserGroups
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /user-groups/{uuid}/members:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: User group UUID
+    post:
+      operationId: addUserGroupMember
+      summary: "UserGroups: Add member"
+      description: Adds a user to a group with a LEAD or MEMBER role. Rejects duplicates with 409. Leadership/Admin only.
+      tags:
+        - UserGroups
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserGroupMemberAddInput"
+      responses:
+        "200":
+          description: The updated user group with its members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserGroupDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /user-groups/{uuid}/members/{userUuid}:
+    parameters:
+      - name: uuid
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: User group UUID
+      - name: userUuid
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: User UUID of the member
+    patch:
+      operationId: updateUserGroupMemberRole
+      summary: "UserGroups: Change member role"
+      description: Changes a member's role to LEAD or MEMBER. Multiple leads are allowed. Leadership/Admin only.
+      tags:
+        - UserGroups
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserGroupMemberRoleInput"
+      responses:
+        "200":
+          description: The updated user group with its members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserGroupDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      operationId: removeUserGroupMember
+      summary: "UserGroups: Remove member"
+      description: Removes a member from a group. Idempotent — a missing membership returns 404, never 500. Leadership/Admin only.
+      tags:
+        - UserGroups
+      responses:
+        "204":
+          description: Removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -9855,7 +10877,7 @@ components:
 
     ActivityEvent:
       type: object
-      required: [id, type, entity_type, entity_id, actor_id, title_key, i18n_params, icon, is_ai_generated, created_at]
+      required: [id, type, entity_type, entity_id, actor_id, source_type, title_key, payload, icon, is_ai_generated, created_at]
       description: One activity event on a task or artifact
       properties:
         id:
@@ -9876,13 +10898,17 @@ components:
           type: integer
           nullable: true
           description: ID of the user who triggered the event, or null for system events
+        source_type:
+          type: string
+          enum: [AURA, USER, AGENT, EXTERNAL]
+          description: Origin of the event (UI/CLI, a signed-in user action, a chat agent, or an external MCP client)
         title_key:
           type: string
           description: i18n key for the event title (e.g. "activity.task_status_changed")
-        i18n_params:
+        payload:
           type: object
           additionalProperties: true
-          description: Interpolation parameters for the i18n key
+          description: Machine-readable event payload (also used as interpolation parameters for the title key)
         icon:
           type: string
           nullable: true
@@ -10041,7 +11067,10 @@ components:
       description: >
         RFC 9457 Problem Details for the POST /tasks/{uuid}/jira-issues endpoint.
         `type` distinguishes the concrete failure reason so the frontend can show
-        a localized message per case.
+        a localized message per case. On `already_linked`, `meta` names the
+        blocking task when the caller can see it, otherwise only its owners
+        (AURA-969). `meta.reason` is never set here — it would collide with
+        AccessDeniedProblemDetail.
       allOf:
         - $ref: "#/components/schemas/ProblemDetail"
         - type: object
@@ -10050,12 +11079,35 @@ components:
             type:
               type: string
               enum: [not_connected, already_linked, not_found, error, token_invalid]
+            meta:
+              type: object
+              additionalProperties: false
+              properties:
+                blocking_task:
+                  type: object
+                  required: [uuid, title]
+                  properties:
+                    uuid:
+                      type: string
+                      format: uuid
+                    human_key:
+                      type: string
+                      nullable: true
+                    title:
+                      type: string
+                blocking_task_owners:
+                  type: array
+                  items:
+                    type: string
 
     AsanaTaskLinkProblemDetail:
       description: >
         RFC 9457 Problem Details for the POST /tasks/{uuid}/asana-tasks endpoint.
         `type` distinguishes the concrete failure reason so the frontend can show
-        a localized message per case.
+        a localized message per case. On `already_linked`, `meta` names the
+        blocking task when the caller can see it, otherwise only its owners
+        (AURA-969). `meta.reason` is never set here — it would collide with
+        AccessDeniedProblemDetail.
       allOf:
         - $ref: "#/components/schemas/ProblemDetail"
         - type: object
@@ -10064,6 +11116,26 @@ components:
             type:
               type: string
               enum: [not_connected, already_linked, not_found, error, token_invalid]
+            meta:
+              type: object
+              additionalProperties: false
+              properties:
+                blocking_task:
+                  type: object
+                  required: [uuid, title]
+                  properties:
+                    uuid:
+                      type: string
+                      format: uuid
+                    human_key:
+                      type: string
+                      nullable: true
+                    title:
+                      type: string
+                blocking_task_owners:
+                  type: array
+                  items:
+                    type: string
 
     AsanaCreateTarget:
       type: object
@@ -12522,6 +13594,115 @@ components:
           items:
             $ref: "#/components/schemas/TaskBoardHierarchyEdge"
 
+    StayStartState:
+      type: string
+      enum: [known, unknown]
+      description: Whether the start bound of a stay was observed (AURA-1652).
+
+    StayEndState:
+      type: string
+      enum: [known, running, unknown]
+      description: >-
+        End bound of a stay (AURA-1652). `running` means the task is still in
+        this stay; `unknown` means the stay was left without an end event —
+        never a duration of zero and never still running.
+
+    TaskStay:
+      type: object
+      required: [id, kind, status, started_at, ended_at, start_state, end_state, visit_index, visit_count, duration_ms, reason]
+      description: One PHASE stay on a task (AURA-1654). Duration is computed at read time from the stored bounds.
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [PHASE]
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        start_state:
+          $ref: "#/components/schemas/StayStartState"
+        end_state:
+          $ref: "#/components/schemas/StayEndState"
+        visit_index:
+          type: integer
+          minimum: 1
+          description: 1-based visit counter for this status on the task.
+        visit_count:
+          type: integer
+          minimum: 1
+          description: Total visits of this status on the task (so the UI can say "2. von 2").
+        duration_ms:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Milliseconds between the bounds; null when a bound is missing so no duration can be computed.
+        reason:
+          type: string
+          nullable: true
+          description: Status-change reason from ActivityEvent.payload.reason, if any.
+
+    TaskSearchStay:
+      type: object
+      required: [id, kind, started_at, ended_at, start_state, end_state, visit_index, duration_ms]
+      description: One owner-search or crew-search stay running alongside the phase strand (AURA-1654).
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [OWNER_SEARCH, CREW_SEARCH]
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        start_state:
+          $ref: "#/components/schemas/StayStartState"
+        end_state:
+          $ref: "#/components/schemas/StayEndState"
+        visit_index:
+          type: integer
+          minimum: 1
+        duration_ms:
+          type: integer
+          minimum: 0
+          nullable: true
+
+    TaskCycleTimes:
+      type: object
+      required: [stays, searches, current_stay, incomplete]
+      description: Cycle-time payload for one task (AURA-1654).
+      properties:
+        stays:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskStay"
+        searches:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskSearchStay"
+        current_stay:
+          description: The running PHASE stay, or null when none is running.
+          anyOf:
+            - $ref: "#/components/schemas/TaskStay"
+            - type: "null"
+        incomplete:
+          type: boolean
+          description: True when the first PHASE stay starts with an unknown bound (history predates the activity log).
+
     TaskRankContextEntry:
       type: object
       required: [id, human_key, title, level, status, rank, asap, rank_reason, viewer_is_owner, restricted, assignees, governing_date]
@@ -13912,11 +15093,16 @@ components:
           description: Ancestors from root to direct parent (empty when the task is a root). Used by the leadership matrix to build the hierarchy tree.
           items:
             $ref: "#/components/schemas/TaskHierarchyRef"
+        governing_deadline:
+          type: string
+          format: date
+          nullable: true
+          description: "The governing deadline of this task, or null when none applies. AURA-1722 / S7: comes straight from `governingDeadline` (no second selection logic), so the payload value and the board display agree. Carries NO ampel and NO overdue flag — the verdict lives in the consuming skill."
 
     CapacityLeadershipRow:
       type: object
       required: [user, base_percent, committed_percent, free_percent, utilization_percent, over, tasks]
-      description: "T18 · S27 (ANW-7772): one person's company-wide capacity summary plus their active-task participation (direct roles only)."
+      description: "T18 · S27 (ANW-7772): one person's company-wide capacity summary plus their active-task participation (direct roles only). AURA-1722 / S5: an optional `group` assignment is carried only by `scope: group` rows; null for the other scopes. AURA-1722 / S6: `capacity_updated_at` is the most recent time the person themselves touched their capacity on any of their memberships (unfiltered aggregation, D9); null means \"never recorded\", not \"stale\" (D16)."
       properties:
         user:
           $ref: "#/components/schemas/UserPickerItem"
@@ -13939,6 +15125,21 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CapacityTaskCommitment"
+        group:
+          type: object
+          nullable: true
+          description: "Group assignment carried only by `scope: group` rows (AURA-1722 / S5); null for me/person/company. A person in two of the caller's groups produces two rows, each with its own group."
+          properties:
+            uuid:
+              type: string
+              format: uuid
+            name:
+              type: string
+        capacity_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: "When the person themselves last touched their capacity on any of their memberships (AURA-1722 / S6 / D9). Comes from an UNFILTERED aggregation over TaskMember (max per user), so a capacity set today on a task completed the same day still counts. Moves only on a self-attributable change (D17); a foreign-set or system-cleared capacity leaves it untouched. null means \"never recorded\" (legacy row, or no self-set yet), NOT \"stale\" (D16 — no backfill). Delivered as null, never mapped away."
 
     CapacityLeadershipList:
       type: object
@@ -13952,10 +15153,68 @@ components:
         pagination:
           $ref: "#/components/schemas/Pagination"
 
+    CapacityReadRow:
+      type: object
+      required: [user, base_percent, committed_percent, free_percent, utilization_percent, over]
+      description: "AURA-1722: one row of a scoped capacity read. Same fields as CapacityLeadershipRow, except that `tasks` is optional: scope=me/person carry the person's active-task list, scope=group/company carry the aggregates only — a measured scope=company answer with every task in every row reached ~122k tokens and left no room for a reply. When absent the field is omitted, never sent as an empty array: for a group row an empty list means \"this member holds no active task\" (D11), so an empty array would turn a missing field into a false fact. Ask again with scope=person to get one member's tasks."
+      properties:
+        user:
+          $ref: "#/components/schemas/UserPickerItem"
+        base_percent:
+          type: integer
+          description: The person's base capacity (percentage of a full position).
+        committed_percent:
+          type: integer
+          description: Sum of the person's capacity commitments across active tasks. Exact for every scope — summed from the full commitments before the task list is dropped.
+        free_percent:
+          type: integer
+          description: base_percent minus committed_percent (may be negative when over-committed).
+        utilization_percent:
+          type: integer
+          description: committed_percent / base_percent as a percentage (0 when base is 0).
+        over:
+          type: boolean
+          description: True when committed_percent exceeds base_percent (soft-limit warning).
+        tasks:
+          type: array
+          description: The person's active tasks and commitments. Present for scope=me/person, omitted for scope=group/company.
+          items:
+            $ref: "#/components/schemas/CapacityTaskCommitment"
+        group:
+          type: object
+          nullable: true
+          description: "Group assignment carried only by `scope: group` rows (AURA-1722 / S5); null for me/person/company. A person in two of the caller's groups produces two rows, each with its own group."
+          properties:
+            uuid:
+              type: string
+              format: uuid
+            name:
+              type: string
+        capacity_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: "When the person themselves last touched their capacity on any of their memberships (AURA-1722 / S6 / D9). Unfiltered aggregation over TaskMember (max per user). Moves only on a self-attributable change (D17). null means \"never recorded\" (D16 — no backfill), NOT \"stale\". Delivered as null, never mapped away."
+
+    CapacityReadResponse:
+      type: object
+      required: [items, total, pagination]
+      description: "AURA-1722: scoped capacity read. One unified list shape for all scopes — scope=me/person is a one-row list, scope=group is the roster (each row carries its group), scope=company is the paginated firm-wide overview. The row shape is CapacityReadRow, whose `tasks` is optional per scope; CapacityLeadershipRow keeps `tasks` required for the leadership board, which needs it."
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapacityReadRow"
+        total:
+          type: integer
+          description: Total number of rows across all pages (1 for scope=me).
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
     CapacityPersonal:
       type: object
       required: [base_percent, committed_percent, free_percent, utilization_percent, over, tasks]
-      description: "T18 · S27 (ANW-7772): the logged-in user's own capacity — KPI values plus their active tasks and commitments."
+      description: "T18 · S27 (ANW-7772): the logged-in user's own capacity — KPI values plus their active tasks and commitments. AURA-1722 / S6: `capacity_updated_at` is the most recent time the person themselves touched their capacity on any of their memberships (unfiltered aggregation, D9); null means \"never recorded\", not \"stale\" (D16)."
       properties:
         base_percent:
           type: integer
@@ -13975,6 +15234,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CapacityTaskCommitment"
+        capacity_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: "When the person themselves last touched their capacity on any of their memberships (AURA-1722 / S6 / D9). Unfiltered aggregation over TaskMember (max per user). Moves only on a self-attributable change (D17). null means \"never recorded\" (D16 — no backfill), NOT \"stale\". Delivered as null, never mapped away."
 
     CapacitySettings:
       type: object
@@ -14344,6 +15608,360 @@ components:
         pagination:
           $ref: "#/components/schemas/Pagination"
 
+    FeedbackSource:
+      type: string
+      enum: [UI, AGENT, MCP]
+      description: How the feedback entry arrived
+
+    FeedbackStatus:
+      type: string
+      enum: [NEW, ACCEPTED, RESOLVED, DISCARDED]
+      description: Triage status of a feedback entry
+
+    FeedbackSortField:
+      type: string
+      enum: [created_at, title]
+      description: Sortable fields for the feedback list
+
+    FeedbackAuthor:
+      type: object
+      required: [id]
+      description: Attributed author of a feedback entry. Null when the entry is anonymous.
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+
+    FeedbackListItem:
+      type: object
+      required: [id, title, source, status, is_anonymous, created_at, updated_at]
+      description: One row of the feedback inbox
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        source:
+          $ref: "#/components/schemas/FeedbackSource"
+        status:
+          $ref: "#/components/schemas/FeedbackStatus"
+        is_anonymous:
+          type: boolean
+        author:
+          allOf:
+            - $ref: "#/components/schemas/FeedbackAuthor"
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    FeedbackDetail:
+      allOf:
+        - $ref: "#/components/schemas/FeedbackListItem"
+        - type: object
+          required: [body, notify_author]
+          properties:
+            body:
+              type: string
+            discard_reason:
+              type: string
+              nullable: true
+            notify_author:
+              type: boolean
+            author_notified_at:
+              type: string
+              format: date-time
+              nullable: true
+            tags:
+              type: array
+              items:
+                $ref: "#/components/schemas/FeedbackTagRef"
+            related:
+              type: array
+              items:
+                $ref: "#/components/schemas/FeedbackRelatedRef"
+            tasks:
+              type: array
+              items:
+                $ref: "#/components/schemas/FeedbackTaskRef"
+
+    FeedbackCreate:
+      type: object
+      required: [title, body]
+      description: Payload for submitting feedback
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        body:
+          type: string
+          minLength: 50
+        is_anonymous:
+          type: boolean
+          default: false
+        source:
+          $ref: "#/components/schemas/FeedbackSource"
+        notify_author:
+          type: boolean
+
+    FeedbackList:
+      type: object
+      required: [items, pagination]
+      description: Paginated list of feedback entries
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeedbackListItem"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+        tag_counts:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeedbackTagCount"
+
+    FeedbackTagCount:
+      type: object
+      required: [slug, name, count]
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+        count:
+          type: integer
+
+    FeedbackTagRef:
+      type: object
+      required: [slug, name]
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+
+    FeedbackRelatedRef:
+      type: object
+      required: [id, title, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        status:
+          $ref: "#/components/schemas/FeedbackStatus"
+
+    FeedbackTaskRef:
+      type: object
+      required: [id, human_key, title, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        human_key:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+
+    FeedbackConfirm:
+      type: object
+      required: [toolCallId]
+      properties:
+        toolCallId:
+          type: string
+          format: uuid
+        is_anonymous:
+          type: boolean
+
+    FeedbackConfirmResult:
+      allOf:
+        - $ref: "#/components/schemas/FeedbackDetail"
+        - type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+            alreadyCreated:
+              type: boolean
+
+    FeedbackStatusChange:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/FeedbackStatus"
+        discard_reason:
+          type: string
+
+    FeedbackRelatedLink:
+      type: object
+      required: [related_id]
+      properties:
+        related_id:
+          type: string
+          format: uuid
+
+    FeedbackTaskLink:
+      type: object
+      required: [task_id]
+      properties:
+        task_id:
+          type: string
+          format: uuid
+    UserGroupMemberRole:
+      type: string
+      enum: [LEAD, MEMBER]
+      description: Role a user holds within a user group. LEAD can read the capacity of the group's members (later slice); MEMBER is a plain member.
+
+    UserGroupSortField:
+      type: string
+      enum: [name, member_count, created_at]
+      description: Field to sort the user-group list by
+
+    UserGroupListItem:
+      type: object
+      required: [uuid, name, description, member_count, lead_count]
+      description: One row of the user-group list with member and lead counts
+      properties:
+        uuid:
+          type: string
+          format: uuid
+          description: Public identifier of the group
+        name:
+          type: string
+          description: Display name (not unique — two groups may share a name)
+        description:
+          type: string
+          nullable: true
+          description: Optional free-text description
+        member_count:
+          type: integer
+          minimum: 0
+          description: Number of members in the group
+        lead_count:
+          type: integer
+          minimum: 0
+          description: Number of members with the LEAD role
+
+    UserGroupList:
+      type: object
+      required: [items, pagination]
+      description: Paginated list of user groups
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserGroupListItem"
+          description: User-group items for the current page
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    UserGroupMemberItem:
+      type: object
+      required: [user_uuid, display_name, email, role]
+      description: One member of a user group
+      properties:
+        user_uuid:
+          type: string
+          format: uuid
+          description: UUID of the user
+        display_name:
+          type: string
+          nullable: true
+          description: Display name of the user
+        email:
+          type: string
+          nullable: true
+          description: Email of the user
+        role:
+          $ref: "#/components/schemas/UserGroupMemberRole"
+
+    UserGroupDetail:
+      type: object
+      required: [uuid, name, description, members]
+      description: A user group with its members
+      properties:
+        uuid:
+          type: string
+          format: uuid
+          description: Public identifier of the group
+        name:
+          type: string
+          description: Display name (not unique)
+        description:
+          type: string
+          nullable: true
+          description: Optional free-text description
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserGroupMemberItem"
+          description: Members of the group
+
+    UserGroupCreateInput:
+      type: object
+      required: [name]
+      description: Payload for creating a user group
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Display name (not unique)
+        description:
+          type: string
+          maxLength: 2000
+          description: Optional free-text description
+
+    UserGroupUpdateInput:
+      type: object
+      required: [name]
+      description: Payload for updating a user group
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: New display name
+        description:
+          type: string
+          maxLength: 2000
+          description: New description (omit or null to clear)
+
+    UserGroupMemberAddInput:
+      type: object
+      required: [user_uuid, role]
+      description: Payload for adding a member to a group
+      properties:
+        user_uuid:
+          type: string
+          format: uuid
+          description: UUID of the user to add
+        role:
+          $ref: "#/components/schemas/UserGroupMemberRole"
+
+    UserGroupMemberRoleInput:
+      type: object
+      required: [role]
+      description: Payload for changing a member's role
+      properties:
+        role:
+          $ref: "#/components/schemas/UserGroupMemberRole"
+
     TaskRelationRef:
       type: object
       required: [id, type, task_id, task_human_key, task_title]
@@ -14507,6 +16125,167 @@ components:
               description: >
                 Position in the parent's ordered zone (1…n); null when the
                 child is still unordered.
+            story_points_contribution:
+              $ref: "#/components/schemas/StoryPointContribution"
+              nullable: true
+              description: >
+                This child's contribution to the parent's story-point sum
+                (own value, or the sum of the deepest estimated layer below).
+                Null when the child contributes nothing (discarded, archived,
+                or unestimated).
+
+    StoryPointValue:
+      type: object
+      required: [key, weight, origin, corrected, label]
+      description: Effective story-point value on a Story or Sub-Task.
+      properties:
+        key:
+          type: string
+          description: Scale key (e.g. "5").
+        weight:
+          type: integer
+          description: Numeric weight used in sums.
+        origin:
+          type: string
+          enum: [AI, HUMAN]
+          description: Origin of the effective value.
+        corrected:
+          type: boolean
+          description: True when a human correction is in effect.
+        label:
+          type: string
+          description: Display label for the key.
+
+    StoryPointContribution:
+      type: object
+      required: [weight, is_sum]
+      description: A child's contribution to a parent sum.
+      properties:
+        weight:
+          type: integer
+        is_sum:
+          type: boolean
+          description: True when this contribution is a sum of descendants.
+        label:
+          type: string
+          nullable: true
+          description: Display label when the contribution is a single key.
+
+    StoryPointChildrenAggregate:
+      type: object
+      required: [total_weight, estimated_count, total_count]
+      description: Sum and coverage of children's story-point contributions.
+      properties:
+        total_weight:
+          type: integer
+        estimated_count:
+          type: integer
+          description: Children that contribute a value.
+        total_count:
+          type: integer
+          description: Visible living children (not discarded or archived).
+
+    StoryPointEstimate:
+      type: object
+      required: [id, origin, trigger, key, weight, rationale, created_at, created_by]
+      description: One append-only story-point history row.
+      properties:
+        id:
+          type: string
+          format: uuid
+        origin:
+          type: string
+          enum: [AI, HUMAN]
+        trigger:
+          type: string
+          description: How the row came into existence (`manual` or `chat`).
+        key:
+          type: string
+          nullable: true
+        weight:
+          type: integer
+          nullable: true
+        rationale:
+          type: string
+        inputs:
+          nullable: true
+          description: Evidence the AI read; null on human rows.
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: object
+          nullable: true
+          required: [id, display_name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            display_name:
+              type: string
+              nullable: true
+
+    StoryPointEstimateList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StoryPointEstimate"
+
+    StoryPointWriteInput:
+      type: object
+      required: [key]
+      properties:
+        key:
+          type: string
+          nullable: true
+          description: Scale key to set, or null to withdraw a human correction.
+        rationale:
+          type: string
+          maxLength: 4000
+          description: >
+            Why this size, or why the value is being withdrawn. Optional for a
+            human write; mandatory when origin is AI, because an unexplained
+            machine estimate carries nothing.
+        origin:
+          type: string
+          enum: [AI, HUMAN]
+          default: HUMAN
+          description: >
+            Who the value came from. HUMAN (the default) is a correction and
+            takes precedence over every AI estimate; AI records a proposal the
+            caller accepted unchanged and leaves that precedence untouched.
+
+    StoryPointProposal:
+      type: object
+      required: [refused, key, weight, rationale]
+      description: An estimator result that has not been recorded.
+      properties:
+        refused:
+          type: boolean
+          description: True when the basis was too thin to pick a size.
+        key:
+          type: string
+          nullable: true
+          description: Proposed scale key; null on a refusal.
+        weight:
+          type: integer
+          nullable: true
+          description: Weight matching the key; null on a refusal.
+        rationale:
+          type: string
+          description: Why this size, or why the estimate was refused.
+
+    StoryPointAcceptInput:
+      type: object
+      required: [toolCallId]
+      properties:
+        toolCallId:
+          type: string
+          format: uuid
+          description: UUID of the ChatToolCall record created by task_estimate_story_points.
 
     PriorityContextRef:
       allOf:
@@ -14928,6 +16707,35 @@ components:
           format: date-time
           description: Delivery due date for the owner goal
 
+    OwnerSearchUpdate:
+      type: object
+      description: Payload for updating a running owner search (AURA-1651). At least one field required.
+      properties:
+        owner_goal:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Replacement owner mandate
+        owner_goal_due_date:
+          type: string
+          format: date
+          description: Replacement due date (calendar day). Cannot be cleared.
+
+    CrewSearchUpdate:
+      type: object
+      description: Payload for updating a running crew search (AURA-1651). At least one field required.
+      properties:
+        crew_need:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Replacement crew-need text
+        crew_need_due_date:
+          type: string
+          format: date
+          nullable: true
+          description: Replacement due date (calendar day), or null to clear it.
+
     OwnerSearchAssign:
       type: object
       required: [user_id]
@@ -15216,6 +17024,19 @@ components:
           description: >
             Count of ranked (non-null rank) tasks in the same rank_context —
             the "m" in "Position n of m" on the detail priority block (AURA-1135).
+        story_points:
+          $ref: "#/components/schemas/StoryPointValue"
+          nullable: true
+          description: >
+            Effective story-point value on Stories and Sub-Tasks. Null when
+            the level is ineligible or no effective value exists (not 0).
+            A filled cache on an ineligible level is ignored at read time.
+        story_points_children:
+          $ref: "#/components/schemas/StoryPointChildrenAggregate"
+          nullable: true
+          description: >
+            Sum and coverage of the children's contributions. Null when the
+            task has no visible children.
         status_changed_at:
           type: string
           format: date-time
@@ -16702,6 +18523,39 @@ components:
         created_at:
           type: string
           format: date-time
+        stop_reason:
+          type: string
+          nullable: true
+          description: Raw provider stop reason (e.g. tool_use, end_turn). Null on turns predating this field.
+        tools:
+          type: array
+          nullable: true
+          description: Tools requested in this turn. Null when unknown (old turns); empty when the turn requested none.
+          items:
+            $ref: "#/components/schemas/LlmTurnTool"
+
+    LlmTurnTool:
+      type: object
+      required: [name, kind]
+      description: A tool the model requested in this LLM turn
+      properties:
+        name:
+          type: string
+        provider_call_id:
+          type: string
+          nullable: true
+        kind:
+          type: string
+          enum: [tool, frontend_tool]
+        args:
+          description: Arguments as logged when the model requested the tool
+        result:
+          nullable: true
+          description: ChatToolCall result when a matching row exists. Always null for frontend_tool.
+        status:
+          type: string
+          nullable: true
+          description: ChatToolCall status when a matching row exists
 
     LlmTurnList:
       type: object

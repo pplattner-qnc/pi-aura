@@ -54,6 +54,7 @@ Detailed instructions for each use case are in the referenced resource files.
 | Explore the memory / knowledge graph | [resources/usecases/memory-graph.md](resources/usecases/memory-graph.md) |
 | Triage signals into tasks | [resources/usecases/signals.md](resources/usecases/signals.md) |
 | Manage skills in Aura | [resources/usecases/skills-management.md](resources/usecases/skills-management.md) |
+| Submit feedback about Aura itself | [resources/usecases/feedback-submission.md](resources/usecases/feedback-submission.md) |
 
 ## Development process
 
@@ -117,3 +118,11 @@ All tools are prefixed with `aura_2d_mcp_2d_dev_`. There are two families:
   posting as an AI agent.
 - **Progress tracking**: use `recordTaskProgress` to log agent activity on
   tasks for visibility in the Aura Timeline.
+
+## Submitting feedback about Aura
+
+If you encounter issues with AURA — whether they be bugs, missing features, or workflow friction that is caused by **Aura itself** (not by the way we use Aura) — use the **`aura_feedback`** tool to propose a feedback submission to the Aura maintainers that the user has to sign off on.
+
+`aura_feedback` is an **undocumented tool**: it is available at all times but is not advertised in the system prompt, so you will not see it listed under "Available tools". It exists specifically for this sign-off-gated feedback path. It takes the same parameters as the feedback creation API call (`title`, `body`, `is_anonymous`, `notify_author`) — except for `source`, which it always sends as `MCP` internally. When you call it, an interactive prompt is shown to the user with the proposed title and body and the two checkboxes; the user can answer **Yes** (send as-is), **No** (reject, optional comment), **Refine** (reject with a required comment so you can re-propose), or **Edit** (open all four fields for manual editing, then Submit or Cancel). On a successful submit the row is created in Aura and appended to `~/.pi/aura/feedback.jsonl`.
+
+**Do not use the `aura-mcp-dev_createFeedback` MCP tool** for this. It submits directly to Aura with no interactive sign-off with the user — which is exactly why the `aura_feedback` tool exists as the sanctioned path. See [resources/usecases/feedback-submission.md](resources/usecases/feedback-submission.md) for the full pipeline and how to read the local log.

@@ -2,14 +2,15 @@
 // `getBlueprintFiles` and `getKnowledgeNodeVersion`.
 //
 // Seam: mock the generated SDK calls by replacing the `.get` method on the
-// @hey-api/client-fetch `Client` (same harness pattern as review-verbs.test.ts).
+// generated `Client` (same harness pattern as review-verbs.test.ts).
 // Each generated function calls `options.client.get(...)`, so mocking that
 // method lets us assert the URL/path/query and the domain mapping without
 // network calls.
 
 import { describe, it, mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { createClient, type Client } from "@hey-api/client-fetch";
+import { createClient } from "../src/generated/client/client.gen.js";
+import type { Client } from "../src/generated/client/types.gen.js";
 import { HeyApiAuraClient, AuraApiError } from "../src/hey-api-aura-client.js";
 import type { Keyring, StoredSecret, SecretKey } from "../src/keyring/index.js";
 

@@ -44,7 +44,7 @@ function fail(msg) {
 }
 
 if (!existsSync(bundlePath)) {
-  fail(`aura-digest bundle not found at ${bundlePath}. Run \`make build\` first.`);
+  fail(`aura-digest bundle not found at ${bundlePath}. Run \`task build\` first.`);
 }
 
 const userArgs = process.argv.slice(2);

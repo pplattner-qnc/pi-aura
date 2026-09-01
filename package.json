@@ -10,6 +10,7 @@
       "./extensions/aura-skill-instruction.ts",
       "./extensions/aura-secrets.ts",
       "./extensions/aura-tasks.ts",
+      "./extensions/aura-feedback.ts",
       "./extensions/engineering-rules.ts",
       "./.pi/extensions/digest-dashboard/index.ts"
     ],
@@ -28,9 +29,11 @@
   ],
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
   "devDependencies": {
+    "@earendil-works/pi-tui": "*",
     "@fontsource/bricolage-grotesque": "^5.3.0",
     "@lanterna-profiler/cli": "^1.17.0",
     "@sveltejs/vite-plugin-svelte": "^6.2.4",
@@ -41,7 +44,7 @@
     "happy-dom": "^20.11.6",
     "svelte": "^5.56.10",
     "tailwindcss": "^4.3.3",
-    "typescript": "^7.0.2",
+    "typescript": "^6.0.3",
     "vite": "^7.3.6",
     "vitest": "^4.1.11"
   }

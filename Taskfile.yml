@@ -1,0 +1,116 @@
+version: "3"
+
+# Taskfile — build + openapi-sync targets for the pi-aura repo.
+#
+# This is the single entry point for the repo's build and spec-sync flows
+# (it replaced the former Makefile — the targets mirror the old make ones).
+#
+# The TypeScript sources + build tooling live in scripts/ (with their own
+# package.json/node_modules, gitignored). esbuild bundles each entry point
+# and writes the .mjs directly into the consuming skill's dist/, which is
+# committed so end users of the pi package don't need to build anything.
+#
+# Common flows:
+#   task                       # install build deps, typecheck, build, verify outputs
+#   task build                 # typecheck + bundle (assumes deps are installed)
+#   task install               # install build deps into scripts/node_modules
+#   task typecheck             # tsc --noEmit (assumes deps are installed)
+#   task clean                 # remove scripts/node_modules + all built dist/ dirs
+#   task watch                 # rebuild on source change (assumes deps installed)
+#   task codegen               # regenerate the typed Aura REST client from the spec
+#   task gen                   # codegen + typecheck + build (after touching the spec)
+#   task openapi-sync          # refresh packages/shared/openapi/openapi.yaml from the Aura repo
+#   task openapi-sync-and-codegen  # refresh the spec, then regenerate the typed client
+
+vars:
+  SCRIPTS_DIR: scripts
+  SHARED_DIR: packages/shared
+  DIGEST_DIST: skills/core/aura-digest/dist
+  AURA_DIST: skills/core/aura/dist
+  SYNC_DIST: .pi/skills/engineering-sync/dist
+  # The three bundled entry points build produces; verified to exist after build.
+  ENTRY_OUTS:
+    sh: |
+      echo "{{.DIGEST_DIST}}/aura-digest.mjs {{.AURA_DIST}}/aura.mjs {{.SYNC_DIST}}/engineering-sync.mjs"
+
+tasks:
+  # Default: install build deps, then typecheck + bundle + verify.
+  default:
+    desc: Install build deps, typecheck, build, and verify outputs
+    cmds:
+      - task: install
+      - task: build
+
+  # Install build deps into scripts/node_modules (and the root workspace).
+  install:
+    desc: Install build deps into scripts/node_modules
+    cmds:
+      - npm install
+
+  # Regenerate the typed Aura REST client from openapi/openapi.yaml into
+  # src/generated/ (gitignored — rebuild after changing the spec).
+  codegen:
+    desc: Regenerate the typed Aura REST client from the OpenAPI spec
+    cmds:
+      - cd {{.SHARED_DIR}} && npm run codegen
+
+  # Regenerate the client, then typecheck + bundle. Use this after touching the spec.
+  gen:
+    desc: Regenerate the client, then typecheck + build (after touching the spec)
+    cmds:
+      - task: codegen
+      - task: typecheck
+      - task: build
+
+  # tsc --noEmit (assumes deps are installed).
+  typecheck:
+    desc: Typecheck the scripts package (tsc --noEmit)
+    cmds:
+      - cd {{.SCRIPTS_DIR}} && npm run typecheck
+
+  # typecheck + bundle every entry point, then verify the .mjs outputs exist.
+  build:
+    desc: Typecheck + bundle the entry points and verify the outputs exist
+    cmds:
+      - task: typecheck
+      - cd {{.SCRIPTS_DIR}} && npm run build
+      - >-
+        for f in {{.ENTRY_OUTS}}; do
+          echo "verifying $$f exists…";
+          test -f "$$f" || { echo "ERROR: $$f was not produced"; exit 1; };
+        done
+      - echo "built {{.ENTRY_OUTS}}"
+
+  # Rebuild on source change (assumes deps are installed).
+  watch:
+    desc: Rebuild on source change
+    cmds:
+      - cd {{.SCRIPTS_DIR}} && npm run build -- --watch
+
+  # Remove scripts/node_modules + package-lock and all built dist/ dirs.
+  # NOTE: packages/shared/src/generated/ is now COMMITTED (not gitignored) so
+  # end users who `pi install` get a working client without running codegen —
+  # `clean` deliberately does NOT remove it. Regenerate it with `task codegen`
+  # after changing the spec.
+  clean:
+    desc: Remove scripts/node_modules and all built dist/ dirs (keeps the committed generated client)
+    cmds:
+      - rm -rf {{.SCRIPTS_DIR}}/node_modules {{.SCRIPTS_DIR}}/package-lock.json
+      - rm -rf {{.DIGEST_DIST}} {{.AURA_DIST}} {{.SYNC_DIST}}
+
+  # Pull the canonical OpenAPI spec from the Aura source repo and copy it
+  # over packages/shared/openapi/openapi.yaml when it changed. Idempotent.
+  # See scripts/openapi-sync.sh for the full flow (clone → hash-compare →
+  # copy → cleanup). Requires SSH access to git@bitbucket.org:anwaltde/aura.git.
+  openapi-sync:
+    desc: Refresh packages/shared/openapi/openapi.yaml from the Aura repo
+    cmds:
+      - ./scripts/openapi-sync.sh
+
+  # Convenience: refresh the spec and regenerate the client in one go.
+  # Runs openapi-sync first; if the spec changed, codegen rebuilds the client.
+  openapi-sync-and-codegen:
+    desc: Refresh the OpenAPI spec and regenerate the typed client
+    cmds:
+      - task: openapi-sync
+      - task: codegen

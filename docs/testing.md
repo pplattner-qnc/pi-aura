@@ -28,11 +28,14 @@ npm run codegen        # regenerate src/generated/ from openapi/openapi.yaml (le
 npm run typecheck      # tsc --noEmit
 npm run build          # esbuild -> skills/*/dist/*.mjs
 
-# Makefile wrappers (require `make` on PATH; not available on NixOS — use npm directly):
-make install          # root npm install
-make codegen          # cd packages/shared && npm run codegen
-make gen              # codegen + typecheck + build
-make build            # typecheck + bundle
+# Taskfile wrappers (run from the repo root; requires `task` on PATH —
+# https://taskfile.dev; not available on NixOS by default — use npm directly
+# as shown above):
+task install          # root npm install
+task codegen          # cd packages/shared && npm run codegen
+task gen              # codegen + typecheck + build
+task build            # typecheck + bundle
+task openapi-sync     # refresh packages/shared/openapi/openapi.yaml from the Aura repo
 ```
 
 ## Mock conventions

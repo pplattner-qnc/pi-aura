@@ -1,7 +1,7 @@
 // Unit tests for the 6 review/approval verbs on HeyApiAuraClient.
 //
 // Seam: mock the generated SDK calls by replacing the `.get`/`.post` methods on
-// the real `@hey-api/client-fetch` Client instance that HeyApiAuraClient
+// the real generated `Client` instance that HeyApiAuraClient
 // creates internally. The generated SDK functions delegate to
 // `options.client.{get,post}(...)`, so mocking those methods lets us assert
 // each verb calls the right URL + path + body + query, and verify the
@@ -15,7 +15,8 @@
 
 import { describe, it, mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { createClient, type Client } from "@hey-api/client-fetch";
+import { createClient } from "../src/generated/client/client.gen.js";
+import type { Client } from "../src/generated/client/types.gen.js";
 import { HeyApiAuraClient, AuraApiError } from "../src/hey-api-aura-client.js";
 import type { AuraClient } from "../src/aura-client.js";
 import type { Keyring, StoredSecret, SecretKey } from "../src/keyring/index.js";

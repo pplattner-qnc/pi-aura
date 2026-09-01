@@ -12,7 +12,7 @@ npm install
 npm run codegen
 
 # Build the skill bundles into skills/*/dist/
-make build
+task build
 ```
 
 ## Aura instance + PAT

@@ -1,5 +1,5 @@
 // HeyApiAuraClient — concrete AuraClient impl that delegates to the generated
-// @hey-api/client-fetch SDK.
+// @hey-api/openapi-ts SDK (client generated into ./generated/client/).
 //
 // This module imports generated types ONLY in private helpers; the public
 // method signatures use the slice-2 domain types from ./aura-client.js (Q8:
@@ -11,7 +11,8 @@
 // baseUrl), unwraps the { data, error, response } shape, and returns `data`
 // mapped to the domain output type — throwing on error.
 
-import { createClient, type Client } from "@hey-api/client-fetch";
+import { createClient } from "./generated/client/client.gen.js";
+import type { Client } from "./generated/client/types.gen.js";
 import type { Keyring } from "./keyring/index.js";
 import { createKeyring } from "./keyring/index.js";
 import { loadAuraClientSettings } from "./settings.js";
@@ -29,6 +30,8 @@ import type {
   CreateArtifactInput,
   CreateKnowledgeNodeInput,
   CreateUploadDocumentInput,
+  CreateFeedbackInput,
+  FeedbackDetail,
   GetBlueprintFilesInput,
   GetBlueprintFilesResult,
   KnowledgeNode,
@@ -81,6 +84,7 @@ import {
   startArtifactReview as genStartArtifactReview,
   submitArtifactDecision as genSubmitArtifactDecision,
   reopenArtifactReview as genReopenArtifactReview,
+  createFeedback as genCreateFeedback,
 } from "./generated/sdk.gen.js";
 
 // Generated types — used ONLY inside private helpers / cast boundaries.
@@ -141,7 +145,7 @@ export class AuraApiError extends Error {
  * because @hey-api's RequestResult resolves `data` to `TData[keyof TData]`,
  * a union of response-body properties) to the domain type. */
 async function unwrap<TDomain>(
-  res: { data: unknown; error: unknown; response: Response },
+  res: { data: unknown; error: unknown; response?: Response },
   mapper: (d: unknown) => TDomain,
 ): Promise<TDomain> {
   if (res.error !== undefined) {
@@ -174,7 +178,7 @@ function sdkErrorMessage(error: unknown): string {
 /** Variant of {@link unwrap} for endpoints that return no body (HTTP 204 / 201 unknown).
  *  Checks for error then returns void; treats a null/undefined data as success. */
 async function unwrapVoid(
-  res: { data: unknown; error: unknown; response: Response },
+  res: { data: unknown; error: unknown; response?: Response },
 ): Promise<void> {
   if (res.error !== undefined) {
     const status = res.response?.status ?? 0;
@@ -208,10 +212,20 @@ export class HeyApiAuraClient implements AuraClient {
     this.pat = opts.pat ?? null;
 
     // Attach a request interceptor that sets the bearer token lazily.
-    this.client.interceptors.request.use(async (req) => {
+    this.client.interceptors.request.use(async (req: Request) => {
       const pat = await this.ensurePat();
       req.headers.set("Authorization", `Bearer ${pat}`);
       return req;
+    });
+
+    // The 0.99 generated client routes a failing request interceptor (e.g.
+    // `ensurePat()` throwing when no PAT is stored) through the `error`
+    // interceptor pipeline and otherwise surfaces it as an opaque empty
+    // `error: {}` on the result. Rethrow here so the original error — most
+    // importantly the actionable "No Aura PAT found … /aura secrets discover"
+    // message — propagates to the caller instead of being swallowed.
+    this.client.interceptors.error.use((err: unknown) => {
+      throw err;
     });
   }
 
@@ -499,6 +513,27 @@ export class HeyApiAuraClient implements AuraClient {
   async listTasks(opts?: Record<string, unknown>): Promise<TaskList> {
     const res = await genListTasks({ client: this.client, query: opts });
     return unwrap(res, mapTaskList);
+  }
+
+  // -------------------------------------------------------------------------
+  // Feedback
+  // -------------------------------------------------------------------------
+
+  /** Submit a feedback entry via the generated `POST /feedback` SDK function.
+   *  `source` is forced to `"MCP"` by the caller (the `aura_feedback` tool) so
+   *  the row records its true origin; the API stores whatever is passed. */
+  async createFeedback(input: CreateFeedbackInput): Promise<FeedbackDetail> {
+    const res = await genCreateFeedback({
+      client: this.client,
+      body: {
+        title: input.title,
+        body: input.body,
+        is_anonymous: input.is_anonymous,
+        source: input.source,
+        notify_author: input.notify_author,
+      },
+    });
+    return unwrap(res, (d) => d as FeedbackDetail);
   }
 
   // -------------------------------------------------------------------------

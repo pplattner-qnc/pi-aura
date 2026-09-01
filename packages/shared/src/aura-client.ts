@@ -343,6 +343,58 @@ export interface ListTasksInput {
 }
 
 // ---------------------------------------------------------------------------
+// Feedback (AURA-1761)
+// ---------------------------------------------------------------------------
+// Product and process feedback inbox. Entries are submitted through the
+// `POST /feedback` endpoint and triaged via status changes, tags, related
+// entries, and linked tasks. See `openapi.yaml` `FeedbackCreate` /
+// `FeedbackDetail` for the authoritative shapes; the domain types below are
+// the subset the client reads + structurally required fields.
+
+/** How a feedback entry arrived. The create endpoint accepts this on submit. */
+export type FeedbackSource = "UI" | "AGENT" | "MCP";
+
+/** Triage status of a feedback entry. `NEW` on create, then triaged. */
+export type FeedbackStatus = "NEW" | "ACCEPTED" | "RESOLVED" | "DISCARDED";
+
+/** Payload for {@link AuraClient.createFeedback} (maps to `FeedbackCreate`). */
+export interface CreateFeedbackInput {
+  /** Short title, 1–120 chars. */
+  title: string;
+  /** The feedback text itself, at least 50 chars. */
+  body: string;
+  /** When true, the row is stored without an `authorId` even though the
+   *  actor is known. */
+  is_anonymous?: boolean;
+  /** How the entry arrived. The MCP tool always sends `"MCP"`. */
+  source?: FeedbackSource;
+  /** Whether to notify the author when a linked task is done. Forced
+   *  `false` for anonymous entries. */
+  notify_author?: boolean;
+}
+
+/** A created feedback row (maps to `FeedbackDetail`). The `id` is the UUID
+ *  the extension logs to `~/.pi/aura/feedback.jsonl`. */
+export interface FeedbackDetail {
+  id: string;
+  title: string;
+  body: string;
+  source: FeedbackSource;
+  status: FeedbackStatus;
+  is_anonymous: boolean;
+  notify_author: boolean;
+  author?: { id?: string; name?: string; [k: string]: unknown } | null;
+  discard_reason?: string | null;
+  author_notified_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  tags?: { slug: string; name: string }[];
+  related?: { id: string; title: string; status: string }[];
+  tasks?: { id: string; title?: string; status?: string }[];
+  [k: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
 // Reviews / approvals
 // ---------------------------------------------------------------------------
 
@@ -500,6 +552,11 @@ export interface AuraClient {
   getMyCapacity(): Promise<Capacity>;
   // lists
   listTasks(opts?: ListTasksInput): Promise<TaskList>;
+  // feedback
+  /** Submit a feedback entry to the Aura inbox (`POST /feedback`). Returns
+   *  the created row, including its `id` (UUID). Requires the
+   *  `SUBMIT_FEEDBACK` capability on the caller's PAT. */
+  createFeedback(input: CreateFeedbackInput): Promise<FeedbackDetail>;
   // reviews / approvals
   getArtifactApprovals(
     id: string,
