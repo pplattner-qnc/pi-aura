@@ -144,7 +144,7 @@ function refName(ref: string): string {
 
 const PATH_PARAM_RE = /\{([^}]+)\}/g;
 
-function extractPathParamNames(path: string): string[] {
+export function extractPathParamNames(path: string): string[] {
   const names: string[] = [];
   let m: RegExpExecArray | null;
   while ((m = PATH_PARAM_RE.exec(path)) !== null) {

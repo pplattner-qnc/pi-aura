@@ -16,6 +16,7 @@
 //   - unsupported query style (spaceDelimited / pipeDelimited)
 
 import type { OpMeta, Param } from "../openapi/loader.js";
+import { extractPathParamNames } from "../openapi/loader.js";
 
 export interface BuiltRequest {
   method: string;
@@ -24,8 +25,6 @@ export interface BuiltRequest {
   headers: Record<string, string>;
   body?: string;
 }
-
-const PATH_PARAM_RE = /\{([^}]+)\}/g;
 
 /**
  * Build a fetch-ready request shape from a parsed operation + user params +
@@ -112,15 +111,6 @@ export function buildRequest(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function extractPathParamNames(path: string): string[] {
-  const names: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = PATH_PARAM_RE.exec(path)) !== null) {
-    names.push(m[1]);
-  }
-  return names;
-}
 
 const SUPPORTED_QUERY_STYLES = new Set(["form", undefined]);
 
