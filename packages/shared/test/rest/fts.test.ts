@@ -42,17 +42,17 @@ describe("buildFtsIndex", () => {
     const index = buildFtsIndex(OPS);
     const doc = index.docs[0]; // updateTaskMemberCapacity
     assert.equal(doc.operationId, "updateTaskMemberCapacity");
-    assert.equal(doc.terms.get("capacity"), 2, "'capacity' appears twice");
-    assert.equal(doc.terms.get("set"), 2, "'set' appears twice");
-    assert.equal(doc.terms.get("task"), undefined, "'task' not in doc 0 (no 'task' token in capacity text)");
+    assert.equal(doc.terms["capacity"], 2, "'capacity' appears twice");
+    assert.equal(doc.terms["set"], 2, "'set' appears twice");
+    assert.equal(doc.terms["task"], undefined, "'task' not in doc 0 (no 'task' token in capacity text)");
     assert.equal(doc.length, 11, "doc length = total token count");
   });
 
   it("computes document frequencies", () => {
     const index = buildFtsIndex(OPS);
-    assert.equal(index.docFreq.get("capacity"), 1, "'capacity' in 1 doc");
-    assert.equal(index.docFreq.get("search"), 1, "'search' in 1 doc (unifiedSearch)");
-    assert.equal(index.docFreq.get("task"), 1, "'task' in 1 doc (getTask only — camelCase opId doesn't split)");
+    assert.equal(index.docFreq["capacity"], 1, "'capacity' in 1 doc");
+    assert.equal(index.docFreq["search"], 1, "'search' in 1 doc (unifiedSearch)");
+    assert.equal(index.docFreq["task"], 1, "'task' in 1 doc (getTask only — camelCase opId doesn't split)");
   });
 
   it("computes average document length", () => {
@@ -67,11 +67,11 @@ describe("buildFtsIndex", () => {
     ];
     const index = buildFtsIndex(ops);
     const doc = index.docs[0];
-    assert.equal(doc.terms.get("hello"), 1);
-    assert.equal(doc.terms.get("world"), 1);
-    assert.equal(doc.terms.get("foo"), 1);
-    assert.equal(doc.terms.get("bar"), 1);
-    assert.equal(doc.terms.get("baz"), 1);
+    assert.equal(doc.terms["hello"], 1);
+    assert.equal(doc.terms["world"], 1);
+    assert.equal(doc.terms["foo"], 1);
+    assert.equal(doc.terms["bar"], 1);
+    assert.equal(doc.terms["baz"], 1);
     assert.equal(doc.length, 5);
   });
 
@@ -82,7 +82,7 @@ describe("buildFtsIndex", () => {
     ];
     const index = buildFtsIndex(ops);
     assert.equal(index.docs[0].length, 0, "empty doc has length 0");
-    assert.equal(index.docs[0].terms.size, 0, "no terms");
+    assert.equal(Object.keys(index.docs[0].terms).length, 0, "no terms");
     assert.equal(index.avgDocLength, 1, "(0 + 2) / 2 = 1");
   });
 });

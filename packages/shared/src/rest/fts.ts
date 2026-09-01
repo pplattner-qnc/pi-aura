@@ -22,7 +22,7 @@ export interface SearchableOp {
 export interface FtsDoc {
   operationId: string;
   /** term → frequency in this doc */
-  terms: Map<string, number>;
+  terms: Record<string, number>;
   /** total token count (document length) */
   length: number;
 }
@@ -30,7 +30,7 @@ export interface FtsDoc {
 export interface FtsIndex {
   docs: FtsDoc[];
   /** term → number of docs containing it (document frequency) */
-  docFreq: Map<string, number>;
+  docFreq: Record<string, number>;
   /** average document length across the corpus */
   avgDocLength: number;
   /** total number of documents */
@@ -68,14 +68,14 @@ const B = 0.75;
 
 export function buildFtsIndex(ops: SearchableOp[]): FtsIndex {
   const docs: FtsDoc[] = [];
-  const docFreq = new Map<string, number>();
+  const docFreq: Record<string, number> = {};
   let totalLength = 0;
 
   for (const op of ops) {
     const tokens = tokenize(op.text);
-    const terms = new Map<string, number>();
+    const terms: Record<string, number> = {};
     for (const tok of tokens) {
-      terms.set(tok, (terms.get(tok) ?? 0) + 1);
+      terms[tok] = (terms[tok] ?? 0) + 1;
     }
     docs.push({
       operationId: op.operationId,
@@ -85,8 +85,8 @@ export function buildFtsIndex(ops: SearchableOp[]): FtsIndex {
     totalLength += tokens.length;
 
     // Update doc frequency (unique terms per doc)
-    for (const term of terms.keys()) {
-      docFreq.set(term, (docFreq.get(term) ?? 0) + 1);
+    for (const term of Object.keys(terms)) {
+      docFreq[term] = (docFreq[term] ?? 0) + 1;
     }
   }
 
@@ -115,10 +115,10 @@ export function bm25Search(index: FtsIndex, query: string, k?: number): FtsHit[]
     const matched: string[] = [];
 
     for (const term of queryTerms) {
-      const tf = doc.terms.get(term) ?? 0;
+      const tf = doc.terms[term] ?? 0;
       if (tf === 0) continue; // term not in this doc
 
-      const df = index.docFreq.get(term) ?? 0;
+      const df = index.docFreq[term] ?? 0;
       // IDF using BM25's formula: ln((N - df + 0.5) / (df + 0.5) + 1)
       const idf = Math.log(
         (index.docCount - df + 0.5) / (df + 0.5) + 1,

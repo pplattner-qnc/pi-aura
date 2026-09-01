@@ -81,7 +81,7 @@ describe("buildRestIndex", () => {
     const capDoc = blob.fts.docs.find((d) => d.operationId === "updateTaskMemberCapacity");
     assert.ok(capDoc, "capacity doc in FTS index");
     assert.ok(
-      capDoc.terms.has("capacity"),
+      capDoc.terms["capacity"] !== undefined,
       "code-tag 'capacity' is in the FTS index text",
     );
   });

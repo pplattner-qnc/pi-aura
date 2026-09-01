@@ -29,8 +29,11 @@ import { randomBytes } from "node:crypto";
 import { createDefaultAuraClient } from "@pi-aura/shared/aura-client";
 import { resolveAuraCredentials } from "@pi-aura/shared/aura-credentials";
 import { loadOpenApi } from "@pi-aura/shared/openapi/loader";
+import type { OpenApiIndex } from "@pi-aura/shared/openapi/loader";
 import { restList, restDescribe } from "./rest-list-describe.js";
 import { restCall, parseCallArgs, resolveBody } from "./rest-call.js";
+import { restSearch } from "./rest-search.js";
+import { REST_INDEX } from "./generated/rest-index.js";
 import type {
   AuraClient,
   ArtifactKind,
@@ -65,7 +68,8 @@ const USAGE = `Usage:
   node aura.mjs rest list                                    list all REST operations grouped by tag
   node aura.mjs rest describe <operationId>                  print the full shape of one REST operation
   node aura.mjs rest call <operationId> [--param name=val …] [--body-file F] [--body <json>]
-                                                            invoke a REST operation by id`;
+                                                            invoke a REST operation by id
+  node aura.mjs rest search "<natural-language intent>"     find REST operations by full-text search`;
 
 function fail(msg: string, usage = false, code = 2): never {
   console.error(msg);
@@ -407,6 +411,39 @@ function parseFlags(args: string[]): Record<string, string> {
   return flags;
 }
 
+// ---------------------------------------------------------------------------
+// REST index resolution (inlined blob → OpenApiIndex, or dev-mode fallback)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the REST operation index for list/describe/call. The committed
+ * bundle uses the inlined REST_INDEX metadata (no openapi.yaml at runtime).
+ * In dev/source mode (REST_INDEX absent), fall back to loadOpenApi.
+ */
+function getRestIndex(): OpenApiIndex {
+  if (REST_INDEX) {
+    const index: OpenApiIndex = {};
+    for (const m of REST_INDEX.metadata) {
+      index[m.operationId] = {
+        operationId: m.operationId,
+        method: m.method,
+        path: m.path,
+        pathParams: m.pathParams,
+        queryParams: m.queryParams,
+        body: m.body,
+        tags: m.tags,
+        summary: m.summary,
+        // description omitted in slim metadata (stays in FTS text only)
+        responses: m.responses,
+      };
+    }
+    return index;
+  }
+  // Dev fallback: read openapi.yaml from the repo root.
+  const openApiPath = resolve(process.cwd(), "packages", "shared", "openapi", "openapi.yaml");
+  return loadOpenApi(openApiPath);
+}
+
 async function main(): Promise<void> {
   const group = process.argv[2];
   const sub = process.argv[3];
@@ -575,11 +612,10 @@ async function main(): Promise<void> {
         default: fail(`upload: unknown subcommand "${sub}"`, true);
       }
     } else if (group === "rest") {
-      // rest list / rest describe — pure metadata, no network/auth.
-      // Dev mode (slice 1): reads openapi.yaml from the repo root. This is
-      // developer-facing until slice 3a inlines a compact index into the bundle.
-      const openApiPath = resolve(process.cwd(), "packages", "shared", "openapi", "openapi.yaml");
-      const index = loadOpenApi(openApiPath);
+      // The committed bundle uses the inlined REST_INDEX (no openapi.yaml read
+      // at runtime). In dev/source mode (REST_INDEX absent), fall back to
+      // loadOpenApi reading the YAML from the repo root.
+      const index = getRestIndex();
       switch (sub) {
         case "list": {
           restList(index, console);
@@ -603,6 +639,15 @@ async function main(): Promise<void> {
             params: callArgs.params,
             body,
           }, console);
+          return;
+        }
+        case "search": {
+          const query = rest[0];
+          if (!query) fail("rest search: missing <query>", true);
+          const flags = parseFlags(rest.slice(1));
+          restSearch(REST_INDEX, query, console, {
+            limit: flags.limit ? Number(flags.limit) : undefined,
+          });
           return;
         }
         default: fail(`rest: unknown subcommand "${sub}"`, true);
