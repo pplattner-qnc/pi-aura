@@ -19,7 +19,7 @@ import {
   type SearchableOp,
   type FtsIndex,
 } from "@pi-aura/shared/rest/fts";
-import type { CodeTags } from "./rest-code-tags.ts";
+import type { CodeTags } from "./rest-code-tags.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -123,7 +123,7 @@ export function buildRestIndex(
 // ---------------------------------------------------------------------------
 
 /**
- * Serialize the blob to a deterministic JSON string (sorted keys).
+ * Serialize the blob to a deterministic JSON string.
  * Used for size-budget assertion and for writing the generated .ts module.
  */
 export function serializeRestIndexBlob(blob: RestIndexBlob): string {
@@ -177,14 +177,19 @@ export function generateRestIndexTs(blob: RestIndexBlob): string {
 /**
  * CLI entry point: load openapi.yaml, build the index, assert the size
  * budget, and write the generated .ts module.
+ *
+ * Imports CODE_TAGS/resolveCodeTags lazily so the pure functions above
+ * remain testable without the CLI's value import chain.
  */
-export function genRestIndex(): void {
+export async function genRestIndex(): Promise<void> {
+  const { CODE_TAGS, resolveCodeTags } = await import("./rest-code-tags.js");
+
   // Resolve openapi.yaml relative to the repo root (works from repo root or scripts/).
   const repoRoot = resolve(process.cwd(), "packages", "shared", "openapi", "openapi.yaml");
   const scriptsRoot = resolve(import.meta.dirname, "..", "packages", "shared", "openapi", "openapi.yaml");
   const openApiPath = existsSync(repoRoot) ? repoRoot : scriptsRoot;
 
-  const blob = buildRestIndex(openApiPath, CODE_TAGS_REF, resolveCodeTagsRef);
+  const blob = buildRestIndex(openApiPath, CODE_TAGS, resolveCodeTags);
 
   // Assert size budget before writing
   assertSizeBudget(blob);
@@ -202,9 +207,6 @@ export function genRestIndex(): void {
     `budget: ${(DEFAULT_SIZE_BUDGET / 1024 / 1024).toFixed(0)} MB)`,
   );
 }
-
-// Late-bound imports for the CLI entry (avoids circular import issues in tests)
-import { CODE_TAGS as CODE_TAGS_REF, resolveCodeTags as resolveCodeTagsRef } from "./rest-code-tags.js";
 
 // Run when invoked directly via `node --experimental-strip-types scripts/src/gen-rest-index.ts`.
 if (import.meta.url === `file://${process.argv[1]}`) {
