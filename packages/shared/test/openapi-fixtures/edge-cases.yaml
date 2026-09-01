@@ -1,0 +1,42 @@
+openapi: 3.1.0
+info:
+  title: Edge cases fixture (no duplicates)
+  version: 0.0.1
+paths:
+  /a/{x}/b/{y}:
+    get:
+      operationId: multiParamOp
+      summary: "op with multiple path params"
+      tags:
+        - Alpha
+      parameters:
+        - name: x
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: y
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: ok
+  /no-tag:
+    get:
+      operationId: noTagOp
+      summary: "op with no tags"
+      responses:
+        "200":
+          description: ok
+  /no-opid:
+    get:
+      summary: "op with no operationId"
+      tags:
+        - Beta
+      responses:
+        "200":
+          description: ok
+components:
+  schemas: {}

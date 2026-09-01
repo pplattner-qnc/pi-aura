@@ -1,0 +1,137 @@
+openapi: 3.1.0
+info:
+  title: Fixture API
+  version: 0.0.1
+paths:
+  /tasks/{uuid}/members/{userIdOrUuid}/capacity:
+    patch:
+      operationId: updateTaskMemberCapacity
+      summary: "Tasks: Set member capacity commitment"
+      description: "Set/change/remove a core-team member's capacity commitment on a task."
+      tags:
+        - Capacity
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task UUID
+        - name: userIdOrUuid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: User integer ID or UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskMemberCapacityUpdate"
+      responses:
+        "200":
+          description: Capacity updated; returns updated task detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /tasks/{uuid}:
+    get:
+      operationId: getTask
+      summary: "Get a task by uuid"
+      tags:
+        - Tasks
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /search:
+    post:
+      operationId: unifiedSearch
+      summary: "Unified semantic search"
+      description: "Semantic search across resource types."
+      tags:
+        - Search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+              required:
+                - query
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+        - $ref: "#/components/parameters/SearchParam"
+      responses:
+        "200":
+          description: Search results
+components:
+  parameters:
+    SearchParam:
+      name: q
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Search query
+  responses:
+    ValidationError:
+      description: Validation error
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetail"
+    Unauthorized:
+      description: Unauthorized
+    NotFound:
+      description: Not found
+    InternalError:
+      description: Internal error
+  schemas:
+    TaskMemberCapacityUpdate:
+      type: object
+      required:
+        - capacity_percent
+      properties:
+        capacity_percent:
+          type: integer
+          nullable: true
+    TaskDetail:
+      type: object
+      properties:
+        id:
+          type: string
+    ProblemDetail:
+      type: object
+      properties:
+        title:
+          type: string
