@@ -61,17 +61,27 @@ tasks:
       - task: typecheck
       - task: build
 
-  # tsc --noEmit (assumes deps are installed).
+  # tsc --noEmit for both packages (assumes deps are installed).
   typecheck:
-    desc: Typecheck the scripts package (tsc --noEmit)
+    desc: Typecheck scripts + packages/shared (tsc --noEmit)
     cmds:
       - cd {{.SCRIPTS_DIR}} && npm run typecheck
+      - cd {{.SHARED_DIR}} && npm run typecheck
+
+  # typecheck + bundle every entry point, then verify the .mjs outputs exist.
+  # gen-rest-doc runs BEFORE the esbuild bundle so the committed
+  # resources/rest-api.md is up to date after build.
+  gen-rest-doc:
+    desc: Regenerate skills/core/aura/resources/rest-api.md from openapi.yaml
+    cmds:
+      - node --experimental-strip-types {{.SCRIPTS_DIR}}/src/gen-rest-doc.ts
 
   # typecheck + bundle every entry point, then verify the .mjs outputs exist.
   build:
     desc: Typecheck + bundle the entry points and verify the outputs exist
     cmds:
       - task: typecheck
+      - task: gen-rest-doc
       - cd {{.SCRIPTS_DIR}} && npm run build
       - >-
         for f in {{.ENTRY_OUTS}}; do
