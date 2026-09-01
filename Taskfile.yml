@@ -76,12 +76,18 @@ tasks:
     cmds:
       - node --experimental-strip-types {{.SCRIPTS_DIR}}/src/gen-rest-doc.ts
 
+  gen-rest-index:
+    desc: Regenerate scripts/src/generated/rest-index.ts (inlined FTS+metadata) from openapi.yaml
+    cmds:
+      - npx tsx {{.SCRIPTS_DIR}}/src/gen-rest-index.ts
+
   # typecheck + bundle every entry point, then verify the .mjs outputs exist.
   build:
     desc: Typecheck + bundle the entry points and verify the outputs exist
     cmds:
       - task: typecheck
       - task: gen-rest-doc
+      - task: gen-rest-index
       - cd {{.SCRIPTS_DIR}} && npm run build
       - >-
         for f in {{.ENTRY_OUTS}}; do
