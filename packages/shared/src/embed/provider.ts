@@ -5,7 +5,7 @@
 // injected config) and returns a provider.
 //
 // SLICE 5 DEFAULT-FLIP: when no `aura.embed.provider` is set, returns a
-// LocalEmbedProvider (modelId = "Xenova/multilingual-e5-small") — the
+// LocalEmbedProvider (modelId = "Xenova/multilingual-e5-base") — the
 // always-on local CPU model. When `aura.embed.provider` IS set, returns the
 // cloud provider (OpenAI-style /v1/embeddings). `null` is only returned on
 // local-init failure the caller degrades from.
@@ -86,7 +86,7 @@ export function loadEmbedSettings(
  *
  * SLICE 5 DEFAULT-FLIP:
  * - When `config.provider` is NOT set → return a LocalEmbedProvider (the
- *   always-on local CPU model, Xenova/multilingual-e5-small). This is the new
+ *   always-on local CPU model, Xenova/multilingual-e5-base). This is the new
  *   default — the semantic leg is always on, no configuration needed.
  * - When `config.provider` IS set → return the cloud provider (OpenAI-style
  *   /v1/embeddings). This is now an optional override, not the enable switch.

@@ -19,14 +19,14 @@ describe("createEmbedProvider", () => {
   it("returns a LocalEmbedProvider when no provider is configured (slice 5 default-flip)", async () => {
     const provider = await createEmbedProvider({});
     assert.ok(provider, "not null — local provider by default");
-    assert.equal(provider!.modelId, "Xenova/multilingual-e5-small",
+    assert.equal(provider!.modelId, "Xenova/multilingual-e5-base",
       "default provider is the local model");
   });
 
   it("returns a LocalEmbedProvider when config has no provider field", async () => {
     const provider = await createEmbedProvider({ provider: "", model: "" });
     assert.ok(provider, "not null when provider field is empty");
-    assert.equal(provider!.modelId, "Xenova/multilingual-e5-small");
+    assert.equal(provider!.modelId, "Xenova/multilingual-e5-base");
   });
 
   it("returns an EmbedProvider when provider + model + apiKey configured", async () => {

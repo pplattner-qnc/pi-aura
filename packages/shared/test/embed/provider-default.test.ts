@@ -2,7 +2,7 @@
 // slice reverses slice 4's "opt-in cloud" default.
 //
 // Seam: createEmbedProvider(config?) now returns:
-//   - LocalEmbedProvider (modelId = "Xenova/multilingual-e5-small") when
+//   - LocalEmbedProvider (modelId = "Xenova/multilingual-e5-base") when
 //     aura.embed.provider is NOT set (the new default — always-on local).
 //   - Cloud provider (OpenAI-style) when aura.embed.provider IS set.
 //   - null only on local-init failure the caller degrades from.
@@ -19,7 +19,7 @@ import { LOCAL_MODEL_ID } from "../../src/embed/local-provider.js";
 // ---------------------------------------------------------------------------
 
 describe("createEmbedProvider — default-flip", () => {
-  it("returns a LocalEmbedProvider (modelId = Xenova/multilingual-e5-small) when no config is set", async () => {
+  it("returns a LocalEmbedProvider (modelId = Xenova/multilingual-e5-base) when no config is set", async () => {
     // No config → local provider (NOT null, NOT cloud)
     const provider = await createEmbedProvider({});
     assert.ok(provider, "provider is not null when no config");
