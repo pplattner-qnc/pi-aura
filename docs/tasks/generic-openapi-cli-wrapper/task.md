@@ -561,3 +561,34 @@ so it can discover the right operation without reading the whole spec.
   (leg: semantic); `rest search "set my capacity commitment"` → #1 (leg: both).
   Committed `rest-index.ts` has `embedModelId: "Xenova/multilingual-e5-base"`,
   `dims: 768`, `dtype: "i8"`, 273 vectors, 1.04 MB (under 3 MB budget).
+
+### Architecture lessons (post-landing harvest)
+
+- **Test-runner discipline is load-bearing for `scripts/src`.** Three runners
+  coexist: `tsx --test` (packages/shared), `node --experimental-strip-types`
+  (scripts/src CLI tests), and `vitest` (scripts/src/scheduler.test.ts +
+  aura-digest-progress.test.ts + test/). A worker that ran a node-test suite
+  under `tsx` once masked a real failure (`.js` sibling value imports resolve
+  under tsx but not under --experimental-strip-types). Always run a
+  scripts/src suite under the runner its header/config documents; a false
+  "green" under the wrong runner hides regressions. See `docs/testing.md`.
+- **Mock fidelity for external libraries.** The `_embedRaw` bug passed all
+  unit tests because the mock `pipeline` returned a per-text array while the
+  real transformers.js returns a single batched `Tensor`. A mock whose shape
+  doesn't match the real library is worse than no test. For external-library
+  integration, assert the real output shape in the mock AND run a real
+  end-to-end gate (the actual `task gen-rest-index` against the cached model)
+  before declaring a slice done.
+- **Model choice matters for short-text retrieval.** `multilingual-e5-small`
+  (384-dim) clustered all 273 short operation summaries within a ~0.01 cosine
+  band, so the motivating "commit allocation" query ranked the capacity op
+  #4, not #1. `multilingual-e5-base` (768-dim) widened the margins and ranks
+  it #1 — at the cost of a larger one-time download (~700 MB) and slower
+  per-query CPU, both acceptable for a local CLI. When embedding very short
+  texts (3-8 word summaries), prefer the larger model; i8 vs f32 storage made
+  no ranking difference, so i8 (0.2 MB) is the right choice.
+- **The land-worker's halt-on-blocker was the workflow working as designed.**
+  The slice-5 land-worker refused to merge a crashing build and escalated via
+  the supervisor channel instead of shipping inert — exactly the gate the
+  feature pipeline intends. The bug was a mock-fidelity gap the unit tests
+  couldn't catch; only the real build exposed it.

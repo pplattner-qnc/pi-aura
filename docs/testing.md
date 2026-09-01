@@ -71,7 +71,54 @@ node --experimental-strip-types scripts/src/followup-working-on.test.ts
 node --experimental-strip-types scripts/src/write-dashboard-digest.test.ts
 ```
 
-## `.pi/extensions/digest-dashboard/` (vitest)
+## `scripts/src/{rest-list-describe,rest-call,rest-search,...}.test.ts` (the `rest` CLI)
+
+The `rest` command group (`aura.mjs rest list/describe/call/search`) added a
+family of unit tests under `scripts/src/`. These run with **`node
+--experimental-strip-types`** (like the digest tests above), NOT vitest.
+
+```bash
+node --experimental-strip-types --test scripts/src/rest-list-describe.test.ts
+node --experimental-strip-types --test scripts/src/rest-call.test.ts
+node --experimental-strip-types --test scripts/src/rest-search.test.ts
+node --experimental-strip-types --test scripts/src/gen-rest-index.test.ts
+# (and rest-search-local, gen-rest-index-local, gen-rest-index-embed, rest-code-tags, gen-rest-doc)
+```
+
+Two runner-discipline lessons (hard-won, from the `generic-openapi-cli-wrapper`
+task):
+
+1. **Use `node --experimental-strip-types` for `scripts/src` CLI tests, not
+   `tsx`.** `tsx` resolves `.js`→`.ts` sibling imports transitively, which can
+   *mask* a failure that `node --experimental-strip-types` (the documented
+   runner for these suites) exposes: a source file importing a sibling
+   **value** module with a `.js` extension breaks under
+   `--experimental-strip-types` (it can't rewrite `.js`→`.ts` for value
+   imports). If a `scripts/src` source needs a shared value module, import it
+   via the **package path** (`@pi-aura/shared/rest/closest-match`), not a
+   sibling `.js` — the package path resolves under both runners. `import type`
+   with `.js` is fine (erased at runtime).
+2. **Two `scripts/src` suites are vitest, not node-test:**
+   `scripts/src/scheduler.test.ts` and `scripts/src/aura-digest-progress.test.ts`
+   are in `vitest.config.ts`'s `include` — run them with `npx vitest run`, not
+   `node --test` (running them with `node --test` shows false `ERR_MODULE_NOT_FOUND`
+   failures because vitest, not node, resolves their imports).
+
+### Mock-fidelity for external-library integration (the `_embedRaw` lesson)
+
+The local-embeddings provider mocks `@huggingface/transformers`' `pipeline`.
+The first implementation's mock returned the WRONG output shape (an array of
+per-text tensors) while the real `pipeline(..., {pooling:'mean', normalize:true})`
+returns a **single `Tensor`** with `dims=[N, hiddenDim]` and flat `data`. All
+unit tests passed against the wrong-shaped mock; the real `task gen-rest-index`
+build crashed (`quantizeToInt8(undefined)`). A mock whose shape doesn't match
+the real library's output is worse than no test — it gives false confidence.
+For external-library integration: **record the real output shape in the test**
+(the `local-provider.test.ts` now asserts a single `{data, dims:[N,384]}`
+tensor against a 2- and 3-text batch, with an off-by-one guard), and run a real
+end-to-end gate (the actual `task gen-rest-index` with the cached model) — not
+just mocked unit tests — before declaring the slice done.
+
 
 The interactive digest-dashboard extension (Svelte SPA + dumb file server +
 `state.json` listener + teardown) has a vitest suite at `test/digest-dashboard/`
