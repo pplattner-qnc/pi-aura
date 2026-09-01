@@ -5661,6 +5661,86 @@ function loadOpenApi(path) {
   return index;
 }
 
+// ../packages/shared/src/rest/fts.ts
+function tokenize(text) {
+  return text.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 0);
+}
+var K1 = 1.5;
+var B = 0.75;
+function bm25Search(index, query, k) {
+  const queryTerms = tokenize(query);
+  if (queryTerms.length === 0 || index.docCount === 0) return [];
+  const hits = [];
+  for (const doc of index.docs) {
+    let score = 0;
+    const matched = [];
+    for (const term of queryTerms) {
+      const tf = doc.terms[term] ?? 0;
+      if (tf === 0) continue;
+      const df = index.docFreq[term] ?? 0;
+      const idf = Math.log(
+        (index.docCount - df + 0.5) / (df + 0.5) + 1
+      );
+      const tfNorm = tf * (K1 + 1) / (tf + K1 * (1 - B + B * (doc.length / index.avgDocLength)));
+      score += idf * tfNorm;
+      matched.push(term);
+    }
+    if (matched.length > 0) {
+      hits.push({ operationId: doc.operationId, score, terms: matched });
+    }
+  }
+  hits.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.operationId.localeCompare(b.operationId);
+  });
+  if (k !== void 0) return hits.slice(0, k);
+  return hits;
+}
+function rrfMerge(rankings, k = 60) {
+  const scores = /* @__PURE__ */ new Map();
+  for (const ranking of rankings) {
+    for (let i = 0; i < ranking.length; i++) {
+      const id = ranking[i];
+      const rank = i + 1;
+      const rrfScore = 1 / (k + rank);
+      scores.set(id, (scores.get(id) ?? 0) + rrfScore);
+    }
+  }
+  return scores;
+}
+
+// src/closest-match.ts
+function closestMatches(fts, ids, query, max = 5) {
+  if (fts) {
+    const hits = bm25Search(fts, query, max);
+    if (hits.length > 0) {
+      return hits.map((h) => h.operationId);
+    }
+  }
+  const lower = query.toLowerCase();
+  const substrMatches = ids.filter((id) => id.toLowerCase().includes(lower));
+  if (substrMatches.length > 0) return substrMatches.slice(0, max);
+  const scored = ids.map((id) => ({ id, dist: levenshtein(id.toLowerCase(), lower) }));
+  scored.sort((a, b) => a.dist - b.dist);
+  return scored.slice(0, max).map((s) => s.id);
+}
+function levenshtein(a, b) {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[m][n];
+}
+
 // src/rest-list-describe.ts
 var OTHER_TAG = "Other";
 function restList(index, out) {
@@ -5692,35 +5772,11 @@ function restList(index, out) {
     out.log("");
   }
 }
-function closestMatches(ids, query, max = 5) {
-  const lower = query.toLowerCase();
-  const substrMatches = ids.filter((id) => id.toLowerCase().includes(lower));
-  if (substrMatches.length > 0) return substrMatches.slice(0, max);
-  const scored = ids.map((id) => ({ id, dist: levenshtein(id.toLowerCase(), lower) }));
-  scored.sort((a, b) => a.dist - b.dist);
-  return scored.slice(0, max).map((s) => s.id);
-}
-function levenshtein(a, b) {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
-    }
-  }
-  return dp[m][n];
-}
-function restDescribe(index, opId, out) {
+function restDescribe(index, opId, out, fts) {
   const op = index[opId];
   if (!op) {
     const ids = Object.keys(index);
-    const matches = closestMatches(ids, opId);
+    const matches = closestMatches(fts, ids, opId);
     out.error(`Error: unknown operationId "${opId}".`);
     if (matches.length > 0) {
       out.error(`Closest matches:`);
@@ -5778,10 +5834,9 @@ function restDescribe(index, opId, out) {
 import { readFileSync as readFileSync3 } from "node:fs";
 
 // ../packages/shared/src/rest/build-request.ts
-var PATH_PARAM_RE3 = /\{([^}]+)\}/g;
 function buildRequest(op, params, body) {
   let urlPath = op.path;
-  const templateNames = extractPathParamNames2(op.path);
+  const templateNames = extractPathParamNames(op.path);
   const providedPathKeys = /* @__PURE__ */ new Set();
   for (const name of templateNames) {
     const val = params[name];
@@ -5840,14 +5895,6 @@ function buildRequest(op, params, body) {
     headers,
     body: bodyStr
   };
-}
-function extractPathParamNames2(path) {
-  const names = [];
-  let m;
-  while ((m = PATH_PARAM_RE3.exec(path)) !== null) {
-    names.push(m[1]);
-  }
-  return names;
 }
 var SUPPORTED_QUERY_STYLES = /* @__PURE__ */ new Set(["form", void 0]);
 function serializeQueryParam(param, val) {
@@ -5911,37 +5958,13 @@ function parseCallArgs(args) {
   }
   return { params, bodyFile, body };
 }
-function closestMatches2(ids, query, max = 5) {
-  const lower = query.toLowerCase();
-  const substrMatches = ids.filter((id) => id.toLowerCase().includes(lower));
-  if (substrMatches.length > 0) return substrMatches.slice(0, max);
-  const scored = ids.map((id) => ({ id, dist: levenshtein2(id.toLowerCase(), lower) }));
-  scored.sort((a, b) => a.dist - b.dist);
-  return scored.slice(0, max).map((s) => s.id);
-}
-function levenshtein2(a, b) {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
-    }
-  }
-  return dp[m][n];
-}
 var PRETTY_PRINT_THRESHOLD = 5e3;
 async function restCall(index, credentials, args, out, opts = {}) {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const op = index[args.operationId];
   if (!op) {
     const ids = Object.keys(index);
-    const matches = closestMatches2(ids, args.operationId);
+    const matches = closestMatches(opts.fts, ids, args.operationId);
     out.error(`Error: unknown operationId "${args.operationId}".`);
     if (matches.length > 0) {
       out.error(`Closest matches:`);
@@ -6003,54 +6026,6 @@ function resolveBody(args) {
     }
   }
   return void 0;
-}
-
-// ../packages/shared/src/rest/fts.ts
-function tokenize(text) {
-  return text.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 0);
-}
-var K1 = 1.5;
-var B = 0.75;
-function bm25Search(index, query, k) {
-  const queryTerms = tokenize(query);
-  if (queryTerms.length === 0 || index.docCount === 0) return [];
-  const hits = [];
-  for (const doc of index.docs) {
-    let score = 0;
-    const matched = [];
-    for (const term of queryTerms) {
-      const tf = doc.terms[term] ?? 0;
-      if (tf === 0) continue;
-      const df = index.docFreq[term] ?? 0;
-      const idf = Math.log(
-        (index.docCount - df + 0.5) / (df + 0.5) + 1
-      );
-      const tfNorm = tf * (K1 + 1) / (tf + K1 * (1 - B + B * (doc.length / index.avgDocLength)));
-      score += idf * tfNorm;
-      matched.push(term);
-    }
-    if (matched.length > 0) {
-      hits.push({ operationId: doc.operationId, score, terms: matched });
-    }
-  }
-  hits.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    return a.operationId.localeCompare(b.operationId);
-  });
-  if (k !== void 0) return hits.slice(0, k);
-  return hits;
-}
-function rrfMerge(rankings, k = 60) {
-  const scores = /* @__PURE__ */ new Map();
-  for (const ranking of rankings) {
-    for (let i = 0; i < ranking.length; i++) {
-      const id = ranking[i];
-      const rank = i + 1;
-      const rrfScore = 1 / (k + rank);
-      scores.set(id, (scores.get(id) ?? 0) + rrfScore);
-    }
-  }
-  return scores;
 }
 
 // ../packages/shared/src/embed/cosine.ts
@@ -6665,7 +6640,7 @@ async function main() {
         case "describe": {
           const opId = rest[0];
           if (!opId) fail("rest describe: missing <operationId>", true);
-          restDescribe(index, opId, console);
+          restDescribe(index, opId, console, REST_INDEX.fts);
           return;
         }
         case "call": {
@@ -6678,7 +6653,7 @@ async function main() {
             operationId: opId,
             params: callArgs.params,
             body
-          }, console);
+          }, console, { fts: REST_INDEX.fts });
           return;
         }
         case "search": {
