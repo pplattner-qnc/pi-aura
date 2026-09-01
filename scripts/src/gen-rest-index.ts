@@ -168,7 +168,6 @@ export function buildRestIndex(
   openApiPath: string,
   codeTags: CodeTags,
   resolveFn: (op: OpMeta, tags: CodeTags) => string[],
-  embedOpts?: BuildRestIndexOptions,
 ): RestIndexBlob {
   const index: OpenApiIndex = loadOpenApi(openApiPath);
 
@@ -290,9 +289,10 @@ export function assertSizeBudget(
       `REST index size budget exceeded: ${size} bytes > ${budgetBytes} bytes budget ` +
       `(${(size / 1024 / 1024).toFixed(2)} MB). ` +
       `Remediation hints: ` +
-      `(1) drop long descriptions from FTS text but keep a truncated form in metadata, ` +
-      `(2) prune unused fields from the metadata blob, ` +
-      `(3) reduce metadata granularity (e.g. omit response schema refs).`,
+      `(1) use int8-quantized vectors (i8 dtype) instead of float32, ` +
+      `(2) use a lower-dimensional embedding model (e.g. 384-dim), ` +
+      `(3) drop long descriptions from FTS text but keep a truncated form in metadata, ` +
+      `(4) prune unused fields from the metadata blob.`,
     );
   }
 }

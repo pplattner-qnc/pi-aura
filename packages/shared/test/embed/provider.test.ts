@@ -5,12 +5,10 @@
 //
 // Run with: cd packages/shared && npx tsx --test test/embed/provider.test.ts
 
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   createEmbedProvider,
-  type EmbedProvider,
-  type EmbedProviderConfig,
 } from "../../src/embed/provider.js";
 
 // ---------------------------------------------------------------------------
@@ -54,8 +52,8 @@ describe("createEmbedProvider", () => {
 
   it("embed() calls the HTTP endpoint and returns Float32Array[]", async () => {
     const callArgs: { url: string; init: RequestInit }[] = [];
-    const mockFetch = async (url: string, init?: RequestInit) => {
-      callArgs.push({ url, init: init ?? {} });
+    const mockFetch = async (url: string | URL | Request, init?: RequestInit) => {
+      callArgs.push({ url: String(url), init: init ?? {} });
       return new Response(
         JSON.stringify({
           data: [
@@ -91,8 +89,8 @@ describe("createEmbedProvider", () => {
     let capturedHeaders: Record<string, string> = {};
     let capturedUrl = "";
 
-    const mockFetch = async (url: string, init?: RequestInit) => {
-      capturedUrl = url;
+    const mockFetch = async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url);
       capturedHeaders = init?.headers as Record<string, string>;
       capturedBody = JSON.parse(init?.body as string);
       return new Response(
@@ -148,8 +146,8 @@ describe("createEmbedProvider", () => {
 
   it("uses a custom baseURL when provided", async () => {
     let capturedUrl = "";
-    const mockFetch = async (url: string) => {
-      capturedUrl = url;
+    const mockFetch = async (url: string | URL | Request) => {
+      capturedUrl = String(url);
       return new Response(
         JSON.stringify({ data: [{ embedding: [0.1] }] }),
         { status: 200, headers: { "content-type": "application/json" } },

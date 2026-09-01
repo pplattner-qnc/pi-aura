@@ -613,10 +613,79 @@ var init_keyring = __esm({
   }
 });
 
+// ../packages/shared/src/embed/provider.ts
+var provider_exports = {};
+__export(provider_exports, {
+  createEmbedProvider: () => createEmbedProvider,
+  loadEmbedSettings: () => loadEmbedSettings
+});
+import { readFileSync as readFileSync4, existsSync as existsSync3 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { join as join3 } from "node:path";
+function loadEmbedSettings(settingsPath = SETTINGS_PATH2) {
+  let settings = {};
+  try {
+    if (existsSync3(settingsPath)) {
+      const raw = readFileSync4(settingsPath, "utf8");
+      settings = JSON.parse(raw);
+    }
+  } catch {
+  }
+  const embed = settings.aura?.embed ?? {};
+  return {
+    provider: process.env.AURA_EMBED_PROVIDER || embed.provider || void 0,
+    model: process.env.AURA_EMBED_MODEL || embed.model || void 0,
+    apiKey: process.env.AURA_EMBED_API_KEY || embed.apiKey || void 0,
+    baseURL: process.env.AURA_EMBED_BASE_URL || embed.baseURL || void 0
+  };
+}
+async function createEmbedProvider(config, opts = {}) {
+  const { provider, model, apiKey, baseURL } = config;
+  if (!provider || !model || !apiKey) {
+    return null;
+  }
+  if (provider !== "openai") {
+    return null;
+  }
+  if (!baseURL) {
+    return null;
+  }
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  return {
+    modelId: model,
+    async embed(texts) {
+      const url = `${baseURL}/embeddings`;
+      const resp = await fetchImpl(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({ model, input: texts })
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        throw new Error(
+          `embed: HTTP ${resp.status} from ${url}` + (body ? ` \u2014 ${body.slice(0, 200)}` : "")
+        );
+      }
+      const json2 = await resp.json();
+      return json2.data.map((d) => new Float32Array(d.embedding));
+    }
+  };
+}
+var SETTINGS_PATH2;
+var init_provider = __esm({
+  "../packages/shared/src/embed/provider.ts"() {
+    "use strict";
+    SETTINGS_PATH2 = join3(homedir3(), ".pi", "agent", "settings.json");
+  }
+});
+
 // src/aura.ts
-import { mkdirSync, writeFileSync, readFileSync as readFileSync4, rmSync, existsSync as existsSync3, readdirSync, statSync as statSync2 } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync as readFileSync5, rmSync, existsSync as existsSync4, readdirSync, statSync as statSync2 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as join3, resolve } from "node:path";
+import { join as join4, resolve } from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
 
 // ../packages/shared/src/generated/core/serverSentEvents.gen.ts
@@ -5984,21 +6053,117 @@ function rrfMerge(rankings, k = 60) {
   return scores;
 }
 
+// ../packages/shared/src/embed/cosine.ts
+function quantizeToInt8(vec) {
+  let maxAbs = 0;
+  for (let i = 0; i < vec.length; i++) {
+    const a = Math.abs(vec[i]);
+    if (a > maxAbs) maxAbs = a;
+  }
+  if (maxAbs === 0) return new Int8Array(vec.length);
+  const scale = 127 / maxAbs;
+  const result = new Int8Array(vec.length);
+  for (let i = 0; i < vec.length; i++) {
+    result[i] = Math.max(-128, Math.min(127, Math.round(vec[i] * scale)));
+  }
+  return result;
+}
+function cosineSim(a, b) {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  if (denom === 0) return 0;
+  return dot / denom;
+}
+function cosineRank(queryVec, opVecs, dtype) {
+  let q = queryVec;
+  if (dtype === "i8" && queryVec instanceof Float32Array) {
+    q = quantizeToInt8(queryVec);
+  }
+  const hits = [];
+  for (const op of opVecs) {
+    const score = cosineSim(q, op.vec);
+    hits.push({ operationId: op.operationId, score });
+  }
+  hits.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.operationId.localeCompare(b.operationId);
+  });
+  return hits;
+}
+
 // src/rest-search.ts
-function restSearch(index, query, out, opts = {}) {
+async function restSearch(index, query, out, opts = {}) {
   const limit = opts.limit ?? 10;
   const ftsHits = bm25Search(index.fts, query, limit);
   const ftsRanking = ftsHits.map((h) => h.operationId);
-  rrfMerge([ftsRanking]);
-  out.error("semantic leg skipped (no embedding provider) \u2014 FTS-only results");
-  if (ftsHits.length === 0) {
+  const ftsHitMap = new Map(ftsHits.map((h) => [h.operationId, h]));
+  let semanticRanking = [];
+  let semanticActive = false;
+  const provider = opts.embedProvider ?? null;
+  if (!provider) {
+    out.error("semantic leg skipped (no embedding provider) \u2014 FTS-only results");
+  } else if (!index.embedModelId || !index.vectors) {
+    out.error(
+      `semantic leg skipped (index has no vectors, embedModelId is null) \u2014 FTS-only results`
+    );
+  } else if (provider.modelId !== index.embedModelId) {
+    out.error(
+      `semantic leg skipped: index built with "${index.embedModelId}", runtime provider is "${provider.modelId}" \u2014 FTS-only results`
+    );
+  } else {
+    try {
+      const queryVec = await provider.embed([query]);
+      const dtype = index.dtype ?? "f32";
+      const opVecs = index.vectors.map((v) => ({
+        operationId: v.operationId,
+        vec: v.vec
+      }));
+      const cosineHits = cosineRank(queryVec[0], opVecs, dtype);
+      semanticRanking = cosineHits.slice(0, limit).map((h) => h.operationId);
+      semanticActive = true;
+    } catch (err) {
+      out.error(
+        `semantic leg skipped (embed error: ${err instanceof Error ? err.message : String(err)}) \u2014 FTS-only results`
+      );
+    }
+  }
+  const rankings = [];
+  if (semanticActive && semanticRanking.length > 0) {
+    rankings.push(semanticRanking);
+  }
+  rankings.push(ftsRanking);
+  const merged = rrfMerge(rankings);
+  if (merged.size === 0) {
     out.log("No results found.");
     return;
   }
-  for (let i = 0; i < ftsHits.length; i++) {
-    const hit = ftsHits[i];
-    const termsStr = hit.terms.join(", ");
-    out.log(`${i + 1}. ${hit.operationId}  (score: ${hit.score.toFixed(4)}, terms: ${termsStr})`);
+  const sorted = [...merged.entries()].sort((a, b) => b[1] - a[1]);
+  const top = sorted.slice(0, limit);
+  for (let i = 0; i < top.length; i++) {
+    const [opId, fusedScore] = top[i];
+    const ftsHit = ftsHitMap.get(opId);
+    const inSemantic = semanticActive && semanticRanking.includes(opId);
+    const inFts = ftsHit !== void 0;
+    let leg;
+    if (inSemantic && inFts) {
+      leg = "both";
+    } else if (inSemantic) {
+      leg = "semantic";
+    } else {
+      leg = "FTS";
+    }
+    const termsStr = ftsHit ? ftsHit.terms.join(", ") : "";
+    const termsPart = termsStr ? `, terms: ${termsStr}` : "";
+    out.log(
+      `${i + 1}. ${opId}  (leg: ${leg}, fused: ${fusedScore.toFixed(6)}${termsPart})`
+    );
   }
 }
 
@@ -6037,18 +6202,18 @@ function fail(msg, usage = false, code = 2) {
 }
 var LARGE_BODY_THRESHOLD = 500;
 function freshWorkdir(prefix) {
-  const dir = join3(tmpdir(), `${prefix}-${randomBytes2(6).toString("hex")}`);
+  const dir = join4(tmpdir(), `${prefix}-${randomBytes2(6).toString("hex")}`);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
 function writeWorkdir(dir, meta, body) {
-  writeFileSync(join3(dir, "meta.json"), JSON.stringify(meta, null, 2) + "\n", "utf8");
-  writeFileSync(join3(dir, "body.md"), body, "utf8");
+  writeFileSync(join4(dir, "meta.json"), JSON.stringify(meta, null, 2) + "\n", "utf8");
+  writeFileSync(join4(dir, "body.md"), body, "utf8");
 }
 function readWorkdirMeta(dir) {
-  const p = join3(dir, "meta.json");
-  if (!existsSync3(p)) fail(`workdir ${dir} has no meta.json`);
-  return JSON.parse(readFileSync4(p, "utf8"));
+  const p = join4(dir, "meta.json");
+  if (!existsSync4(p)) fail(`workdir ${dir} has no meta.json`);
+  return JSON.parse(readFileSync5(p, "utf8"));
 }
 function removeWorkdir(dir) {
   rmSync(dir, { recursive: true, force: true });
@@ -6059,7 +6224,7 @@ function cleanupStale() {
   let count = 0;
   for (const name of readdirSync(tmp)) {
     if (!/^aura-(artifact|wiki|upload)-[0-9a-f]+$/.test(name)) continue;
-    const p = join3(tmp, name);
+    const p = join4(tmp, name);
     try {
       if (statSync2(p).mtimeMs < cutoff) {
         rmSync(p, { recursive: true, force: true });
@@ -6087,9 +6252,9 @@ async function artifactGet(client2, id) {
 async function artifactUpdate(client2, dir, summary) {
   const meta = readWorkdirMeta(dir);
   if (meta.kind !== "artifact") fail(`workdir ${dir} is not an artifact workdir`);
-  const bodyPath = join3(dir, "body.md");
-  if (!existsSync3(bodyPath)) fail(`workdir ${dir} has no body.md`);
-  const body = readFileSync4(bodyPath, "utf8");
+  const bodyPath = join4(dir, "body.md");
+  if (!existsSync4(bodyPath)) fail(`workdir ${dir} has no body.md`);
+  const body = readFileSync5(bodyPath, "utf8");
   await client2.mcpUpdateArtifact({
     id: meta.artifact_id,
     mode: "whole",
@@ -6103,7 +6268,7 @@ async function artifactUpdate(client2, dir, summary) {
 async function artifactCreate(client2, opts) {
   let body = "";
   if (opts.bodyFile) {
-    body = readFileSync4(opts.bodyFile, "utf8");
+    body = readFileSync5(opts.bodyFile, "utf8");
     if (body.length < LARGE_BODY_THRESHOLD) console.error(`note: body is ${body.length} bytes (\u2264 ${LARGE_BODY_THRESHOLD}); a direct mcpCreateArtifact call would also be fine.`);
   }
   const created = await client2.mcpCreateArtifact({
@@ -6211,9 +6376,9 @@ async function wikiGet(client2, opts) {
 async function wikiSave(client2, dir, summary) {
   const meta = readWorkdirMeta(dir);
   if (meta.kind !== "wiki") fail(`workdir ${dir} is not a wiki workdir`);
-  const bodyPath = join3(dir, "body.md");
-  if (!existsSync3(bodyPath)) fail(`workdir ${dir} has no body.md`);
-  const body = readFileSync4(bodyPath, "utf8");
+  const bodyPath = join4(dir, "body.md");
+  if (!existsSync4(bodyPath)) fail(`workdir ${dir} has no body.md`);
+  const body = readFileSync5(bodyPath, "utf8");
   await client2.saveKnowledgeNodeBody({
     uuid: meta.node_uuid,
     body,
@@ -6246,7 +6411,7 @@ async function wikiCreate(client2, opts) {
   console.log(res.id);
 }
 async function uploadCreate(client2, opts) {
-  const buf = readFileSync4(opts.file);
+  const buf = readFileSync5(opts.file);
   const contentBase64 = buf.toString("base64");
   const filename = opts.filename ?? opts.file.split("/").pop() ?? "upload";
   const res = await client2.mcpCreateUploadDocument({
@@ -6278,7 +6443,7 @@ ${text}
     process.stdout.write(summary);
   } else {
     const dir = freshWorkdir("aura-upload");
-    writeFileSync(join3(dir, "parsed.md"), summary, "utf8");
+    writeFileSync(join4(dir, "parsed.md"), summary, "utf8");
     console.log(`workdir: ${dir}/`);
     console.error(`  ${doc.filename}  (${summary.length} bytes) \u2014 parsed text in parsed.md`);
   }
@@ -6520,8 +6685,12 @@ async function main() {
           const query = rest[0];
           if (!query) fail("rest search: missing <query>", true);
           const flags = parseFlags(rest.slice(1));
-          restSearch(REST_INDEX, query, console, {
-            limit: flags.limit ? Number(flags.limit) : void 0
+          const { createEmbedProvider: createEmbedProvider2, loadEmbedSettings: loadEmbedSettings2 } = await Promise.resolve().then(() => (init_provider(), provider_exports));
+          const embedSettings = loadEmbedSettings2();
+          const embedProvider = await createEmbedProvider2(embedSettings);
+          await restSearch(REST_INDEX, query, console, {
+            limit: flags.limit ? Number(flags.limit) : void 0,
+            embedProvider
           });
           return;
         }
