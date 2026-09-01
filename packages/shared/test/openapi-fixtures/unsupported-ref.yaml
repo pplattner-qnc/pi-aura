@@ -1,0 +1,16 @@
+openapi: 3.1.0
+info:
+  title: Unsupported ref fixture
+  version: 0.0.1
+paths:
+  /external:
+    get:
+      operationId: externalRefOp
+      summary: uses an external ref
+      parameters:
+        - $ref: "https://example.com/other.yaml#/components/parameters/Foo"
+      responses:
+        "200":
+          description: ok
+components:
+  schemas: {}

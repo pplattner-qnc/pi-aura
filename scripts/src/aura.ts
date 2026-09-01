@@ -27,6 +27,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createDefaultAuraClient } from "@pi-aura/shared/aura-client";
+import { resolveAuraCredentials } from "@pi-aura/shared/aura-credentials";
+import { loadOpenApi } from "@pi-aura/shared/openapi/loader";
+import type { OpenApiIndex } from "@pi-aura/shared/openapi/loader";
+import { restList, restDescribe } from "./rest-list-describe.js";
+import { restCall, parseCallArgs, resolveBody } from "./rest-call.js";
+import { restSearch } from "./rest-search.js";
+import { REST_INDEX } from "./generated/rest-index.js";
 import type {
   AuraClient,
   ArtifactKind,
@@ -57,7 +64,12 @@ const USAGE = `Usage:
   node aura.mjs wiki tree --slug "<space>"
   node aura.mjs wiki create --space <slug> --title T --slug S    prints new node uuid
   node aura.mjs upload create --file <path> [--mime <type>] [--filename <name>]
-  node aura.mjs upload get <upload-uuid> [--out <path>]          parsed text to file (or stdout if small)`;
+  node aura.mjs upload get <upload-uuid> [--out <path>]          parsed text to file (or stdout if small)
+  node aura.mjs rest list                                    list all REST operations grouped by tag
+  node aura.mjs rest describe <operationId>                  print the full shape of one REST operation
+  node aura.mjs rest call <operationId> [--param name=val …] [--body-file F] [--body <json>]
+                                                            invoke a REST operation by id
+  node aura.mjs rest search "<natural-language intent>"     find REST operations by semantic + full-text search (local model, on by default)`;
 
 function fail(msg: string, usage = false, code = 2): never {
   console.error(msg);
@@ -399,11 +411,49 @@ function parseFlags(args: string[]): Record<string, string> {
   return flags;
 }
 
+// ---------------------------------------------------------------------------
+// REST index resolution (inlined blob → OpenApiIndex, or dev-mode fallback)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the REST operation index for list/describe/call. The committed
+ * bundle uses the inlined REST_INDEX metadata (no openapi.yaml at runtime).
+ * In dev/source mode (REST_INDEX absent), fall back to loadOpenApi.
+ */
+function getRestIndex(): OpenApiIndex {
+  if (REST_INDEX) {
+    const index: OpenApiIndex = {};
+    for (const m of REST_INDEX.metadata) {
+      index[m.operationId] = {
+        operationId: m.operationId,
+        method: m.method,
+        path: m.path,
+        pathParams: m.pathParams,
+        queryParams: m.queryParams,
+        body: m.body,
+        tags: m.tags,
+        summary: m.summary,
+        // description omitted in slim metadata (stays in FTS text only)
+        responses: m.responses,
+      };
+    }
+    return index;
+  }
+  // Dev fallback: read openapi.yaml from the repo root.
+  const openApiPath = resolve(process.cwd(), "packages", "shared", "openapi", "openapi.yaml");
+  return loadOpenApi(openApiPath);
+}
+
 async function main(): Promise<void> {
   const group = process.argv[2];
   const sub = process.argv[3];
   const rest = process.argv.slice(4);
-  const client = await createDefaultAuraClient();
+
+  // The `rest` group's list/describe subcommands are pure metadata (no
+  // network, no auth); do NOT eagerly resolve credentials for them.
+  // Only construct the client for groups that actually need it.
+  const needsClient = group !== "rest";
+  const client = needsClient ? await createDefaultAuraClient() : null as never;
 
   try {
     if (group === "artifact") {
@@ -560,6 +610,61 @@ async function main(): Promise<void> {
           return;
         }
         default: fail(`upload: unknown subcommand "${sub}"`, true);
+      }
+    } else if (group === "rest") {
+      // The committed bundle uses the inlined REST_INDEX (no openapi.yaml read
+      // at runtime). In dev/source mode (REST_INDEX absent), fall back to
+      // loadOpenApi reading the YAML from the repo root.
+      const index = getRestIndex();
+      switch (sub) {
+        case "list": {
+          restList(index, console);
+          return;
+        }
+        case "describe": {
+          const opId = rest[0];
+          if (!opId) fail("rest describe: missing <operationId>", true);
+          restDescribe(index, opId, console, REST_INDEX.fts);
+          return;
+        }
+        case "call": {
+          const opId = rest[0];
+          if (!opId) fail("rest call: missing <operationId>", true);
+          const callArgs = parseCallArgs(rest.slice(1));
+          const body = resolveBody(callArgs);
+          // Resolve credentials lazily — only rest call needs them.
+          const credentials = await resolveAuraCredentials();
+          await restCall(index, credentials, {
+            operationId: opId,
+            params: callArgs.params,
+            body,
+          }, console, { fts: REST_INDEX.fts });
+          return;
+        }
+        case "search": {
+          const query = rest[0];
+          if (!query) fail("rest search: missing <query>", true);
+          const flags = parseFlags(rest.slice(1));
+          // Create an embed provider at runtime. By default (no aura.embed.*
+          // settings) → LocalEmbedProvider (always-on local CPU model).
+          // When aura.embed.provider is set → cloud provider (optional override).
+          // On local-init failure → null → restSearch degrades to FTS-only.
+          const { createEmbedProvider, loadEmbedSettings } = await import("@pi-aura/shared/embed/provider");
+          const embedSettings = loadEmbedSettings();
+          let embedProvider: import("@pi-aura/shared/embed/provider").EmbedProvider | null = null;
+          try {
+            embedProvider = await createEmbedProvider(embedSettings);
+          } catch {
+            // Local provider init failure → null → FTS-only fallback
+            embedProvider = null;
+          }
+          await restSearch(REST_INDEX, query, console, {
+            limit: flags.limit ? Number(flags.limit) : undefined,
+            embedProvider,
+          });
+          return;
+        }
+        default: fail(`rest: unknown subcommand "${sub}"`, true);
       }
     } else {
       fail(group ? `unknown group "${group}"` : "missing group", true);
