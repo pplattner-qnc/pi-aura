@@ -614,7 +614,7 @@ var init_keyring = __esm({
 });
 
 // src/aura.ts
-import { mkdirSync, writeFileSync, readFileSync as readFileSync3, rmSync, existsSync as existsSync3, readdirSync, statSync as statSync2 } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync as readFileSync4, rmSync, existsSync as existsSync3, readdirSync, statSync as statSync2 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join3, resolve } from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
@@ -1414,6 +1414,24 @@ function loadAuraClientSettings(settingsPath = SETTINGS_PATH) {
   } catch {
     return {};
   }
+}
+
+// ../packages/shared/src/aura-credentials.ts
+async function resolveAuraCredentials(opts = {}) {
+  const settings = loadAuraClientSettings(opts.settingsPath);
+  if (!settings.baseUrl) {
+    throw new Error(
+      'Missing `aura.baseUrl` in ~/.pi/agent/settings.json. Add the Aura REST API base URL (e.g. "https://aura.dev-anwalt.de/api") to the `aura` block.'
+    );
+  }
+  const keyring = opts.keyring ?? await createKeyring();
+  const pat = await keyring.getSecret({ service: "aura", name: "pat" });
+  if (pat === null) {
+    throw new Error(
+      'No Aura PAT found in the OS keyring. Run `/aura secrets discover` to store one (service: "aura", name: "pat").'
+    );
+  }
+  return { baseUrl: settings.baseUrl, pat };
 }
 
 // ../packages/shared/src/generated/core/params.gen.ts
@@ -2320,20 +2338,9 @@ function mapArtifactReview(d) {
   };
 }
 async function createDefaultAuraClient() {
-  const settings = loadAuraClientSettings();
-  if (!settings.baseUrl) {
-    throw new Error(
-      'Missing `aura.baseUrl` in ~/.pi/agent/settings.json. Add the Aura REST API base URL (e.g. "https://aura.dev-anwalt.de/api") to the `aura` block.'
-    );
-  }
+  const { baseUrl, pat } = await resolveAuraCredentials();
   const keyring = await createKeyring();
-  const pat = await keyring.getSecret({ service: "aura", name: "pat" });
-  if (pat === null) {
-    throw new Error(
-      'No Aura PAT found in the OS keyring. Run `/aura secrets discover` to store one (service: "aura", name: "pat").'
-    );
-  }
-  return new HeyApiAuraClient({ keyring, baseUrl: settings.baseUrl, pat });
+  return new HeyApiAuraClient({ keyring, baseUrl, pat });
 }
 
 // ../packages/shared/src/openapi/loader.ts
@@ -5698,6 +5705,237 @@ function restDescribe(index, opId, out) {
   }
 }
 
+// src/rest-call.ts
+import { readFileSync as readFileSync3 } from "node:fs";
+
+// ../packages/shared/src/rest/build-request.ts
+var PATH_PARAM_RE3 = /\{([^}]+)\}/g;
+function buildRequest(op, params, body) {
+  let urlPath = op.path;
+  const templateNames = extractPathParamNames2(op.path);
+  const providedPathKeys = /* @__PURE__ */ new Set();
+  for (const name of templateNames) {
+    const val = params[name];
+    if (val === void 0) {
+      throw new Error(
+        `Missing required path param "${name}" for operation "${op.operationId}".`
+      );
+    }
+    if (Array.isArray(val)) {
+      throw new Error(
+        `Path param "${name}" for operation "${op.operationId}" must be a single value, got an array.`
+      );
+    }
+    urlPath = urlPath.replace(`{${name}}`, encodeURIComponent(val));
+    providedPathKeys.add(name);
+  }
+  const queryParamNames = new Set(op.queryParams.map((p) => p.name));
+  for (const key of Object.keys(params)) {
+    if (!templateNames.includes(key) && !queryParamNames.has(key)) {
+      throw new Error(
+        `Extra param "${key}" is not a path or query param of operation "${op.operationId}".`
+      );
+    }
+    if (templateNames.includes(key)) {
+      providedPathKeys.add(key);
+    }
+  }
+  const queryParts = [];
+  for (const qp of op.queryParams) {
+    const val = params[qp.name];
+    if (val === void 0) continue;
+    queryParts.push(serializeQueryParam(qp, val));
+  }
+  const query = queryParts.length > 0 ? "?" + queryParts.join("&") : "";
+  const headers = {};
+  let bodyStr;
+  if (body !== void 0) {
+    if (!op.body) {
+      throw new Error(
+        `Operation "${op.operationId}" does not declare a request body; remove the body argument.`
+      );
+    }
+    bodyStr = JSON.stringify(body);
+    headers["Content-Type"] = "application/json";
+  } else {
+    if (op.body?.required) {
+      throw new Error(
+        `Operation "${op.operationId}" requires a request body; provide one via --body-file or --body.`
+      );
+    }
+  }
+  return {
+    method: op.method.toUpperCase(),
+    urlPath,
+    query,
+    headers,
+    body: bodyStr
+  };
+}
+function extractPathParamNames2(path) {
+  const names = [];
+  let m;
+  while ((m = PATH_PARAM_RE3.exec(path)) !== null) {
+    names.push(m[1]);
+  }
+  return names;
+}
+var SUPPORTED_QUERY_STYLES = /* @__PURE__ */ new Set(["form", void 0]);
+function serializeQueryParam(param, val) {
+  if (!Array.isArray(val)) {
+    return `${encodeURIComponent(param.name)}=${encodeURIComponent(val)}`;
+  }
+  const style = param.style ?? "form";
+  if (!SUPPORTED_QUERY_STYLES.has(style)) {
+    throw new Error(
+      `Unsupported query style "${style}" for param "${param.name}" in operation. Only "form" is supported.`
+    );
+  }
+  if (param.explode === true) {
+    return val.map((v) => `${encodeURIComponent(param.name)}=${encodeURIComponent(v)}`).join("&");
+  }
+  return `${encodeURIComponent(param.name)}=${val.map(encodeURIComponent).join(",")}`;
+}
+
+// src/rest-call.ts
+function parseCallArgs(args) {
+  const params = {};
+  let bodyFile;
+  let body;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--param") {
+      const val = args[i + 1];
+      if (val === void 0 || val.startsWith("--")) {
+        throw new Error("rest call: --param requires a name=value argument");
+      }
+      const eqIdx = val.indexOf("=");
+      if (eqIdx === -1) {
+        throw new Error(`rest call: --param "${val}" must be in name=value format`);
+      }
+      const name = val.slice(0, eqIdx);
+      const value = val.slice(eqIdx + 1);
+      if (!params[name]) params[name] = [];
+      params[name].push(value);
+      i++;
+    } else if (a === "--body-file") {
+      const val = args[i + 1];
+      if (val === void 0 || val.startsWith("--")) {
+        throw new Error("rest call: --body-file requires a file path argument");
+      }
+      if (body !== void 0) {
+        throw new Error("rest call: --body and --body-file are mutually exclusive");
+      }
+      bodyFile = val;
+      i++;
+    } else if (a === "--body") {
+      const val = args[i + 1];
+      if (val === void 0 || val.startsWith("--")) {
+        throw new Error("rest call: --body requires a JSON string argument");
+      }
+      if (bodyFile !== void 0) {
+        throw new Error("rest call: --body and --body-file are mutually exclusive");
+      }
+      body = val;
+      i++;
+    }
+  }
+  return { params, bodyFile, body };
+}
+function closestMatches2(ids, query, max = 5) {
+  const lower = query.toLowerCase();
+  const substrMatches = ids.filter((id) => id.toLowerCase().includes(lower));
+  if (substrMatches.length > 0) return substrMatches.slice(0, max);
+  const scored = ids.map((id) => ({ id, dist: levenshtein2(id.toLowerCase(), lower) }));
+  scored.sort((a, b) => a.dist - b.dist);
+  return scored.slice(0, max).map((s) => s.id);
+}
+function levenshtein2(a, b) {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[m][n];
+}
+var PRETTY_PRINT_THRESHOLD = 5e3;
+async function restCall(index, credentials, args, out, opts = {}) {
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const op = index[args.operationId];
+  if (!op) {
+    const ids = Object.keys(index);
+    const matches = closestMatches2(ids, args.operationId);
+    out.error(`Error: unknown operationId "${args.operationId}".`);
+    if (matches.length > 0) {
+      out.error(`Closest matches:`);
+      for (const m of matches) out.error(`  ${m}`);
+    }
+    process.exit(2);
+  }
+  let body;
+  if (args.body !== void 0) {
+    body = args.body;
+  }
+  const buildParams = {};
+  for (const [key, values] of Object.entries(args.params)) {
+    buildParams[key] = values.length === 1 ? values[0] : values;
+  }
+  const request = buildRequest(op, buildParams, body);
+  const url = `${credentials.baseUrl}${request.urlPath}${request.query}`;
+  const headers = {
+    Authorization: `Bearer ${credentials.pat}`,
+    ...request.headers
+  };
+  const response = await fetchImpl(url, {
+    method: request.method,
+    headers,
+    body: request.body
+  });
+  const responseText = await response.text();
+  if (!response.ok) {
+    out.error(`HTTP ${response.status}: ${responseText}`);
+    process.exit(1);
+  }
+  let output;
+  if (responseText.length <= PRETTY_PRINT_THRESHOLD) {
+    try {
+      const parsed = JSON.parse(responseText);
+      output = JSON.stringify(parsed, null, 2);
+    } catch {
+      output = responseText;
+    }
+  } else {
+    output = responseText;
+  }
+  out.log(output);
+}
+function resolveBody(args) {
+  if (args.bodyFile) {
+    const raw = readFileSync3(args.bodyFile, "utf8");
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      throw new Error(`rest call: --body-file "${args.bodyFile}" is not valid JSON: ${e.message}`);
+    }
+  }
+  if (args.body !== void 0) {
+    try {
+      return JSON.parse(args.body);
+    } catch (e) {
+      throw new Error(`rest call: --body is not valid JSON: ${e.message}`);
+    }
+  }
+  return void 0;
+}
+
 // src/aura.ts
 var USAGE = `Usage:
   node aura.mjs artifact get <artifact-uuid>              fetch body+meta into a workdir
@@ -5719,7 +5957,9 @@ var USAGE = `Usage:
   node aura.mjs upload create --file <path> [--mime <type>] [--filename <name>]
   node aura.mjs upload get <upload-uuid> [--out <path>]          parsed text to file (or stdout if small)
   node aura.mjs rest list                                    list all REST operations grouped by tag
-  node aura.mjs rest describe <operationId>                  print the full shape of one REST operation`;
+  node aura.mjs rest describe <operationId>                  print the full shape of one REST operation
+  node aura.mjs rest call <operationId> [--param name=val \u2026] [--body-file F] [--body <json>]
+                                                            invoke a REST operation by id`;
 function fail(msg, usage = false, code = 2) {
   console.error(msg);
   if (usage) console.error(USAGE);
@@ -5738,7 +5978,7 @@ function writeWorkdir(dir, meta, body) {
 function readWorkdirMeta(dir) {
   const p = join3(dir, "meta.json");
   if (!existsSync3(p)) fail(`workdir ${dir} has no meta.json`);
-  return JSON.parse(readFileSync3(p, "utf8"));
+  return JSON.parse(readFileSync4(p, "utf8"));
 }
 function removeWorkdir(dir) {
   rmSync(dir, { recursive: true, force: true });
@@ -5779,7 +6019,7 @@ async function artifactUpdate(client2, dir, summary) {
   if (meta.kind !== "artifact") fail(`workdir ${dir} is not an artifact workdir`);
   const bodyPath = join3(dir, "body.md");
   if (!existsSync3(bodyPath)) fail(`workdir ${dir} has no body.md`);
-  const body = readFileSync3(bodyPath, "utf8");
+  const body = readFileSync4(bodyPath, "utf8");
   await client2.mcpUpdateArtifact({
     id: meta.artifact_id,
     mode: "whole",
@@ -5793,7 +6033,7 @@ async function artifactUpdate(client2, dir, summary) {
 async function artifactCreate(client2, opts) {
   let body = "";
   if (opts.bodyFile) {
-    body = readFileSync3(opts.bodyFile, "utf8");
+    body = readFileSync4(opts.bodyFile, "utf8");
     if (body.length < LARGE_BODY_THRESHOLD) console.error(`note: body is ${body.length} bytes (\u2264 ${LARGE_BODY_THRESHOLD}); a direct mcpCreateArtifact call would also be fine.`);
   }
   const created = await client2.mcpCreateArtifact({
@@ -5903,7 +6143,7 @@ async function wikiSave(client2, dir, summary) {
   if (meta.kind !== "wiki") fail(`workdir ${dir} is not a wiki workdir`);
   const bodyPath = join3(dir, "body.md");
   if (!existsSync3(bodyPath)) fail(`workdir ${dir} has no body.md`);
-  const body = readFileSync3(bodyPath, "utf8");
+  const body = readFileSync4(bodyPath, "utf8");
   await client2.saveKnowledgeNodeBody({
     uuid: meta.node_uuid,
     body,
@@ -5936,7 +6176,7 @@ async function wikiCreate(client2, opts) {
   console.log(res.id);
 }
 async function uploadCreate(client2, opts) {
-  const buf = readFileSync3(opts.file);
+  const buf = readFileSync4(opts.file);
   const contentBase64 = buf.toString("base64");
   const filename = opts.filename ?? opts.file.split("/").pop() ?? "upload";
   const res = await client2.mcpCreateUploadDocument({
@@ -6170,6 +6410,19 @@ async function main() {
           const opId = rest[0];
           if (!opId) fail("rest describe: missing <operationId>", true);
           restDescribe(index, opId, console);
+          return;
+        }
+        case "call": {
+          const opId = rest[0];
+          if (!opId) fail("rest call: missing <operationId>", true);
+          const callArgs = parseCallArgs(rest.slice(1));
+          const body = resolveBody(callArgs);
+          const credentials = await resolveAuraCredentials();
+          await restCall(index, credentials, {
+            operationId: opId,
+            params: callArgs.params,
+            body
+          }, console);
           return;
         }
         default:

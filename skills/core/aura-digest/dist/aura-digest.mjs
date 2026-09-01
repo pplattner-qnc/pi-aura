@@ -8425,6 +8425,24 @@ function loadAuraClientSettings(settingsPath = SETTINGS_PATH) {
   }
 }
 
+// ../packages/shared/src/aura-credentials.ts
+async function resolveAuraCredentials(opts = {}) {
+  const settings = loadAuraClientSettings(opts.settingsPath);
+  if (!settings.baseUrl) {
+    throw new Error(
+      'Missing `aura.baseUrl` in ~/.pi/agent/settings.json. Add the Aura REST API base URL (e.g. "https://aura.dev-anwalt.de/api") to the `aura` block.'
+    );
+  }
+  const keyring = opts.keyring ?? await createKeyring();
+  const pat = await keyring.getSecret({ service: "aura", name: "pat" });
+  if (pat === null) {
+    throw new Error(
+      'No Aura PAT found in the OS keyring. Run `/aura secrets discover` to store one (service: "aura", name: "pat").'
+    );
+  }
+  return { baseUrl: settings.baseUrl, pat };
+}
+
 // ../packages/shared/src/generated/core/params.gen.ts
 var extraPrefixesMap = {
   $body_: "body",
@@ -9329,20 +9347,9 @@ function mapArtifactReview(d) {
   };
 }
 async function createDefaultAuraClient() {
-  const settings = loadAuraClientSettings();
-  if (!settings.baseUrl) {
-    throw new Error(
-      'Missing `aura.baseUrl` in ~/.pi/agent/settings.json. Add the Aura REST API base URL (e.g. "https://aura.dev-anwalt.de/api") to the `aura` block.'
-    );
-  }
+  const { baseUrl, pat } = await resolveAuraCredentials();
   const keyring = await createKeyring();
-  const pat = await keyring.getSecret({ service: "aura", name: "pat" });
-  if (pat === null) {
-    throw new Error(
-      'No Aura PAT found in the OS keyring. Run `/aura secrets discover` to store one (service: "aura", name: "pat").'
-    );
-  }
-  return new HeyApiAuraClient({ keyring, baseUrl: settings.baseUrl, pat });
+  return new HeyApiAuraClient({ keyring, baseUrl, pat });
 }
 
 // src/devlinks.ts

@@ -6,7 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "codegen": "openapi-ts -f openapi-ts.config.ts",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test 'test/**/*.test.ts'"
   },
   "dependencies": {
     "dbus-next": "^0.10.2",

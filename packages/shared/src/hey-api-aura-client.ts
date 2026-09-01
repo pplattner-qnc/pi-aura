@@ -15,7 +15,7 @@ import { createClient } from "./generated/client/client.gen.js";
 import type { Client } from "./generated/client/types.gen.js";
 import type { Keyring } from "./keyring/index.js";
 import { createKeyring } from "./keyring/index.js";
-import { loadAuraClientSettings } from "./settings.js";
+import { resolveAuraCredentials } from "./aura-credentials.js";
 import type {
   Artifact,
   ArtifactApprovals,
@@ -898,30 +898,14 @@ function mapArtifactReview(d: unknown): ArtifactReview {
 
 /**
  * Build a production `HeyApiAuraClient` from environment defaults:
- * 1. Read `aura.baseUrl` from ~/.pi/agent/settings.json.
- * 2. Build a keyring via `createKeyring()`.
- * 3. Validate the PAT is present (clear error -> `/aura secrets discover`).
- * 4. Construct `HeyApiAuraClient({ keyring, baseUrl })`.
+ * 1. Resolve credentials via `resolveAuraCredentials()` (the single path).
+ * 2. Construct `HeyApiAuraClient({ keyring, baseUrl, pat })`.
  *
  * Throws actionable errors for missing baseUrl or missing PAT.
  */
 export async function createDefaultAuraClient(): Promise<AuraClient> {
-  const settings = loadAuraClientSettings();
-  if (!settings.baseUrl) {
-    throw new Error(
-      "Missing `aura.baseUrl` in ~/.pi/agent/settings.json. Add the Aura REST API base URL (e.g. \"https://aura.dev-anwalt.de/api\") to the `aura` block.",
-    );
-  }
-
+  const { baseUrl, pat } = await resolveAuraCredentials();
   const keyring = await createKeyring();
-  const pat = await keyring.getSecret({ service: "aura", name: "pat" });
-  if (pat === null) {
-    throw new Error(
-      "No Aura PAT found in the OS keyring. Run `/aura secrets discover` to store one (service: \"aura\", name: \"pat\").",
-    );
-  }
-
-  // Pass the validated PAT to avoid a double keyring read (open decision #3).
-  return new HeyApiAuraClient({ keyring, baseUrl: settings.baseUrl, pat });
+  return new HeyApiAuraClient({ keyring, baseUrl, pat });
 }
 
