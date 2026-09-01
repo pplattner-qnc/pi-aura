@@ -1,3 +1,2 @@
-task: generic-openapi-cli-wrapper
-slice: 5-local-embeddings
-slice_status: done
+task: None
+slice: None
