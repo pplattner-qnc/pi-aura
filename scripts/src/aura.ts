@@ -27,6 +27,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createDefaultAuraClient } from "@pi-aura/shared/aura-client";
+import { loadOpenApi } from "@pi-aura/shared/openapi/loader";
+import { restList, restDescribe } from "./rest-list-describe.js";
 import type {
   AuraClient,
   ArtifactKind,
@@ -57,7 +59,9 @@ const USAGE = `Usage:
   node aura.mjs wiki tree --slug "<space>"
   node aura.mjs wiki create --space <slug> --title T --slug S    prints new node uuid
   node aura.mjs upload create --file <path> [--mime <type>] [--filename <name>]
-  node aura.mjs upload get <upload-uuid> [--out <path>]          parsed text to file (or stdout if small)`;
+  node aura.mjs upload get <upload-uuid> [--out <path>]          parsed text to file (or stdout if small)
+  node aura.mjs rest list                                    list all REST operations grouped by tag
+  node aura.mjs rest describe <operationId>                  print the full shape of one REST operation`;
 
 function fail(msg: string, usage = false, code = 2): never {
   console.error(msg);
@@ -403,7 +407,12 @@ async function main(): Promise<void> {
   const group = process.argv[2];
   const sub = process.argv[3];
   const rest = process.argv.slice(4);
-  const client = await createDefaultAuraClient();
+
+  // The `rest` group's list/describe subcommands are pure metadata (no
+  // network, no auth); do NOT eagerly resolve credentials for them.
+  // Only construct the client for groups that actually need it.
+  const needsClient = group !== "rest";
+  const client = needsClient ? await createDefaultAuraClient() : null as never;
 
   try {
     if (group === "artifact") {
@@ -560,6 +569,25 @@ async function main(): Promise<void> {
           return;
         }
         default: fail(`upload: unknown subcommand "${sub}"`, true);
+      }
+    } else if (group === "rest") {
+      // rest list / rest describe — pure metadata, no network/auth.
+      // Dev mode (slice 1): reads openapi.yaml from the repo root. This is
+      // developer-facing until slice 3a inlines a compact index into the bundle.
+      const openApiPath = resolve(process.cwd(), "packages", "shared", "openapi", "openapi.yaml");
+      const index = loadOpenApi(openApiPath);
+      switch (sub) {
+        case "list": {
+          restList(index, console);
+          return;
+        }
+        case "describe": {
+          const opId = rest[0];
+          if (!opId) fail("rest describe: missing <operationId>", true);
+          restDescribe(index, opId, console);
+          return;
+        }
+        default: fail(`rest: unknown subcommand "${sub}"`, true);
       }
     } else {
       fail(group ? `unknown group "${group}"` : "missing group", true);
