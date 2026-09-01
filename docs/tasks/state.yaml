@@ -1,3 +1,2 @@
 task: generic-openapi-cli-wrapper
 slice: 3-fts-search-and-inlined-index
-slice_status: done

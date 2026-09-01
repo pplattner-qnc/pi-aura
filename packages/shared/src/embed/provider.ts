@@ -11,6 +11,10 @@
 // Supports at least one HTTP provider: OpenAI-style /v1/embeddings via fetch.
 // Configurable via baseURL, not hardcoded.
 
+import { readFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 export interface EmbedProvider {
   /** The model id this provider uses (for the model-id guard). */
   modelId: string;
@@ -32,6 +36,43 @@ export interface EmbedProviderConfig {
 export interface CreateEmbedProviderOptions {
   /** Injectable fetch implementation for testing. */
   fetchImpl?: typeof fetch;
+}
+
+export interface EmbedSettings {
+  provider?: string;
+  model?: string;
+  apiKey?: string;
+  baseURL?: string;
+}
+
+const SETTINGS_PATH = join(homedir(), ".pi", "agent", "settings.json");
+
+/**
+ * Read the `aura.embed` block from pi's global settings.json and return the
+ * embed config. Also checks env vars (AURA_EMBED_PROVIDER, AURA_EMBED_MODEL,
+ * AURA_EMBED_API_KEY, AURA_EMBED_BASE_URL) as overrides. Returns `{}` when
+ * absent so createEmbedProvider returns null (graceful FTS-only fallback).
+ */
+export function loadEmbedSettings(
+  settingsPath: string = SETTINGS_PATH,
+): EmbedSettings {
+  let settings: { aura?: { embed?: EmbedSettings } } = {};
+  try {
+    if (existsSync(settingsPath)) {
+      const raw = readFileSync(settingsPath, "utf8");
+      settings = JSON.parse(raw);
+    }
+  } catch {
+    // ignore — fall back to env
+  }
+
+  const embed = settings.aura?.embed ?? {};
+  return {
+    provider: process.env.AURA_EMBED_PROVIDER || embed.provider || undefined,
+    model: process.env.AURA_EMBED_MODEL || embed.model || undefined,
+    apiKey: process.env.AURA_EMBED_API_KEY || embed.apiKey || undefined,
+    baseURL: process.env.AURA_EMBED_BASE_URL || embed.baseURL || undefined,
+  };
 }
 
 /**
