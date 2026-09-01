@@ -3,11 +3,55 @@ kind: task
 type: feature
 slug: generic-openapi-cli-wrapper
 title: Generic OpenAPI → REST-CLI wrapper in the aura CLI (generates commands + agent resources)
-status: proposed
+status: ready
 size: l
+slices: [1-loader-list-describe, 2-rest-call-invoker, 3-fts-search-and-inlined-index, 4-semantic-search-leg]
+blocked_by: []
 ---
 
 # Generic OpenAPI → REST-CLI wrapper in the aura CLI
+
+## Architecture notes
+
+### Runtime operation metadata: inlined into the bundle (DECIDED)
+
+The task body says "the loader reads `openapi.yaml` at runtime (CLI)".
+That conflicts with the task's other hard constraint — a **self-contained
+committed `.mjs`** with "no sidecar file at runtime" — because the
+committed bundle ships to end users whose installed repo layout may not
+keep `packages/shared/openapi/openapi.yaml` reachable from the bundle.
+
+Decision (user-approved during slice planning): `openapi.yaml` is a
+**build-time-only** input. The `gen-rest-index` build step parses it once
+and emits a compact operation-metadata blob that esbuild **inlines into
+`aura.mjs`** (alongside the FTS index and, later, the semantic vectors).
+`rest list` / `describe` / `call` read from the inlined blob at runtime,
+never the YAML. This makes the committed CLI self-contained and robust for
+end users. The loader still exists as the single parser, used by the build
+generator; it is not invoked at runtime in the bundle.
+
+Slice 1 first ships `list`/`describe` reading the YAML at runtime (dev mode)
+so the parsing+rendering slice is decoupled from the bundler; slice 3a
+switches them to the inlined blob. The slice-3a inlining is therefore a
+hard dependency, not optional polish.
+
+### Generic invoker auth: reuse the credential path, not the typed client
+
+`createDefaultAuraClient()` returns the typed `AuraClient` (≈21 hand-written
+methods) — unusable for a 273-op generic invoker. The invoker reuses the
+**credential path** underneath it (`loadAuraClientSettings()` +
+`createKeyring().getSecret("pat")`) via a new shared helper, and does raw
+`fetch` with `Bearer <pat>`. `createDefaultAuraClient()` is refactored to
+use the same helper so there is exactly one credential resolution path.
+
+### Vector size reality check
+
+273 ops × 1536-dim float32 ≈ 1.68 MB raw (≈2.22 MB base64) — already at/over
+a 2 MB budget before any metadata/FTS. Slice 3b resolves this by choosing a
+vector representation that fits (low-dim ≤384 float32, or int8-quantized
+larger model ≈ 0.42 MB for 273 ops) and proves it with the extended size
+assertion. The index records `dims` + `dtype` so the runtime query embedder
+produces a compatible vector.
 
 ## Outcome
 
@@ -215,3 +259,40 @@ so it can discover the right operation without reading the whole spec.
   model; a runtime query embedder using a different model skips the semantic
   leg rather than producing nonsense cosine scores. Correctness over
   convenience.
+
+## Implementation notes
+
+### Slice 1 — loader, rest list/describe, generated rest-api.md (landed)
+
+- **OpenAPI loader** (`packages/shared/src/openapi/loader.ts`, exported as
+  `@pi-aura/shared/openapi`) parses `openapi.yaml` once into an in-memory
+  `OpenApiIndex` (`Record<operationId, OpMeta>`). It resolves the three
+  `$ref` constructs the Aura spec uses (`#/components/{schemas,parameters,responses}/`)
+  and throws loudly with the ref path on anything else (e.g. remote URL refs).
+  Path params are extracted from the path template and cross-checked against
+  `in: path` parameters; ops missing an `operationId` are skipped with a loud
+  warning; duplicate `operationId`s throw naming both method+path. The result
+  is cached per process.
+- **`rest list` / `rest describe`** live in `scripts/src/rest-list-describe.ts`
+  as pure functions (`restList(index, out)`, `restDescribe(index, opId, out)`)
+  wired into the `rest` group in `scripts/src/aura.ts` `main()` (alongside
+  `artifact`/`wiki`/`upload`). The `rest` group skips client/credential
+  construction entirely (pure metadata, no network). `describe` on an
+  unknown id prints a clear error listing the closest matches (substring then
+  Levenshtein) and exits 2.
+- **`gen-rest-doc`** build step (`scripts/src/gen-rest-doc.ts`) runs before the
+  esbuild bundle in `Taskfile.yml`'s `build` target and writes
+  `skills/core/aura/resources/rest-api.md` — 273 operations grouped by tag
+  with their params, body shape, and responses. `generateRestDocMd(index)` is a
+  pure deterministic function; the committed resource is byte-identical when
+  regenerated twice.
+- **Dev-mode runtime path:** per the task architecture decision, slice 1 reads
+  `openapi.yaml` at runtime via a path resolved relative to `cwd` (dev-facing).
+  Slice 3a will switch `list`/`describe` to the inlined compact index blob.
+- **Verification:** `task typecheck` passes for both `scripts` and
+  `packages/shared`; the loader (`tsx --test` in `packages/shared`),
+  `rest-list-describe`, and `gen-rest-doc` suites all pass (14 + 6 + 6 tests).
+  `rest list` prints all 273 operations; `rest describe updateTaskMemberCapacity`
+  prints `/tasks/{uuid}/members/{userIdOrUuid}/capacity`, `PATCH`, path params
+  `uuid` (string/uuid) and `userIdOrUuid` (string), body `TaskMemberCapacityUpdate`,
+  and response codes 200/400/401/403/404/500.

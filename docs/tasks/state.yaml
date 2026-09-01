@@ -1,2 +1,3 @@
-task: core-move
-slice: None
+task: generic-openapi-cli-wrapper
+slice: 1-loader-list-describe
+slice_status: done
