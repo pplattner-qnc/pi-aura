@@ -110,6 +110,10 @@ export function buildSearchableText(
  * When provider is null → returns null (no vectors; FTS-only is valid).
  * When the provider's embed call fails → throws loudly naming the operation.
  *
+ * E5 PREFIX CONVENTION: op texts are prefixed with "passage: " before
+ * embedding (E5 models require this for best retrieval quality). The prefix
+ * is applied here (build-time) so callers don't have to remember.
+ *
  * Vectors are stored as Int8Array (i8 dtype) by default to fit the size
  * budget, or as Float32Array (f32 dtype) when explicitly requested.
  */
@@ -120,7 +124,8 @@ export async function buildSemanticVectors(
 ): Promise<SemanticVectors | null> {
   if (!provider) return null;
 
-  const texts = ops.map((op) => op.text);
+  // E5 PREFIX CONVENTION: prefix op texts with "passage: " for best retrieval.
+  const texts = ops.map((op) => `passage: ${op.text}`);
   let rawVectors: Float32Array[];
   try {
     rawVectors = await provider.embed(texts);
