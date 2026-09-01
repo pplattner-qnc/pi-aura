@@ -42,7 +42,7 @@ describe("HeyApiAuraClient", () => {
     const keyring = new FakeKeyring("test-pat-123");
     const client = new HeyApiAuraClient({ keyring, baseUrl: "https://example.com/api" });
     // Structural check: all 27 methods exist (21 original + 4 review verbs + 2
-    // blueprint/version verbs added by engineering-sync-skill).
+    // blueprint/version verbs).
     const methods = [
       "getArtifact", "mcpCreateArtifact", "mcpUpdateArtifact", "listArtifacts",
       "getKnowledgeNode", "getKnowledgeNodeByPath", "saveKnowledgeNodeBody",

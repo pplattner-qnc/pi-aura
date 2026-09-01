@@ -208,7 +208,7 @@ function packKey2(key) {
 }
 function unpackKey(service, account) {
   if (service !== NAMESPACE2) return void 0;
-  const known = KNOWN_SECRET_KEYS2.find((k2) => `${k2.service}/${k2.name}` === account);
+  const known = KNOWN_SECRET_KEYS2.find((k) => `${k.service}/${k.name}` === account);
   return known;
 }
 function indicatesLockedKeychain(stderr) {
@@ -761,15 +761,15 @@ var require_code = __commonJS({
       return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str`${c1}${c2}`;
     }
     exports.strConcat = strConcat;
-    function interpolate(x2) {
-      return typeof x2 == "number" || typeof x2 == "boolean" || x2 === null ? x2 : safeStringify(Array.isArray(x2) ? x2.join(",") : x2);
+    function interpolate(x) {
+      return typeof x == "number" || typeof x == "boolean" || x === null ? x : safeStringify(Array.isArray(x) ? x.join(",") : x);
     }
-    function stringify(x2) {
-      return new _Code(safeStringify(x2));
+    function stringify(x) {
+      return new _Code(safeStringify(x));
     }
     exports.stringify = stringify;
-    function safeStringify(x2) {
-      return JSON.stringify(x2).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+    function safeStringify(x) {
+      return JSON.stringify(x).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     }
     exports.safeStringify = safeStringify;
     function getProperty(key) {
@@ -1632,8 +1632,8 @@ var require_codegen = __commonJS({
       for (const n in from)
         names[n] = (names[n] || 0) - (from[n] || 0);
     }
-    function not(x2) {
-      return typeof x2 == "boolean" || typeof x2 == "number" || x2 === null ? !x2 : (0, code_1._)`!${par(x2)}`;
+    function not(x) {
+      return typeof x == "boolean" || typeof x == "number" || x === null ? !x : (0, code_1._)`!${par(x)}`;
     }
     exports.not = not;
     var andCode = mappend(exports.operators.AND);
@@ -1647,10 +1647,10 @@ var require_codegen = __commonJS({
     }
     exports.or = or;
     function mappend(op) {
-      return (x2, y) => x2 === code_1.nil ? y : y === code_1.nil ? x2 : (0, code_1._)`${par(x2)} ${op} ${par(y)}`;
+      return (x, y) => x === code_1.nil ? y : y === code_1.nil ? x : (0, code_1._)`${par(x)} ${op} ${par(y)}`;
     }
-    function par(x2) {
-      return x2 instanceof code_1.Name ? x2 : (0, code_1._)`(${x2})`;
+    function par(x) {
+      return x instanceof code_1.Name ? x : (0, code_1._)`(${x})`;
     }
   }
 });
@@ -1740,8 +1740,8 @@ var require_util = __commonJS({
     exports.unescapeJsonPointer = unescapeJsonPointer;
     function eachItem(xs, f) {
       if (Array.isArray(xs)) {
-        for (const x2 of xs)
-          f(x2);
+        for (const x of xs)
+          f(x);
       } else {
         f(xs);
       }
@@ -1931,7 +1931,7 @@ var require_errors = __commonJS({
         gen.return(false);
       }
     }
-    var E2 = {
+    var E = {
       keyword: new codegen_1.Name("keyword"),
       schemaPath: new codegen_1.Name("schemaPath"),
       // also used in JTD errors
@@ -1965,20 +1965,20 @@ var require_errors = __commonJS({
       if (schemaPath) {
         schPath = (0, codegen_1.str)`${schPath}${(0, util_1.getErrorPath)(schemaPath, util_1.Type.Str)}`;
       }
-      return [E2.schemaPath, schPath];
+      return [E.schemaPath, schPath];
     }
     function extraErrorProps(cxt, { params, message }, keyValues) {
       const { keyword, data, schemaValue, it } = cxt;
       const { opts, propertyName, topSchemaRef, schemaPath } = it;
-      keyValues.push([E2.keyword, keyword], [E2.params, typeof params == "function" ? params(cxt) : params || (0, codegen_1._)`{}`]);
+      keyValues.push([E.keyword, keyword], [E.params, typeof params == "function" ? params(cxt) : params || (0, codegen_1._)`{}`]);
       if (opts.messages) {
-        keyValues.push([E2.message, typeof message == "function" ? message(cxt) : message]);
+        keyValues.push([E.message, typeof message == "function" ? message(cxt) : message]);
       }
       if (opts.verbose) {
-        keyValues.push([E2.schema, schemaValue], [E2.parentSchema, (0, codegen_1._)`${topSchemaRef}${schemaPath}`], [names_1.default.data, data]);
+        keyValues.push([E.schema, schemaValue], [E.parentSchema, (0, codegen_1._)`${topSchemaRef}${schemaPath}`], [names_1.default.data, data]);
       }
       if (propertyName)
-        keyValues.push([E2.propertyName, propertyName]);
+        keyValues.push([E.propertyName, propertyName]);
     }
   }
 });
@@ -2042,8 +2042,8 @@ var require_rules = __commonJS({
     exports.getRules = exports.isJSONType = void 0;
     var _jsonTypes = ["string", "number", "integer", "boolean", "null", "object", "array"];
     var jsonTypes = new Set(_jsonTypes);
-    function isJSONType(x2) {
-      return typeof x2 == "string" && jsonTypes.has(x2);
+    function isJSONType(x) {
+      return typeof x == "string" && jsonTypes.has(x);
     }
     exports.isJSONType = isJSONType;
     function getRules() {
@@ -4708,17 +4708,17 @@ var require_core = __commonJS({
         return this.opts.defaultMeta = typeof meta2 == "object" ? meta2[schemaId] || meta2 : void 0;
       }
       validate(schemaKeyRef, data) {
-        let v2;
+        let v;
         if (typeof schemaKeyRef == "string") {
-          v2 = this.getSchema(schemaKeyRef);
-          if (!v2)
+          v = this.getSchema(schemaKeyRef);
+          if (!v)
             throw new Error(`no schema with key or ref "${schemaKeyRef}"`);
         } else {
-          v2 = this.compile(schemaKeyRef);
+          v = this.compile(schemaKeyRef);
         }
-        const valid = v2(data);
-        if (!("$async" in v2))
-          this.errors = v2.errors;
+        const valid = v(data);
+        if (!("$async" in v))
+          this.errors = v.errors;
         return valid;
       }
       compile(schema, _meta) {
@@ -4915,7 +4915,7 @@ var require_core = __commonJS({
           type: (0, dataType_1.getJSONTypes)(def.type),
           schemaType: (0, dataType_1.getJSONTypes)(def.schemaType)
         };
-        (0, util_1.eachItem)(keyword, definition.type.length === 0 ? (k2) => addRule.call(this, k2, definition) : (k2) => definition.type.forEach((t) => addRule.call(this, k2, definition, t)));
+        (0, util_1.eachItem)(keyword, definition.type.length === 0 ? (k) => addRule.call(this, k, definition) : (k) => definition.type.forEach((t) => addRule.call(this, k, definition, t)));
         return this;
       }
       getKeyword(keyword) {
@@ -5212,8 +5212,8 @@ var require_ref = __commonJS({
           return callRef(cxt, (0, codegen_1._)`${rootName}.validate`, root, root.$async);
         }
         function callValidate(sch) {
-          const v2 = getValidate(cxt, sch);
-          callRef(cxt, v2, sch, sch.$async);
+          const v = getValidate(cxt, sch);
+          callRef(cxt, v, sch, sch.$async);
         }
         function inlineRefSchema(sch) {
           const schName = gen.scopeValue("schema", opts.code.source === true ? { ref: sch, code: (0, codegen_1.stringify)(sch) } : { ref: sch });
@@ -5235,7 +5235,7 @@ var require_ref = __commonJS({
       return sch.validate ? gen.scopeValue("validate", { ref: sch.validate }) : (0, codegen_1._)`${gen.scopeValue("wrapper", { ref: sch })}.validate`;
     }
     exports.getValidate = getValidate;
-    function callRef(cxt, v2, sch, $async) {
+    function callRef(cxt, v, sch, $async) {
       const { gen, it } = cxt;
       const { allErrors, schemaEnv: env, opts } = it;
       const passCxt = opts.passContext ? names_1.default.this : codegen_1.nil;
@@ -5248,8 +5248,8 @@ var require_ref = __commonJS({
           throw new Error("async schema referenced by sync schema");
         const valid = gen.let("valid");
         gen.try(() => {
-          gen.code((0, codegen_1._)`await ${(0, code_1.callValidateCode)(cxt, v2, passCxt)}`);
-          addEvaluatedFrom(v2);
+          gen.code((0, codegen_1._)`await ${(0, code_1.callValidateCode)(cxt, v, passCxt)}`);
+          addEvaluatedFrom(v);
           if (!allErrors)
             gen.assign(valid, true);
         }, (e) => {
@@ -5261,7 +5261,7 @@ var require_ref = __commonJS({
         cxt.ok(valid);
       }
       function callSyncRef() {
-        cxt.result((0, code_1.callValidateCode)(cxt, v2, passCxt), () => addEvaluatedFrom(v2), () => addErrorsFrom(v2));
+        cxt.result((0, code_1.callValidateCode)(cxt, v, passCxt), () => addEvaluatedFrom(v), () => addErrorsFrom(v));
       }
       function addErrorsFrom(source) {
         const errs = (0, codegen_1._)`${source}.errors`;
@@ -5637,8 +5637,8 @@ var require_uniqueItems = __commonJS({
     var util_1 = require_util();
     var equal_1 = require_equal();
     var error2 = {
-      message: ({ params: { i, j: j2 } }) => (0, codegen_1.str)`must NOT have duplicate items (items ## ${j2} and ${i} are identical)`,
-      params: ({ params: { i, j: j2 } }) => (0, codegen_1._)`{i: ${i}, j: ${j2}}`
+      message: ({ params: { i, j } }) => (0, codegen_1.str)`must NOT have duplicate items (items ## ${j} and ${i} are identical)`,
+      params: ({ params: { i, j } }) => (0, codegen_1._)`{i: ${i}, j: ${j}}`
     };
     var def = {
       keyword: "uniqueItems",
@@ -5656,15 +5656,15 @@ var require_uniqueItems = __commonJS({
         cxt.ok(valid);
         function validateUniqueItems() {
           const i = gen.let("i", (0, codegen_1._)`${data}.length`);
-          const j2 = gen.let("j");
-          cxt.setParams({ i, j: j2 });
+          const j = gen.let("j");
+          cxt.setParams({ i, j });
           gen.assign(valid, true);
-          gen.if((0, codegen_1._)`${i} > 1`, () => (canOptimize() ? loopN : loopN2)(i, j2));
+          gen.if((0, codegen_1._)`${i} > 1`, () => (canOptimize() ? loopN : loopN2)(i, j));
         }
         function canOptimize() {
           return itemTypes.length > 0 && !itemTypes.some((t) => t === "object" || t === "array");
         }
-        function loopN(i, j2) {
+        function loopN(i, j) {
           const item = gen.name("item");
           const wrongType = (0, dataType_1.checkDataTypes)(itemTypes, item, it.opts.strictNumbers, dataType_1.DataType.Wrong);
           const indices = gen.const("indices", (0, codegen_1._)`{}`);
@@ -5674,16 +5674,16 @@ var require_uniqueItems = __commonJS({
             if (itemTypes.length > 1)
               gen.if((0, codegen_1._)`typeof ${item} == "string"`, (0, codegen_1._)`${item} += "_"`);
             gen.if((0, codegen_1._)`typeof ${indices}[${item}] == "number"`, () => {
-              gen.assign(j2, (0, codegen_1._)`${indices}[${item}]`);
+              gen.assign(j, (0, codegen_1._)`${indices}[${item}]`);
               cxt.error();
               gen.assign(valid, false).break();
             }).code((0, codegen_1._)`${indices}[${item}] = ${i}`);
           });
         }
-        function loopN2(i, j2) {
+        function loopN2(i, j) {
           const eql = (0, util_1.useFunc)(gen, equal_1.default);
           const outer = gen.name("outer");
-          gen.label(outer).for((0, codegen_1._)`;${i}--;`, () => gen.for((0, codegen_1._)`${j2} = ${i}; ${j2}--;`, () => gen.if((0, codegen_1._)`${eql}(${data}[${i}], ${data}[${j2}])`, () => {
+          gen.label(outer).for((0, codegen_1._)`;${i}--;`, () => gen.for((0, codegen_1._)`${j} = ${i}; ${j}--;`, () => gen.if((0, codegen_1._)`${eql}(${data}[${i}], ${data}[${j}])`, () => {
             cxt.error();
             gen.assign(valid, false).break(outer);
           })));
@@ -5760,7 +5760,7 @@ var require_enum = __commonJS({
         cxt.pass(valid);
         function loopEnum() {
           gen.assign(valid, false);
-          gen.forOf("v", schemaCode, (v2) => gen.if((0, codegen_1._)`${getEql()}(${data}, ${v2})`, () => gen.assign(valid, true).break()));
+          gen.forOf("v", schemaCode, (v) => gen.if((0, codegen_1._)`${getEql()}(${data}, ${v})`, () => gen.assign(valid, true).break()));
         }
         function equalCode(vSchema, i) {
           const sch = schema[i];
@@ -7146,7 +7146,7 @@ var require_ajv = __commonJS({
     var Ajv2 = class extends core_1.default {
       _addVocabularies() {
         super._addVocabularies();
-        draft7_1.default.forEach((v2) => this.addVocabulary(v2));
+        draft7_1.default.forEach((v) => this.addVocabulary(v));
         if (this.opts.discriminator)
           this.addKeyword(discriminator_1.default);
       }
@@ -7628,16 +7628,136 @@ import { resolve, join as join6 } from "node:path";
 import { tmpdir, homedir as homedir6 } from "node:os";
 import { randomBytes as randomBytes2 } from "node:crypto";
 
-// ../node_modules/@hey-api/client-fetch/dist/index.js
-var A = async (s, r) => {
-  let e = typeof r == "function" ? await r(s) : r;
-  if (e) return s.scheme === "bearer" ? `Bearer ${e}` : s.scheme === "basic" ? `Basic ${btoa(e)}` : e;
-};
-var O = { bodySerializer: (s) => JSON.stringify(s, (r, e) => typeof e == "bigint" ? e.toString() : e) };
-var U = { $body_: "body", $headers_: "headers", $path_: "path", $query_: "query" };
-var D = Object.entries(U);
-var B = (s) => {
-  switch (s) {
+// ../packages/shared/src/generated/core/serverSentEvents.gen.ts
+function createSseClient({
+  onRequest,
+  onSseError,
+  onSseEvent,
+  responseTransformer,
+  responseValidator,
+  sseDefaultRetryDelay,
+  sseMaxRetryAttempts,
+  sseMaxRetryDelay,
+  sseSleepFn,
+  url: url2,
+  ...options
+}) {
+  let lastEventId;
+  const sleep = sseSleepFn ?? ((ms) => new Promise((resolve2) => setTimeout(resolve2, ms)));
+  const createStream = async function* () {
+    let retryDelay = sseDefaultRetryDelay ?? 3e3;
+    let attempt = 0;
+    const signal = options.signal ?? new AbortController().signal;
+    while (true) {
+      if (signal.aborted) break;
+      attempt++;
+      const headers = options.headers instanceof Headers ? options.headers : new Headers(options.headers);
+      if (lastEventId !== void 0) {
+        headers.set("Last-Event-ID", lastEventId);
+      }
+      try {
+        const requestInit = {
+          redirect: "follow",
+          ...options,
+          body: options.serializedBody,
+          headers,
+          signal
+        };
+        let request = new Request(url2, requestInit);
+        if (onRequest) {
+          request = await onRequest(url2, requestInit);
+        }
+        const _fetch = options.fetch ?? globalThis.fetch;
+        const response = await _fetch(request);
+        if (!response.ok) throw new Error(`SSE failed: ${response.status} ${response.statusText}`);
+        if (!response.body) throw new Error("No body in SSE response");
+        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buffer = "";
+        const abortHandler = () => {
+          try {
+            reader.cancel();
+          } catch {
+          }
+        };
+        signal.addEventListener("abort", abortHandler);
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += value;
+            buffer = buffer.replace(/\r\n?/g, "\n");
+            const chunks = buffer.split("\n\n");
+            buffer = chunks.pop() ?? "";
+            for (const chunk of chunks) {
+              const lines = chunk.split("\n");
+              const dataLines = [];
+              let eventName;
+              for (const line of lines) {
+                if (line.startsWith("data:")) {
+                  dataLines.push(line.replace(/^data:\s*/, ""));
+                } else if (line.startsWith("event:")) {
+                  eventName = line.replace(/^event:\s*/, "");
+                } else if (line.startsWith("id:")) {
+                  lastEventId = line.replace(/^id:\s*/, "");
+                } else if (line.startsWith("retry:")) {
+                  const parsed = Number.parseInt(line.replace(/^retry:\s*/, ""), 10);
+                  if (!Number.isNaN(parsed)) {
+                    retryDelay = parsed;
+                  }
+                }
+              }
+              let data;
+              let parsedJson = false;
+              if (dataLines.length) {
+                const rawData = dataLines.join("\n");
+                try {
+                  data = JSON.parse(rawData);
+                  parsedJson = true;
+                } catch {
+                  data = rawData;
+                }
+              }
+              if (parsedJson) {
+                if (responseValidator) {
+                  await responseValidator(data);
+                }
+                if (responseTransformer) {
+                  data = await responseTransformer(data);
+                }
+              }
+              onSseEvent?.({
+                data,
+                event: eventName,
+                id: lastEventId,
+                retry: retryDelay
+              });
+              if (dataLines.length) {
+                yield data;
+              }
+            }
+          }
+        } finally {
+          signal.removeEventListener("abort", abortHandler);
+          reader.releaseLock();
+        }
+        break;
+      } catch (error2) {
+        onSseError?.(error2);
+        if (sseMaxRetryAttempts !== void 0 && attempt >= sseMaxRetryAttempts) {
+          break;
+        }
+        const backoff = Math.min(retryDelay * 2 ** (attempt - 1), sseMaxRetryDelay ?? 3e4);
+        await sleep(backoff);
+      }
+    }
+  };
+  const stream = createStream();
+  return { stream };
+}
+
+// ../packages/shared/src/generated/core/pathSerializer.gen.ts
+var separatorArrayExplode = (style) => {
+  switch (style) {
     case "label":
       return ".";
     case "matrix":
@@ -7648,8 +7768,8 @@ var B = (s) => {
       return "&";
   }
 };
-var N = (s) => {
-  switch (s) {
+var separatorArrayNoExplode = (style) => {
+  switch (style) {
     case "form":
       return ",";
     case "pipeDelimited":
@@ -7660,8 +7780,8 @@ var N = (s) => {
       return ",";
   }
 };
-var Q = (s) => {
-  switch (s) {
+var separatorObjectExplode = (style) => {
+  switch (style) {
     case "label":
       return ".";
     case "matrix":
@@ -7672,202 +7792,616 @@ var Q = (s) => {
       return "&";
   }
 };
-var S = ({ allowReserved: s, explode: r, name: e, style: a, value: i }) => {
-  if (!r) {
-    let t = (s ? i : i.map((l) => encodeURIComponent(l))).join(N(a));
-    switch (a) {
+var serializeArrayParam = ({
+  allowReserved,
+  explode,
+  name,
+  style,
+  value
+}) => {
+  if (!explode) {
+    const joinedValues2 = (allowReserved ? value : value.map((v) => encodeURIComponent(v))).join(separatorArrayNoExplode(style));
+    switch (style) {
       case "label":
-        return `.${t}`;
+        return `.${joinedValues2}`;
       case "matrix":
-        return `;${e}=${t}`;
+        return `;${name}=${joinedValues2}`;
       case "simple":
-        return t;
+        return joinedValues2;
       default:
-        return `${e}=${t}`;
+        return `${name}=${joinedValues2}`;
     }
   }
-  let o = B(a), n = i.map((t) => a === "label" || a === "simple" ? s ? t : encodeURIComponent(t) : m({ allowReserved: s, name: e, value: t })).join(o);
-  return a === "label" || a === "matrix" ? o + n : n;
-};
-var m = ({ allowReserved: s, name: r, value: e }) => {
-  if (e == null) return "";
-  if (typeof e == "object") throw new Error("Deeply-nested arrays/objects aren\u2019t supported. Provide your own `querySerializer()` to handle these.");
-  return `${r}=${s ? e : encodeURIComponent(e)}`;
-};
-var q = ({ allowReserved: s, explode: r, name: e, style: a, value: i, valueOnly: o }) => {
-  if (i instanceof Date) return o ? i.toISOString() : `${e}=${i.toISOString()}`;
-  if (a !== "deepObject" && !r) {
-    let l = [];
-    Object.entries(i).forEach(([p, d]) => {
-      l = [...l, p, s ? d : encodeURIComponent(d)];
+  const separator = separatorArrayExplode(style);
+  const joinedValues = value.map((v) => {
+    if (style === "label" || style === "simple") {
+      return allowReserved ? v : encodeURIComponent(v);
+    }
+    return serializePrimitiveParam({
+      allowReserved,
+      name,
+      value: v
     });
-    let u = l.join(",");
-    switch (a) {
+  }).join(separator);
+  return style === "label" || style === "matrix" ? separator + joinedValues : joinedValues;
+};
+var serializePrimitiveParam = ({
+  allowReserved,
+  name,
+  value
+}) => {
+  if (value === void 0 || value === null) {
+    return "";
+  }
+  if (typeof value === "object") {
+    throw new Error(
+      "Deeply-nested arrays/objects aren\u2019t supported. Provide your own `querySerializer()` to handle these."
+    );
+  }
+  return `${name}=${allowReserved ? value : encodeURIComponent(value)}`;
+};
+var serializeObjectParam = ({
+  allowReserved,
+  explode,
+  name,
+  style,
+  value,
+  valueOnly
+}) => {
+  if (value instanceof Date) {
+    return valueOnly ? value.toISOString() : `${name}=${value.toISOString()}`;
+  }
+  if (style !== "deepObject" && !explode) {
+    let values = [];
+    Object.entries(value).forEach(([key, v]) => {
+      values = [...values, key, allowReserved ? v : encodeURIComponent(v)];
+    });
+    const joinedValues2 = values.join(",");
+    switch (style) {
       case "form":
-        return `${e}=${u}`;
+        return `${name}=${joinedValues2}`;
       case "label":
-        return `.${u}`;
+        return `.${joinedValues2}`;
       case "matrix":
-        return `;${e}=${u}`;
+        return `;${name}=${joinedValues2}`;
       default:
-        return u;
+        return joinedValues2;
     }
   }
-  let n = Q(a), t = Object.entries(i).map(([l, u]) => m({ allowReserved: s, name: a === "deepObject" ? `${e}[${l}]` : l, value: u })).join(n);
-  return a === "label" || a === "matrix" ? n + t : t;
+  const separator = separatorObjectExplode(style);
+  const joinedValues = Object.entries(value).map(
+    ([key, v]) => serializePrimitiveParam({
+      allowReserved,
+      name: style === "deepObject" ? `${name}[${key}]` : key,
+      value: v
+    })
+  ).join(separator);
+  return style === "label" || style === "matrix" ? separator + joinedValues : joinedValues;
 };
-var J = /\{[^{}]+\}/g;
-var M = ({ path: s, url: r }) => {
-  let e = r, a = r.match(J);
-  if (a) for (let i of a) {
-    let o = false, n = i.substring(1, i.length - 1), t = "simple";
-    n.endsWith("*") && (o = true, n = n.substring(0, n.length - 1)), n.startsWith(".") ? (n = n.substring(1), t = "label") : n.startsWith(";") && (n = n.substring(1), t = "matrix");
-    let l = s[n];
-    if (l == null) continue;
-    if (Array.isArray(l)) {
-      e = e.replace(i, S({ explode: o, name: n, style: t, value: l }));
+
+// ../packages/shared/src/generated/core/utils.gen.ts
+var PATH_PARAM_RE = /\{[^{}]+\}/g;
+var defaultPathSerializer = ({ path, url: _url2 }) => {
+  let url2 = _url2;
+  const matches = _url2.match(PATH_PARAM_RE);
+  if (matches) {
+    for (const match of matches) {
+      let explode = false;
+      let name = match.substring(1, match.length - 1);
+      let style = "simple";
+      if (name.endsWith("*")) {
+        explode = true;
+        name = name.substring(0, name.length - 1);
+      }
+      if (name.startsWith(".")) {
+        name = name.substring(1);
+        style = "label";
+      } else if (name.startsWith(";")) {
+        name = name.substring(1);
+        style = "matrix";
+      }
+      const value = path[name];
+      if (value === void 0 || value === null) {
+        continue;
+      }
+      if (Array.isArray(value)) {
+        url2 = url2.replace(match, serializeArrayParam({ explode, name, style, value }));
+        continue;
+      }
+      if (typeof value === "object") {
+        url2 = url2.replace(
+          match,
+          serializeObjectParam({
+            explode,
+            name,
+            style,
+            value,
+            valueOnly: true
+          })
+        );
+        continue;
+      }
+      if (style === "matrix") {
+        url2 = url2.replace(
+          match,
+          `;${serializePrimitiveParam({
+            name,
+            value
+          })}`
+        );
+        continue;
+      }
+      const replaceValue = encodeURIComponent(
+        style === "label" ? `.${value}` : value
+      );
+      url2 = url2.replace(match, replaceValue);
+    }
+  }
+  return url2;
+};
+var getUrl = ({
+  baseUrl,
+  path,
+  query,
+  querySerializer,
+  url: _url2
+}) => {
+  const pathUrl = _url2.startsWith("/") ? _url2 : `/${_url2}`;
+  let url2 = (baseUrl ?? "") + pathUrl;
+  if (path) {
+    url2 = defaultPathSerializer({ path, url: url2 });
+  }
+  let search = query ? querySerializer(query) : "";
+  if (search.startsWith("?")) {
+    search = search.substring(1);
+  }
+  if (search) {
+    url2 += `?${search}`;
+  }
+  return url2;
+};
+function getValidRequestBody(options) {
+  const hasBody = options.body !== void 0;
+  const isSerializedBody = hasBody && options.bodySerializer;
+  if (isSerializedBody) {
+    if ("serializedBody" in options) {
+      const hasSerializedBody = options.serializedBody !== void 0 && options.serializedBody !== "";
+      return hasSerializedBody ? options.serializedBody : null;
+    }
+    return options.body !== "" ? options.body : null;
+  }
+  if (hasBody) {
+    return options.body;
+  }
+  return void 0;
+}
+
+// ../packages/shared/src/generated/core/auth.gen.ts
+var getAuthToken = async (auth2, callback) => {
+  const token = typeof callback === "function" ? await callback(auth2) : callback;
+  if (!token) {
+    return;
+  }
+  if (auth2.scheme === "bearer") {
+    return `Bearer ${token}`;
+  }
+  if (auth2.scheme === "basic") {
+    return `Basic ${btoa(token)}`;
+  }
+  return token;
+};
+
+// ../packages/shared/src/generated/core/bodySerializer.gen.ts
+var jsonBodySerializer = {
+  bodySerializer: (body) => JSON.stringify(body, (_key, value) => typeof value === "bigint" ? value.toString() : value)
+};
+
+// ../packages/shared/src/generated/client/utils.gen.ts
+var createQuerySerializer = ({
+  parameters = {},
+  ...args
+} = {}) => {
+  const querySerializer = (queryParams) => {
+    const search = [];
+    if (queryParams && typeof queryParams === "object") {
+      for (const name in queryParams) {
+        const value = queryParams[name];
+        if (value === void 0 || value === null) {
+          continue;
+        }
+        const options = parameters[name] || args;
+        if (Array.isArray(value)) {
+          const serializedArray = serializeArrayParam({
+            allowReserved: options.allowReserved,
+            explode: true,
+            name,
+            style: "form",
+            value,
+            ...options.array
+          });
+          if (serializedArray) search.push(serializedArray);
+        } else if (typeof value === "object") {
+          const serializedObject = serializeObjectParam({
+            allowReserved: options.allowReserved,
+            explode: true,
+            name,
+            style: "deepObject",
+            value,
+            ...options.object
+          });
+          if (serializedObject) search.push(serializedObject);
+        } else {
+          const serializedPrimitive = serializePrimitiveParam({
+            allowReserved: options.allowReserved,
+            name,
+            value
+          });
+          if (serializedPrimitive) search.push(serializedPrimitive);
+        }
+      }
+    }
+    return search.join("&");
+  };
+  return querySerializer;
+};
+var getParseAs = (contentType2) => {
+  if (!contentType2) {
+    return "stream";
+  }
+  const cleanContent = contentType2.split(";")[0]?.trim();
+  if (!cleanContent) {
+    return;
+  }
+  if (cleanContent.startsWith("application/json") || cleanContent.endsWith("+json")) {
+    return "json";
+  }
+  if (cleanContent === "multipart/form-data") {
+    return "formData";
+  }
+  if (["application/", "audio/", "image/", "video/"].some((type) => cleanContent.startsWith(type))) {
+    return "blob";
+  }
+  if (cleanContent.startsWith("text/")) {
+    return "text";
+  }
+  return;
+};
+var checkForExistence = (options, name) => {
+  if (!name) {
+    return false;
+  }
+  if (options.headers.has(name) || options.query?.[name] || options.headers.get("Cookie")?.includes(`${name}=`)) {
+    return true;
+  }
+  return false;
+};
+async function setAuthParams(options) {
+  for (const auth2 of options.security ?? []) {
+    if (checkForExistence(options, auth2.name)) {
       continue;
     }
-    if (typeof l == "object") {
-      e = e.replace(i, q({ explode: o, name: n, style: t, value: l, valueOnly: true }));
+    const token = await getAuthToken(auth2, options.auth);
+    if (!token) {
       continue;
     }
-    if (t === "matrix") {
-      e = e.replace(i, `;${m({ name: n, value: l })}`);
-      continue;
-    }
-    let u = encodeURIComponent(t === "label" ? `.${l}` : l);
-    e = e.replace(i, u);
-  }
-  return e;
-};
-var k = ({ allowReserved: s, array: r, object: e } = {}) => (i) => {
-  let o = [];
-  if (i && typeof i == "object") for (let n in i) {
-    let t = i[n];
-    if (t != null) if (Array.isArray(t)) {
-      let l = S({ allowReserved: s, explode: true, name: n, style: "form", value: t, ...r });
-      l && o.push(l);
-    } else if (typeof t == "object") {
-      let l = q({ allowReserved: s, explode: true, name: n, style: "deepObject", value: t, ...e });
-      l && o.push(l);
-    } else {
-      let l = m({ allowReserved: s, name: n, value: t });
-      l && o.push(l);
-    }
-  }
-  return o.join("&");
-};
-var E = (s) => {
-  if (!s) return "stream";
-  let r = s.split(";")[0]?.trim();
-  if (r) {
-    if (r.startsWith("application/json") || r.endsWith("+json")) return "json";
-    if (r === "multipart/form-data") return "formData";
-    if (["application/", "audio/", "image/", "video/"].some((e) => r.startsWith(e))) return "blob";
-    if (r.startsWith("text/")) return "text";
-  }
-};
-var $ = async ({ security: s, ...r }) => {
-  for (let e of s) {
-    let a = await A(e, r.auth);
-    if (!a) continue;
-    let i = e.name ?? "Authorization";
-    switch (e.in) {
+    const name = auth2.name ?? "Authorization";
+    switch (auth2.in) {
       case "query":
-        r.query || (r.query = {}), r.query[i] = a;
+        if (!options.query) {
+          options.query = {};
+        }
+        options.query[name] = token;
         break;
       case "cookie":
-        r.headers.append("Cookie", `${i}=${a}`);
+        options.headers.append("Cookie", `${name}=${token}`);
         break;
       case "header":
       default:
-        r.headers.set(i, a);
+        options.headers.set(name, token);
         break;
     }
-    return;
   }
-};
-var C = (s) => L({ baseUrl: s.baseUrl, path: s.path, query: s.query, querySerializer: typeof s.querySerializer == "function" ? s.querySerializer : k(s.querySerializer), url: s.url });
-var L = ({ baseUrl: s, path: r, query: e, querySerializer: a, url: i }) => {
-  let o = i.startsWith("/") ? i : `/${i}`, n = (s ?? "") + o;
-  r && (n = M({ path: r, url: n }));
-  let t = e ? a(e) : "";
-  return t.startsWith("?") && (t = t.substring(1)), t && (n += `?${t}`), n;
-};
-var x = (s, r) => {
-  let e = { ...s, ...r };
-  return e.baseUrl?.endsWith("/") && (e.baseUrl = e.baseUrl.substring(0, e.baseUrl.length - 1)), e.headers = j(s.headers, r.headers), e;
-};
-var j = (...s) => {
-  let r = new Headers();
-  for (let e of s) {
-    if (!e || typeof e != "object") continue;
-    let a = e instanceof Headers ? e.entries() : Object.entries(e);
-    for (let [i, o] of a) if (o === null) r.delete(i);
-    else if (Array.isArray(o)) for (let n of o) r.append(i, n);
-    else o !== void 0 && r.set(i, typeof o == "object" ? JSON.stringify(o) : o);
+}
+var buildUrl = (options) => getUrl({
+  baseUrl: options.baseUrl,
+  path: options.path,
+  query: options.query,
+  querySerializer: typeof options.querySerializer === "function" ? options.querySerializer : createQuerySerializer(options.querySerializer),
+  url: options.url
+});
+var mergeConfigs = (a, b) => {
+  const config2 = { ...a, ...b };
+  if (config2.baseUrl?.endsWith("/")) {
+    config2.baseUrl = config2.baseUrl.substring(0, config2.baseUrl.length - 1);
   }
-  return r;
+  config2.headers = mergeHeaders(a.headers, b.headers);
+  return config2;
 };
-var g = class {
-  _fns;
-  constructor() {
-    this._fns = [];
+var headersEntries = (headers) => {
+  const entries = [];
+  headers.forEach((value, key) => {
+    entries.push([key, value]);
+  });
+  return entries;
+};
+var mergeHeaders = (...headers) => {
+  const mergedHeaders = new Headers();
+  for (const header of headers) {
+    if (!header) {
+      continue;
+    }
+    const iterator = header instanceof Headers ? headersEntries(header) : Object.entries(header);
+    for (const [key, value] of iterator) {
+      if (value === null) {
+        mergedHeaders.delete(key);
+      } else if (Array.isArray(value)) {
+        for (const v of value) {
+          mergedHeaders.append(key, v);
+        }
+      } else if (value !== void 0) {
+        mergedHeaders.set(
+          key,
+          typeof value === "object" ? JSON.stringify(value) : value
+        );
+      }
+    }
   }
+  return mergedHeaders;
+};
+var Interceptors = class {
+  fns = [];
   clear() {
-    this._fns = [];
+    this.fns = [];
   }
-  getInterceptorIndex(r) {
-    return typeof r == "number" ? this._fns[r] ? r : -1 : this._fns.indexOf(r);
+  eject(id) {
+    const index = this.getInterceptorIndex(id);
+    if (this.fns[index]) {
+      this.fns[index] = null;
+    }
   }
-  exists(r) {
-    let e = this.getInterceptorIndex(r);
-    return !!this._fns[e];
+  exists(id) {
+    const index = this.getInterceptorIndex(id);
+    return Boolean(this.fns[index]);
   }
-  eject(r) {
-    let e = this.getInterceptorIndex(r);
-    this._fns[e] && (this._fns[e] = null);
+  getInterceptorIndex(id) {
+    if (typeof id === "number") {
+      return this.fns[id] ? id : -1;
+    }
+    return this.fns.indexOf(id);
   }
-  update(r, e) {
-    let a = this.getInterceptorIndex(r);
-    return this._fns[a] ? (this._fns[a] = e, r) : false;
+  update(id, fn) {
+    const index = this.getInterceptorIndex(id);
+    if (this.fns[index]) {
+      this.fns[index] = fn;
+      return id;
+    }
+    return false;
   }
-  use(r) {
-    return this._fns = [...this._fns, r], this._fns.length - 1;
+  use(fn) {
+    this.fns.push(fn);
+    return this.fns.length - 1;
   }
 };
-var v = () => ({ error: new g(), request: new g(), response: new g() });
-var V = k({ allowReserved: false, array: { explode: true, style: "form" }, object: { explode: true, style: "deepObject" } });
-var F = { "Content-Type": "application/json" };
-var w = (s = {}) => ({ ...O, headers: F, parseAs: "auto", querySerializer: V, ...s });
-var G = (s = {}) => {
-  let r = x(w(), s), e = () => ({ ...r }), a = (n) => (r = x(r, n), e()), i = v(), o = async (n) => {
-    let t = { ...r, ...n, fetch: n.fetch ?? r.fetch ?? globalThis.fetch, headers: j(r.headers, n.headers) };
-    t.security && await $({ ...t, security: t.security }), t.body && t.bodySerializer && (t.body = t.bodySerializer(t.body)), (t.body === void 0 || t.body === "") && t.headers.delete("Content-Type");
-    let l = C(t), u = { redirect: "follow", ...t }, p = new Request(l, u);
-    for (let f of i.request._fns) f && (p = await f(p, t));
-    let d = t.fetch, c = await d(p);
-    for (let f of i.response._fns) f && (c = await f(c, p, t));
-    let b = { request: p, response: c };
-    if (c.ok) {
-      if (c.status === 204 || c.headers.get("Content-Length") === "0") return t.responseStyle === "data" ? {} : { data: {}, ...b };
-      let f = (t.parseAs === "auto" ? E(c.headers.get("Content-Type")) : t.parseAs) ?? "json";
-      if (f === "stream") return t.responseStyle === "data" ? c.body : { data: c.body, ...b };
-      let h = await c[f]();
-      return f === "json" && (t.responseValidator && await t.responseValidator(h), t.responseTransformer && (h = await t.responseTransformer(h))), t.responseStyle === "data" ? h : { data: h, ...b };
-    }
-    let R = await c.text();
-    try {
-      R = JSON.parse(R);
-    } catch {
-    }
-    let y = R;
-    for (let f of i.error._fns) f && (y = await f(R, c, p, t));
-    if (y = y || {}, t.throwOnError) throw y;
-    return t.responseStyle === "data" ? void 0 : { error: y, ...b };
+var createInterceptors = () => ({
+  error: new Interceptors(),
+  request: new Interceptors(),
+  response: new Interceptors()
+});
+var defaultQuerySerializer = createQuerySerializer({
+  allowReserved: false,
+  array: {
+    explode: true,
+    style: "form"
+  },
+  object: {
+    explode: true,
+    style: "deepObject"
+  }
+});
+var defaultHeaders = {
+  "Content-Type": "application/json"
+};
+var createConfig = (override = {}) => ({
+  ...jsonBodySerializer,
+  headers: defaultHeaders,
+  parseAs: "auto",
+  querySerializer: defaultQuerySerializer,
+  ...override
+});
+
+// ../packages/shared/src/generated/client/client.gen.ts
+var createClient = (config2 = {}) => {
+  let _config = mergeConfigs(createConfig(), config2);
+  const getConfig = () => ({ ..._config });
+  const setConfig = (config3) => {
+    _config = mergeConfigs(_config, config3);
+    return getConfig();
   };
-  return { buildUrl: C, connect: (n) => o({ ...n, method: "CONNECT" }), delete: (n) => o({ ...n, method: "DELETE" }), get: (n) => o({ ...n, method: "GET" }), getConfig: e, head: (n) => o({ ...n, method: "HEAD" }), interceptors: i, options: (n) => o({ ...n, method: "OPTIONS" }), patch: (n) => o({ ...n, method: "PATCH" }), post: (n) => o({ ...n, method: "POST" }), put: (n) => o({ ...n, method: "PUT" }), request: o, setConfig: a, trace: (n) => o({ ...n, method: "TRACE" }) };
+  const interceptors = createInterceptors();
+  const beforeRequest = async (options) => {
+    const opts = {
+      ..._config,
+      ...options,
+      fetch: options.fetch ?? _config.fetch ?? globalThis.fetch,
+      headers: mergeHeaders(_config.headers, options.headers),
+      serializedBody: void 0
+    };
+    if (opts.security) {
+      await setAuthParams(opts);
+    }
+    if (opts.requestValidator) {
+      await opts.requestValidator(opts);
+    }
+    if (opts.body !== void 0 && opts.bodySerializer) {
+      opts.serializedBody = opts.bodySerializer(opts.body);
+    }
+    if (opts.body === void 0 || opts.serializedBody === "") {
+      opts.headers.delete("Content-Type");
+    }
+    const resolvedOpts = opts;
+    const url2 = buildUrl(resolvedOpts);
+    return { opts: resolvedOpts, url: url2 };
+  };
+  const request = async (options) => {
+    const throwOnError = options.throwOnError ?? _config.throwOnError;
+    const responseStyle = options.responseStyle ?? _config.responseStyle;
+    let request2;
+    let response;
+    try {
+      const { opts, url: url2 } = await beforeRequest(options);
+      const requestInit = {
+        redirect: "follow",
+        ...opts,
+        body: getValidRequestBody(opts)
+      };
+      request2 = new Request(url2, requestInit);
+      for (const fn of interceptors.request.fns) {
+        if (fn) {
+          request2 = await fn(request2, opts);
+        }
+      }
+      const _fetch = opts.fetch;
+      response = await _fetch(request2);
+      for (const fn of interceptors.response.fns) {
+        if (fn) {
+          response = await fn(response, request2, opts);
+        }
+      }
+      const result = {
+        request: request2,
+        response
+      };
+      if (response.ok) {
+        const parseAs = (opts.parseAs === "auto" ? getParseAs(response.headers.get("Content-Type")) : opts.parseAs) ?? "json";
+        if (response.status === 204 || response.headers.get("Content-Length") === "0") {
+          let emptyData;
+          switch (parseAs) {
+            case "arrayBuffer":
+            case "blob":
+            case "text":
+              emptyData = await response[parseAs]();
+              break;
+            case "formData":
+              emptyData = new FormData();
+              break;
+            case "stream":
+              emptyData = response.body;
+              break;
+            case "json":
+            default:
+              emptyData = {};
+              break;
+          }
+          return opts.responseStyle === "data" ? emptyData : {
+            data: emptyData,
+            ...result
+          };
+        }
+        let data;
+        switch (parseAs) {
+          case "arrayBuffer":
+          case "blob":
+          case "formData":
+          case "text":
+            data = await response[parseAs]();
+            break;
+          case "json": {
+            const text = await response.text();
+            data = text ? JSON.parse(text) : {};
+            break;
+          }
+          case "stream":
+            return opts.responseStyle === "data" ? response.body : {
+              data: response.body,
+              ...result
+            };
+        }
+        if (parseAs === "json") {
+          if (opts.responseValidator) {
+            await opts.responseValidator(data);
+          }
+          if (opts.responseTransformer) {
+            data = await opts.responseTransformer(data);
+          }
+        }
+        return opts.responseStyle === "data" ? data : {
+          data,
+          ...result
+        };
+      }
+      const textError = await response.text();
+      let jsonError;
+      try {
+        jsonError = JSON.parse(textError);
+      } catch {
+      }
+      throw jsonError ?? textError;
+    } catch (error2) {
+      let finalError = error2;
+      for (const fn of interceptors.error.fns) {
+        if (fn) {
+          finalError = await fn(finalError, response, request2, options);
+        }
+      }
+      finalError = finalError || {};
+      if (throwOnError) {
+        throw finalError;
+      }
+      return responseStyle === "data" ? void 0 : {
+        error: finalError,
+        request: request2,
+        response
+      };
+    }
+  };
+  const makeMethodFn = (method) => (options) => request({ ...options, method });
+  const makeSseFn = (method) => async (options) => {
+    const { opts, url: url2 } = await beforeRequest(options);
+    return createSseClient({
+      ...opts,
+      body: opts.body,
+      method,
+      onRequest: async (url3, init) => {
+        let request2 = new Request(url3, init);
+        for (const fn of interceptors.request.fns) {
+          if (fn) {
+            request2 = await fn(request2, opts);
+          }
+        }
+        return request2;
+      },
+      serializedBody: getValidRequestBody(opts),
+      url: url2
+    });
+  };
+  const _buildUrl = (options) => buildUrl({ ..._config, ...options });
+  return {
+    buildUrl: _buildUrl,
+    connect: makeMethodFn("CONNECT"),
+    delete: makeMethodFn("DELETE"),
+    get: makeMethodFn("GET"),
+    getConfig,
+    head: makeMethodFn("HEAD"),
+    interceptors,
+    options: makeMethodFn("OPTIONS"),
+    patch: makeMethodFn("PATCH"),
+    post: makeMethodFn("POST"),
+    put: makeMethodFn("PUT"),
+    request,
+    setConfig,
+    sse: {
+      connect: makeSseFn("CONNECT"),
+      delete: makeSseFn("DELETE"),
+      get: makeSseFn("GET"),
+      head: makeSseFn("HEAD"),
+      options: makeSseFn("OPTIONS"),
+      patch: makeSseFn("PATCH"),
+      post: makeSseFn("POST"),
+      put: makeSseFn("PUT"),
+      trace: makeSseFn("TRACE")
+    },
+    trace: makeMethodFn("TRACE")
+  };
 };
 
 // ../packages/shared/src/keyring/index.ts
@@ -7891,449 +8425,283 @@ function loadAuraClientSettings(settingsPath = SETTINGS_PATH) {
   }
 }
 
+// ../packages/shared/src/generated/core/params.gen.ts
+var extraPrefixesMap = {
+  $body_: "body",
+  $headers_: "headers",
+  $path_: "path",
+  $query_: "query"
+};
+var extraPrefixes = Object.entries(extraPrefixesMap);
+
 // ../packages/shared/src/generated/client.gen.ts
-var client = G(w({
-  baseUrl: "http://localhost:3000/api"
-}));
+var client = createClient(createConfig({ baseUrl: "http://localhost:3000/api" }));
 
 // ../packages/shared/src/generated/sdk.gen.ts
-var getBlueprintFiles = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/mcp/blueprint/files",
-    ...options
-  });
-};
-var mcpCreateArtifact = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/mcp/artifacts",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var mcpUpdateArtifact = (options) => {
-  return (options.client ?? client).patch({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/mcp/artifacts/{id}",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var mcpCreateUploadDocument = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/mcp/upload-documents",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var mcpGetUploadDocument = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/mcp/upload-documents/{id}",
-    ...options
-  });
-};
-var mcpWikiSearch = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/mcp/wiki-search",
-    ...options
-  });
-};
-var listTasks = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/tasks",
-    ...options
-  });
-};
-var getMyPriorityQueue = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/tasks/my-priority",
-    ...options
-  });
-};
-var getTaskByHumanKey = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/tasks/by-key/{key}",
-    ...options
-  });
-};
-var getMyCapacity = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/capacity/me",
-    ...options
-  });
-};
-var listArtifacts = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts",
-    ...options
-  });
-};
-var getArtifact = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}",
-    ...options
-  });
-};
-var requestArtifactReview = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}/review-request",
-    ...options
-  });
-};
-var submitArtifactDecision = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}/decisions",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var getArtifactApprovals = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}/approvals",
-    ...options
-  });
-};
-var startArtifactReview = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}/review-start",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var reopenArtifactReview = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}/review-reopen",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var getArtifactReview = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}/review",
-    ...options
-  });
-};
-var getKnowledgeTree = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      }
-    ],
-    url: "/knowledge/spaces/{slug}/nodes",
-    ...options
-  });
-};
-var createKnowledgeNode = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      }
-    ],
-    url: "/knowledge/spaces/{slug}/nodes",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var getKnowledgeNodeByPath = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      }
-    ],
-    url: "/knowledge/spaces/{slug}/nodes/by-path",
-    ...options
-  });
-};
-var getKnowledgeNode = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      }
-    ],
-    url: "/knowledge/nodes/{uuid}",
-    ...options
-  });
-};
-var saveKnowledgeNodeBody = (options) => {
-  return (options.client ?? client).put({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      }
-    ],
-    url: "/knowledge/nodes/{uuid}/body",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var getKnowledgeNodeVersion = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      }
-    ],
-    url: "/knowledge/nodes/{uuid}/versions/{version}",
-    ...options
-  });
-};
-var getBoardSummary = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/boards",
-    ...options
-  });
-};
-var getBoardBriefing = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/boards/briefing",
-    ...options
-  });
-};
-var listNotifications = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/notifications",
-    ...options
-  });
-};
+var getBlueprintFiles = (options) => (options.client ?? client).get({
+  security: [{ scheme: "bearer", type: "http" }],
+  url: "/mcp/blueprint/files",
+  ...options
+});
+var mcpCreateArtifact = (options) => (options.client ?? client).post({
+  security: [{ scheme: "bearer", type: "http" }],
+  url: "/mcp/artifacts",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var mcpUpdateArtifact = (options) => (options.client ?? client).patch({
+  security: [{ scheme: "bearer", type: "http" }],
+  url: "/mcp/artifacts/{id}",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var mcpCreateUploadDocument = (options) => (options.client ?? client).post({
+  security: [{ scheme: "bearer", type: "http" }],
+  url: "/mcp/upload-documents",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var mcpGetUploadDocument = (options) => (options.client ?? client).get({
+  security: [{ scheme: "bearer", type: "http" }],
+  url: "/mcp/upload-documents/{id}",
+  ...options
+});
+var mcpWikiSearch = (options) => (options.client ?? client).get({
+  security: [{ scheme: "bearer", type: "http" }],
+  url: "/mcp/wiki-search",
+  ...options
+});
+var listTasks = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/tasks",
+  ...options
+});
+var getMyPriorityQueue = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/tasks/my-priority",
+  ...options
+});
+var getTaskByHumanKey = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/tasks/by-key/{key}",
+  ...options
+});
+var getMyCapacity = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/capacity/me",
+  ...options
+});
+var createFeedback = (options) => (options.client ?? client).post({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/feedback",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var listArtifacts = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts",
+  ...options
+});
+var getArtifact = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}",
+  ...options
+});
+var requestArtifactReview = (options) => (options.client ?? client).post({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}/review-request",
+  ...options
+});
+var submitArtifactDecision = (options) => (options.client ?? client).post({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}/decisions",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var getArtifactApprovals = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}/approvals",
+  ...options
+});
+var startArtifactReview = (options) => (options.client ?? client).post({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}/review-start",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var reopenArtifactReview = (options) => (options.client ?? client).post({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}/review-reopen",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var getArtifactReview = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}/review",
+  ...options
+});
+var getKnowledgeTree = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }],
+  url: "/knowledge/spaces/{slug}/nodes",
+  ...options
+});
+var createKnowledgeNode = (options) => (options.client ?? client).post({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }],
+  url: "/knowledge/spaces/{slug}/nodes",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var getKnowledgeNodeByPath = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }],
+  url: "/knowledge/spaces/{slug}/nodes/by-path",
+  ...options
+});
+var getKnowledgeNode = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }],
+  url: "/knowledge/nodes/{uuid}",
+  ...options
+});
+var saveKnowledgeNodeBody = (options) => (options.client ?? client).put({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }],
+  url: "/knowledge/nodes/{uuid}/body",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var getKnowledgeNodeVersion = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }],
+  url: "/knowledge/nodes/{uuid}/versions/{version}",
+  ...options
+});
+var getBoardSummary = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/boards",
+  ...options
+});
+var getBoardBriefing = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/boards/briefing",
+  ...options
+});
+var listNotifications = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/notifications",
+  ...options
+});
 
 // ../packages/shared/src/hey-api-aura-client.ts
 var AuraApiError = class extends Error {
@@ -8381,12 +8749,15 @@ var HeyApiAuraClient = class {
   pat;
   constructor(opts) {
     this.keyring = opts.keyring;
-    this.client = G({ baseUrl: opts.baseUrl });
+    this.client = createClient({ baseUrl: opts.baseUrl });
     this.pat = opts.pat ?? null;
     this.client.interceptors.request.use(async (req) => {
       const pat = await this.ensurePat();
       req.headers.set("Authorization", `Bearer ${pat}`);
       return req;
+    });
+    this.client.interceptors.error.use((err) => {
+      throw err;
     });
   }
   /** Lazily read the PAT from the keyring on first request, cache it. */
@@ -8434,14 +8805,14 @@ var HeyApiAuraClient = class {
       }
     });
     return unwrap(res, (d) => {
-      const g2 = d;
+      const g = d;
       return {
-        status: g2.status,
-        id: g2.id,
-        title: g2.title,
-        version: g2.version,
-        mode: g2.mode,
-        affected_heading: g2.affected_heading
+        status: g.status,
+        id: g.id,
+        title: g.title,
+        version: g.version,
+        mode: g.mode,
+        affected_heading: g.affected_heading
       };
     });
   }
@@ -8481,9 +8852,9 @@ var HeyApiAuraClient = class {
       query: { query: input.query, space_slug: input.space_slug, limit: input.limit }
     });
     return unwrap(res, (d) => {
-      const g2 = d;
+      const g = d;
       return {
-        items: g2.items.map((h) => ({
+        items: g.items.map((h) => ({
           id: h.id,
           space_slug: h.space_slug,
           space_kind: h.space_kind,
@@ -8502,10 +8873,10 @@ var HeyApiAuraClient = class {
       path: { slug: spaceSlug }
     });
     return unwrap(res, (d) => {
-      const g2 = d;
+      const g = d;
       return {
-        space_id: g2.space_id,
-        nodes: g2.nodes.map(mapKnowledgeNode)
+        space_id: g.space_id,
+        nodes: g.nodes.map(mapKnowledgeNode)
       };
     });
   }
@@ -8532,11 +8903,11 @@ var HeyApiAuraClient = class {
       const status = res.response?.status ?? 0;
       throw new AuraApiError(status, sdkErrorMessage(res.error));
     }
-    const g2 = res.data ?? {};
-    if (g2.ok === false && g2.error) {
-      throw new AuraApiError(0, `${g2.error.code}: ${g2.error.detail}`);
+    const g = res.data ?? {};
+    if (g.ok === false && g.error) {
+      throw new AuraApiError(0, `${g.error.code}: ${g.error.detail}`);
     }
-    const files = (g2.files ?? []).map((f) => ({
+    const files = (g.files ?? []).map((f) => ({
       path: f.path,
       filename: f.filename,
       encoding: f.encoding,
@@ -8549,9 +8920,9 @@ var HeyApiAuraClient = class {
       }
     }));
     return {
-      ok: g2.ok ?? true,
+      ok: g.ok ?? true,
       files,
-      error: g2.error
+      error: g.error
     };
   }
   async getKnowledgeNodeVersion(uuid2, version2) {
@@ -8560,15 +8931,15 @@ var HeyApiAuraClient = class {
       path: { uuid: uuid2, version: version2 }
     });
     return unwrap(res, (d) => {
-      const g2 = d;
+      const g = d;
       return {
-        id: g2.id,
-        node_id: g2.node_id,
-        version: g2.version,
-        body: g2.body,
-        summary: g2.summary ?? null,
-        created_by_user_id: g2.created_by_user_id,
-        created_at: g2.created_at
+        id: g.id,
+        node_id: g.node_id,
+        version: g.version,
+        body: g.body,
+        summary: g.summary ?? null,
+        created_by_user_id: g.created_by_user_id,
+        created_at: g.created_at
       };
     });
   }
@@ -8599,10 +8970,10 @@ var HeyApiAuraClient = class {
       query: opts
     });
     return unwrap(res, (d) => {
-      const g2 = d;
+      const g = d;
       return {
-        text: g2.text,
-        generated_at: g2.generated_at
+        text: g.text,
+        generated_at: g.generated_at
       };
     });
   }
@@ -8634,6 +9005,25 @@ var HeyApiAuraClient = class {
   async listTasks(opts) {
     const res = await listTasks({ client: this.client, query: opts });
     return unwrap(res, mapTaskList);
+  }
+  // -------------------------------------------------------------------------
+  // Feedback
+  // -------------------------------------------------------------------------
+  /** Submit a feedback entry via the generated `POST /feedback` SDK function.
+   *  `source` is forced to `"MCP"` by the caller (the `aura_feedback` tool) so
+   *  the row records its true origin; the API stores whatever is passed. */
+  async createFeedback(input) {
+    const res = await createFeedback({
+      client: this.client,
+      body: {
+        title: input.title,
+        body: input.body,
+        is_anonymous: input.is_anonymous,
+        source: input.source,
+        notify_author: input.notify_author
+      }
+    });
+    return unwrap(res, (d) => d);
   }
   // -------------------------------------------------------------------------
   // Reviews / approvals
@@ -8696,74 +9086,74 @@ function mapPagination(p) {
   return { page: d.page, limit: d.limit, total: d.total, total_pages: d.total_pages };
 }
 function mapArtifact(d) {
-  const g2 = d;
+  const g = d;
   return {
-    id: g2.id,
-    title: g2.title,
-    latest_version: g2.latest_version,
-    version: g2.version,
-    body: g2.body,
-    summary: g2.summary,
-    kind: g2.kind,
-    created_at: g2.created_at,
-    updated_at: g2.updated_at
+    id: g.id,
+    title: g.title,
+    latest_version: g.latest_version,
+    version: g.version,
+    body: g.body,
+    summary: g.summary,
+    kind: g.kind,
+    created_at: g.created_at,
+    updated_at: g.updated_at
   };
 }
 function mapArtifactListItem(d) {
-  const g2 = d;
+  const g = d;
   return {
-    id: g2.id,
-    title: g2.title,
-    latest_version: g2.latest_version,
-    created_at: g2.created_at,
-    updated_at: g2.updated_at,
-    kind: g2.kind,
-    pending_for_me: g2.pending_for_me
+    id: g.id,
+    title: g.title,
+    latest_version: g.latest_version,
+    created_at: g.created_at,
+    updated_at: g.updated_at,
+    kind: g.kind,
+    pending_for_me: g.pending_for_me
   };
 }
 function mapArtifactList(d) {
-  const g2 = d;
+  const g = d;
   return {
-    items: g2.items.map(mapArtifactListItem),
-    pagination: mapPagination(g2.pagination)
+    items: g.items.map(mapArtifactListItem),
+    pagination: mapPagination(g.pagination)
   };
 }
 function mapKnowledgeNode(d) {
-  const g2 = d;
+  const g = d;
   return {
-    id: g2.id,
-    space_id: g2.space_id,
-    space_slug: g2.space_slug,
-    kind: g2.kind,
-    title: g2.title,
-    slug: g2.slug,
-    latest_version: g2.latest_version,
-    body: g2.body,
-    // Surface the provenance Aura carries on every node (used by the
-    // engineering-sync manifest); kept off the named interface via the index
-    // signature so callers opt in explicitly.
-    updated_at: g2.updated_at,
-    body_hash: g2.body_hash,
+    id: g.id,
+    space_id: g.space_id,
+    space_slug: g.space_slug,
+    kind: g.kind,
+    title: g.title,
+    slug: g.slug,
+    latest_version: g.latest_version,
+    body: g.body,
+    // Surface the provenance Aura carries on every node; kept off the
+    // named interface via the index signature so callers opt in explicitly.
+    updated_at: g.updated_at,
+    body_hash: g.body_hash,
     // Preserve the nested `children` the REST tree carries (the wiki tree is
     // recursive: folders contain documents/other folders). The named
     // KnowledgeNode interface hides this behind its index signature so callers
-    // opt in explicitly (engineering-sync recurses it; pretty-printers ignore
-    // it). Without this the nested docs (guides/*, workflow/*) are invisible.
-    children: (g2.children ?? []).map(mapKnowledgeNode)
+    // opt in explicitly (tree-walking callers recurse it; pretty-printers
+    // ignore it). Without this the nested docs (guides/*, workflow/*) are
+    // invisible.
+    children: (g.children ?? []).map(mapKnowledgeNode)
   };
 }
 function mapUploadDocument(d) {
-  const g2 = d;
+  const g = d;
   return {
-    id: g2.id,
-    filename: g2.filename,
-    mime_type: g2.mime_type,
-    byte_size: g2.byte_size,
-    summary: g2.summary,
-    page_count: g2.page_count,
-    ingest_status: g2.ingest_status,
-    portal_url: g2.portal_url,
-    pages: g2.pages
+    id: g.id,
+    filename: g.filename,
+    mime_type: g.mime_type,
+    byte_size: g.byte_size,
+    summary: g.summary,
+    page_count: g.page_count,
+    ingest_status: g.ingest_status,
+    portal_url: g.portal_url,
+    pages: g.pages
   };
 }
 function mapBoardBucketItem(d) {
@@ -8778,9 +9168,9 @@ function mapBoardBucketItem(d) {
   };
 }
 function mapBoardSummary(d) {
-  const g2 = d;
+  const g = d;
   return {
-    overdue: g2.overdue ? { count: g2.overdue.count, items: g2.overdue.items.map((i) => ({
+    overdue: g.overdue ? { count: g.overdue.count, items: g.overdue.items.map((i) => ({
       // BoardOverdueItem has task + deadline + days, not kind/title/since.
       kind: void 0,
       task: i.task ? { uuid: i.task.uuid, human_key: i.task.human_key, title: i.task.title, status: i.task.status, status_type: i.task.status_type } : void 0,
@@ -8790,87 +9180,87 @@ function mapBoardSummary(d) {
       link: void 0,
       approvals_pending: void 0
     })) } : void 0,
-    waiting_on_me: g2.waiting_on_me ? { count: g2.waiting_on_me.count, items: g2.waiting_on_me.items.map(mapBoardBucketItem) } : void 0,
-    waiting_on_others: g2.waiting_on_others ? { count: g2.waiting_on_others.count, items: g2.waiting_on_others.items.map(mapBoardBucketItem) } : void 0
+    waiting_on_me: g.waiting_on_me ? { count: g.waiting_on_me.count, items: g.waiting_on_me.items.map(mapBoardBucketItem) } : void 0,
+    waiting_on_others: g.waiting_on_others ? { count: g.waiting_on_others.count, items: g.waiting_on_others.items.map(mapBoardBucketItem) } : void 0
   };
 }
 function mapNotification(d) {
-  const g2 = d;
+  const g = d;
   return {
-    id: g2.id,
-    type: g2.type,
-    read: g2.read,
-    created_at: g2.created_at
+    id: g.id,
+    type: g.type,
+    read: g.read,
+    created_at: g.created_at
   };
 }
 function mapNotificationList(d) {
-  const g2 = d;
+  const g = d;
   return {
-    items: g2.items.map(mapNotification),
-    pagination: mapPagination(g2.pagination)
+    items: g.items.map(mapNotification),
+    pagination: mapPagination(g.pagination)
   };
 }
 function mapHumanKeyRef(d) {
-  const g2 = d;
-  return { id: g2.id, title: g2.title, level: g2.level ?? "" };
+  const g = d;
+  return { id: g.id, title: g.title, level: g.level ?? "" };
 }
 function mapPriorityQueueItem(d) {
-  const g2 = d;
+  const g = d;
   return {
-    id: g2.id,
-    human_key: g2.human_key,
-    title: g2.title,
-    status: g2.status,
-    status_type: g2.status_type,
-    level: g2.level,
-    block: g2.block,
-    rank: g2.rank,
-    asap: g2.asap,
-    blocked_by: g2.blocked_by.map((b) => b.human_key),
-    context_path: g2.context_path.map((c) => mapHumanKeyRef(c)),
-    governing_date: g2.governing_date,
-    capacity_percent: g2.capacity_percent
+    id: g.id,
+    human_key: g.human_key,
+    title: g.title,
+    status: g.status,
+    status_type: g.status_type,
+    level: g.level,
+    block: g.block,
+    rank: g.rank,
+    asap: g.asap,
+    blocked_by: g.blocked_by.map((b) => b.human_key),
+    context_path: g.context_path.map((c) => mapHumanKeyRef(c)),
+    governing_date: g.governing_date,
+    capacity_percent: g.capacity_percent
   };
 }
 function mapPriorityQueue(d) {
-  const g2 = d;
+  const g = d;
   return {
-    items: g2.items.map(mapPriorityQueueItem),
-    total: g2.total,
-    unordered_count: g2.unordered_count
+    items: g.items.map(mapPriorityQueueItem),
+    total: g.total,
+    unordered_count: g.unordered_count
   };
 }
 function mapCapacityTask(d) {
-  const g2 = d;
+  const g = d;
   return {
-    task_id: g2.task_id,
-    human_key: g2.human_key,
-    task_title: g2.task_title,
-    task_status: g2.task_status,
-    roles: g2.roles,
-    capacity_percent: g2.capacity_percent,
-    task_level: g2.task_level,
-    hierarchy_path: g2.hierarchy_path.map(mapHumanKeyRef)
+    task_id: g.task_id,
+    human_key: g.human_key,
+    task_title: g.task_title,
+    task_status: g.task_status,
+    roles: g.roles,
+    capacity_percent: g.capacity_percent,
+    task_level: g.task_level,
+    hierarchy_path: g.hierarchy_path.map(mapHumanKeyRef)
   };
 }
 function mapCapacity(d) {
-  const g2 = d;
+  const g = d;
   return {
-    base_percent: g2.base_percent,
-    committed_percent: g2.committed_percent,
-    free_percent: g2.free_percent,
-    utilization_percent: g2.utilization_percent,
-    over: g2.over,
-    base_capacity_note: g2.base_capacity_note,
-    tasks: g2.tasks.map(mapCapacityTask)
+    base_percent: g.base_percent,
+    committed_percent: g.committed_percent,
+    free_percent: g.free_percent,
+    utilization_percent: g.utilization_percent,
+    over: g.over,
+    base_capacity_note: g.base_capacity_note,
+    tasks: g.tasks.map(mapCapacityTask)
   };
 }
 function mapTask(d) {
-  const g2 = d;
-  const jira = "jira_issues" in g2 ? g2.jira_issues ?? [] : [];
-  const children = "children" in g2 ? g2.children ?? [] : [];
-  const repositories = "repositories" in g2 ? g2.repositories ?? [] : [];
-  const inherited = "inherited_repositories" in g2 ? g2.inherited_repositories ?? [] : [];
+  const g = d;
+  const jira = "jira_issues" in g ? g.jira_issues ?? [] : [];
+  const children = "children" in g ? g.children ?? [] : [];
+  const repositories = "repositories" in g ? g.repositories ?? [] : [];
+  const inherited = "inherited_repositories" in g ? g.inherited_repositories ?? [] : [];
   const mapRepo = (r) => ({
     id: r.id,
     display_name: r.display_name,
@@ -8881,40 +9271,40 @@ function mapTask(d) {
     browse_url: r.browse_url ?? null
   });
   return {
-    id: g2.id,
-    human_key: g2.human_key,
-    title: g2.title,
-    description: g2.description,
-    status: g2.status,
-    status_type: g2.status_type,
-    level: g2.level,
-    jira_issues: jira.map((j2) => ({ issue_key: j2.issue_key, summary: j2.summary })),
+    id: g.id,
+    human_key: g.human_key,
+    title: g.title,
+    description: g.description,
+    status: g.status,
+    status_type: g.status_type,
+    level: g.level,
+    jira_issues: jira.map((j) => ({ issue_key: j.issue_key, summary: j.summary })),
     children: children.map((c) => ({ human_key: c.human_key, title: c.title })),
     repositories: repositories.map(mapRepo),
     inherited_repositories: inherited.map(mapRepo),
-    suggested_branch: "suggested_branch" in g2 ? g2.suggested_branch ?? null : null
+    suggested_branch: "suggested_branch" in g ? g.suggested_branch ?? null : null
   };
 }
 function mapTaskList(d) {
-  const g2 = d;
+  const g = d;
   return {
-    items: g2.items.map((t) => mapTask(t)),
-    pagination: mapPagination(g2.pagination)
+    items: g.items.map((t) => mapTask(t)),
+    pagination: mapPagination(g.pagination)
   };
 }
 function mapArtifactApprovals(d) {
-  const g2 = d;
+  const g = d;
   return {
-    version: g2.version,
-    latest_version: g2.latest_version,
-    decided_count: g2.decided_count,
-    total_required: g2.total_required,
-    open_reviews: g2.open_reviews.map((r) => ({
+    version: g.version,
+    latest_version: g.latest_version,
+    decided_count: g.decided_count,
+    total_required: g.total_required,
+    open_reviews: g.open_reviews.map((r) => ({
       user_id: r.user_id ?? "",
       user_name: r.user_name ?? "",
       decided: r.decided
     })),
-    decisions: g2.decisions.map((dec) => ({
+    decisions: g.decisions.map((dec) => ({
       user_name: dec.user_name,
       decision: dec.decision,
       decided: true
@@ -8922,20 +9312,20 @@ function mapArtifactApprovals(d) {
   };
 }
 function mapArtifactReview(d) {
-  const g2 = d;
+  const g = d;
   return {
-    version: g2.version,
-    review_state: g2.review_state,
-    reviewers: g2.reviewers.map((r) => ({
+    version: g.version,
+    review_state: g.review_state,
+    reviewers: g.reviewers.map((r) => ({
       user_id: r.user_id,
       user_name: r.user_name,
       status: r.status
     })),
-    review_artifacts: g2.review_artifacts.map((a) => ({ title: a.title })),
-    initiator: g2.initiator ? { user_id: g2.initiator.user_id, user_name: g2.initiator.user_name } : null,
-    review_started_at: g2.review_started_at,
-    review_deadline_at: g2.review_deadline_at,
-    is_initiator: g2.is_initiator
+    review_artifacts: g.review_artifacts.map((a) => ({ title: a.title })),
+    initiator: g.initiator ? { user_id: g.initiator.user_id, user_name: g.initiator.user_name } : null,
+    review_started_at: g.review_started_at,
+    review_deadline_at: g.review_deadline_at,
+    is_initiator: g.is_initiator
   };
 }
 async function createDefaultAuraClient() {
@@ -8990,9 +9380,9 @@ function $constructor(name, initializer3, params) {
     const proto = _.prototype;
     const keys = Object.keys(proto);
     for (let i = 0; i < keys.length; i++) {
-      const k2 = keys[i];
-      if (!(k2 in inst)) {
-        inst[k2] = proto[k2].bind(inst);
+      const k = keys[i];
+      if (!(k in inst)) {
+        inst[k] = proto[k].bind(inst);
       }
     }
   }
@@ -9122,8 +9512,8 @@ function assertNever(_x) {
 function assert(_) {
 }
 function getEnumValues(entries) {
-  const numericValues = Object.values(entries).filter((v2) => typeof v2 === "number");
-  const values = Object.entries(entries).filter(([k2, _]) => numericValues.indexOf(+k2) === -1).map(([_, v2]) => v2);
+  const numericValues = Object.values(entries).filter((v) => typeof v === "number");
+  const values = Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
   return values;
 }
 function joinValues(array2, separator = "|") {
@@ -9177,9 +9567,9 @@ function defineLazy(object3, key, getter) {
       }
       return value;
     },
-    set(v2) {
+    set(v) {
       Object.defineProperty(object3, key, {
-        value: v2
+        value: v
         // configurable: true,
       });
     },
@@ -9251,8 +9641,8 @@ var allowsEval = /* @__PURE__ */ cached(() => {
     return false;
   }
   try {
-    const F2 = Function;
-    new F2("");
+    const F = Function;
+    new F("");
     return true;
   } catch (_) {
     return false;
@@ -9413,8 +9803,8 @@ function stringifyPrimitive(value) {
   return `${value}`;
 }
 function optionalKeys(shape) {
-  return Object.keys(shape).filter((k2) => {
-    return shape[k2]._zod.optin === "optional" && shape[k2]._zod.optout === "optional";
+  return Object.keys(shape).filter((k) => {
+    return shape[k]._zod.optin === "optional" && shape[k]._zod.optout === "optional";
   });
 }
 var NUMBER_FORMAT_RANGES = {
@@ -9600,21 +9990,21 @@ function required(Class2, schema, mask) {
   });
   return clone(schema, def);
 }
-function aborted(x2, startIndex = 0) {
-  if (x2.aborted === true)
+function aborted(x, startIndex = 0) {
+  if (x.aborted === true)
     return true;
-  for (let i = startIndex; i < x2.issues.length; i++) {
-    if (x2.issues[i]?.continue !== true) {
+  for (let i = startIndex; i < x.issues.length; i++) {
+    if (x.issues[i]?.continue !== true) {
       return true;
     }
   }
   return false;
 }
-function explicitlyAborted(x2, startIndex = 0) {
-  if (x2.aborted === true)
+function explicitlyAborted(x, startIndex = 0) {
+  if (x.aborted === true)
     return true;
-  for (let i = startIndex; i < x2.issues.length; i++) {
-    if (x2.issues[i]?.continue === false) {
+  for (let i = startIndex; i < x.issues.length; i++) {
+    if (x.issues[i]?.continue === false) {
       return true;
     }
   }
@@ -9691,8 +10081,8 @@ function issue(...args) {
   return { ...iss };
 }
 function cleanEnum(obj) {
-  return Object.entries(obj).filter(([k2, _]) => {
-    return Number.isNaN(Number.parseInt(k2, 10));
+  return Object.entries(obj).filter(([k, _]) => {
+    return Number.isNaN(Number.parseInt(k, 10));
   }).map((el) => el[1]);
 }
 function base64ToUint8Array(base642) {
@@ -10353,19 +10743,19 @@ var Doc = class {
       return;
     }
     const content = arg;
-    const lines = content.split("\n").filter((x2) => x2);
-    const minIndent = Math.min(...lines.map((x2) => x2.length - x2.trimStart().length));
-    const dedented = lines.map((x2) => x2.slice(minIndent)).map((x2) => " ".repeat(this.indent * 2) + x2);
+    const lines = content.split("\n").filter((x) => x);
+    const minIndent = Math.min(...lines.map((x) => x.length - x.trimStart().length));
+    const dedented = lines.map((x) => x.slice(minIndent)).map((x) => " ".repeat(this.indent * 2) + x);
     for (const line of dedented) {
       this.content.push(line);
     }
   }
   compile() {
-    const F2 = Function;
+    const F = Function;
     const args = this?.args;
     const content = this?.content ?? [``];
-    const lines = [...content.map((x2) => `  ${x2}`)];
-    return new F2(...args, lines.join("\n"));
+    const lines = [...content.map((x) => `  ${x}`)];
+    return new F(...args, lines.join("\n"));
   }
 };
 
@@ -10528,10 +10918,10 @@ var $ZodUUID = /* @__PURE__ */ $constructor("$ZodUUID", (inst, def) => {
       v7: 7,
       v8: 8
     };
-    const v2 = versionMap[def.version];
-    if (v2 === void 0)
+    const v = versionMap[def.version];
+    if (v === void 0)
       throw new Error(`Invalid UUID version: "${def.version}"`);
-    def.pattern ?? (def.pattern = uuid(v2));
+    def.pattern ?? (def.pattern = uuid(v));
   } else
     def.pattern ?? (def.pattern = uuid());
   $ZodStringFormat.init(inst, def);
@@ -10992,9 +11382,9 @@ function handlePropertyResult(result, final, key, input, isOptionalIn, isOptiona
 }
 function normalizeDef(def) {
   const keys = Object.keys(def.shape);
-  for (const k2 of keys) {
-    if (!def.shape?.[k2]?._zod?.traits?.has("$ZodType")) {
-      throw new Error(`Invalid element at key "${k2}": expected a Zod schema`);
+  for (const k of keys) {
+    if (!def.shape?.[k]?._zod?.traits?.has("$ZodType")) {
+      throw new Error(`Invalid element at key "${k}": expected a Zod schema`);
     }
   }
   const okeys = optionalKeys(def.shape);
@@ -11066,8 +11456,8 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
       const field = shape[key]._zod;
       if (field.values) {
         propValues[key] ?? (propValues[key] = /* @__PURE__ */ new Set());
-        for (const v2 of field.values)
-          propValues[key].add(v2);
+        for (const v of field.values)
+          propValues[key].add(v);
       }
     }
     return propValues;
@@ -11115,8 +11505,8 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     const doc = new Doc(["shape", "payload", "ctx"]);
     const normalized = _normalized.value;
     const parseStr = (key) => {
-      const k2 = esc(key);
-      return `shape[${k2}]._zod.run({ value: input[${k2}], issues: [] }, ctx)`;
+      const k = esc(key);
+      return `shape[${k}]._zod.run({ value: input[${k}], issues: [] }, ctx)`;
     };
     doc.write(`const input = payload.value;`);
     const ids = /* @__PURE__ */ Object.create(null);
@@ -11127,7 +11517,7 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     doc.write(`const newResult = {};`);
     for (const key of normalized.keys) {
       const id = ids[key];
-      const k2 = esc(key);
+      const k = esc(key);
       const schema = shape[key];
       const isOptionalIn = schema?._zod?.optin === "optional";
       const isOptionalOut = schema?._zod?.optout === "optional";
@@ -11135,30 +11525,30 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
       if (isOptionalIn && isOptionalOut) {
         doc.write(`
         if (${id}.issues.length) {
-          if (${k2} in input) {
+          if (${k} in input) {
             payload.issues = payload.issues.concat(${id}.issues.map(iss => ({
               ...iss,
-              path: iss.path ? [${k2}, ...iss.path] : [${k2}]
+              path: iss.path ? [${k}, ...iss.path] : [${k}]
             })));
           }
         }
         
         if (${id}.value === undefined) {
-          if (${k2} in input) {
-            newResult[${k2}] = undefined;
+          if (${k} in input) {
+            newResult[${k}] = undefined;
           }
         } else {
-          newResult[${k2}] = ${id}.value;
+          newResult[${k}] = ${id}.value;
         }
         
       `);
       } else if (!isOptionalIn) {
         doc.write(`
-        const ${id}_present = ${k2} in input;
+        const ${id}_present = ${k} in input;
         if (${id}.issues.length) {
           payload.issues = payload.issues.concat(${id}.issues.map(iss => ({
             ...iss,
-            path: iss.path ? [${k2}, ...iss.path] : [${k2}]
+            path: iss.path ? [${k}, ...iss.path] : [${k}]
           })));
         }
         if (!${id}_present && !${id}.issues.length) {
@@ -11166,15 +11556,15 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
             code: "invalid_type",
             expected: "nonoptional",
             input: undefined,
-            path: [${k2}]
+            path: [${k}]
           });
         }
 
         if (${id}_present) {
           if (${id}.value === undefined) {
-            newResult[${k2}] = undefined;
+            newResult[${k}] = undefined;
           } else {
-            newResult[${k2}] = ${id}.value;
+            newResult[${k}] = ${id}.value;
           }
         }
 
@@ -11184,16 +11574,16 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
         if (${id}.issues.length) {
           payload.issues = payload.issues.concat(${id}.issues.map(iss => ({
             ...iss,
-            path: iss.path ? [${k2}, ...iss.path] : [${k2}]
+            path: iss.path ? [${k}, ...iss.path] : [${k}]
           })));
         }
         
         if (${id}.value === undefined) {
-          if (${k2} in input) {
-            newResult[${k2}] = undefined;
+          if (${k} in input) {
+            newResult[${k}] = undefined;
           }
         } else {
-          newResult[${k2}] = ${id}.value;
+          newResult[${k}] = ${id}.value;
         }
         
       `);
@@ -11309,11 +11699,11 @@ var $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUnio
       const pv = option._zod.propValues;
       if (!pv || Object.keys(pv).length === 0)
         throw new Error(`Invalid discriminated union option at index "${def.options.indexOf(option)}"`);
-      for (const [k2, v2] of Object.entries(pv)) {
-        if (!propValues[k2])
-          propValues[k2] = /* @__PURE__ */ new Set();
-        for (const val of v2) {
-          propValues[k2].add(val);
+      for (const [k, v] of Object.entries(pv)) {
+        if (!propValues[k])
+          propValues[k] = /* @__PURE__ */ new Set();
+        for (const val of v) {
+          propValues[k].add(val);
         }
       }
     }
@@ -11326,11 +11716,11 @@ var $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUnio
       const values = o._zod.propValues?.[def.discriminator];
       if (!values || values.size === 0)
         throw new Error(`Invalid discriminated union option at index "${def.options.indexOf(o)}"`);
-      for (const v2 of values) {
-        if (map.has(v2)) {
-          throw new Error(`Duplicate discriminator value "${String(v2)}"`);
+      for (const v of values) {
+        if (map.has(v)) {
+          throw new Error(`Duplicate discriminator value "${String(v)}"`);
         }
-        map.set(v2, o);
+        map.set(v, o);
       }
     }
     return map;
@@ -11431,10 +11821,10 @@ function handleIntersectionResults(result, left, right) {
   for (const iss of left.issues) {
     if (iss.code === "unrecognized_keys") {
       unrecIssue ?? (unrecIssue = iss);
-      for (const k2 of iss.keys) {
-        if (!unrecKeys.has(k2))
-          unrecKeys.set(k2, {});
-        unrecKeys.get(k2).l = true;
+      for (const k of iss.keys) {
+        if (!unrecKeys.has(k))
+          unrecKeys.set(k, {});
+        unrecKeys.get(k).l = true;
       }
     } else {
       result.issues.push(iss);
@@ -11442,16 +11832,16 @@ function handleIntersectionResults(result, left, right) {
   }
   for (const iss of right.issues) {
     if (iss.code === "unrecognized_keys") {
-      for (const k2 of iss.keys) {
-        if (!unrecKeys.has(k2))
-          unrecKeys.set(k2, {});
-        unrecKeys.get(k2).r = true;
+      for (const k of iss.keys) {
+        if (!unrecKeys.has(k))
+          unrecKeys.set(k, {});
+        unrecKeys.get(k).r = true;
       }
     } else {
       result.issues.push(iss);
     }
   }
-  const bothKeys = [...unrecKeys].filter(([, f]) => f.l && f.r).map(([k2]) => k2);
+  const bothKeys = [...unrecKeys].filter(([, f]) => f.l && f.r).map(([k]) => k);
   if (bothKeys.length && unrecIssue) {
     result.issues.push({ ...unrecIssue, keys: bothKeys });
   }
@@ -11595,7 +11985,7 @@ var $ZodEnum = /* @__PURE__ */ $constructor("$ZodEnum", (inst, def) => {
   const values = getEnumValues(def.entries);
   const valuesSet = new Set(values);
   inst._zod.values = valuesSet;
-  inst._zod.pattern = new RegExp(`^(${values.filter((k2) => propertyKeyTypes.has(typeof k2)).map((o) => typeof o === "string" ? escapeRegex(o) : o.toString()).join("|")})$`);
+  inst._zod.pattern = new RegExp(`^(${values.filter((k) => propertyKeyTypes.has(typeof k)).map((o) => typeof o === "string" ? escapeRegex(o) : o.toString()).join("|")})$`);
   inst._zod.parse = (payload, _ctx) => {
     const input = payload.value;
     if (valuesSet.has(input)) {
@@ -11754,8 +12144,8 @@ var $ZodPrefault = /* @__PURE__ */ $constructor("$ZodPrefault", (inst, def) => {
 var $ZodNonOptional = /* @__PURE__ */ $constructor("$ZodNonOptional", (inst, def) => {
   $ZodType.init(inst, def);
   defineLazy(inst._zod, "values", () => {
-    const v2 = def.innerType._zod.values;
-    return v2 ? new Set([...v2].filter((x2) => x2 !== void 0)) : void 0;
+    const v = def.innerType._zod.values;
+    return v ? new Set([...v].filter((x) => x !== void 0)) : void 0;
   });
   inst._zod.parse = (payload, ctx) => {
     const result = def.innerType._zod.run(payload, ctx);
@@ -13107,9 +13497,9 @@ var dateProcessor = (_schema, ctx, _json, _params) => {
 var enumProcessor = (schema, _ctx, json, _params) => {
   const def = schema._zod.def;
   const values = getEnumValues(def.entries);
-  if (values.every((v2) => typeof v2 === "number"))
+  if (values.every((v) => typeof v === "number"))
     json.type = "number";
-  if (values.every((v2) => typeof v2 === "string"))
+  if (values.every((v) => typeof v === "string"))
     json.type = "string";
   json.enum = values;
 };
@@ -13142,13 +13532,13 @@ var literalProcessor = (schema, ctx, json, _params) => {
       json.const = val;
     }
   } else {
-    if (vals.every((v2) => typeof v2 === "number"))
+    if (vals.every((v) => typeof v === "number"))
       json.type = "number";
-    if (vals.every((v2) => typeof v2 === "string"))
+    if (vals.every((v) => typeof v === "string"))
       json.type = "string";
-    if (vals.every((v2) => typeof v2 === "boolean"))
+    if (vals.every((v) => typeof v === "boolean"))
       json.type = "boolean";
-    if (vals.every((v2) => v2 === null))
+    if (vals.every((v) => v === null))
       json.type = "null";
     json.enum = vals;
   }
@@ -13191,11 +13581,11 @@ var objectProcessor = (schema, ctx, _json, params) => {
   }
   const allKeys = new Set(Object.keys(shape));
   const requiredKeys = new Set([...allKeys].filter((key) => {
-    const v2 = def.shape[key]._zod;
+    const v = def.shape[key]._zod;
     if (ctx.io === "input") {
-      return v2.optin === void 0;
+      return v.optin === void 0;
     } else {
-      return v2.optout === void 0;
+      return v.optout === void 0;
     }
   }));
   if (requiredKeys.size > 0) {
@@ -13216,7 +13606,7 @@ var objectProcessor = (schema, ctx, _json, params) => {
 var unionProcessor = (schema, ctx, json, params) => {
   const def = schema._zod.def;
   const isExclusive = def.inclusive === false;
-  const options = def.options.map((x2, i) => process2(x2, ctx, {
+  const options = def.options.map((x, i) => process2(x, ctx, {
     ...params,
     path: [...params.path, isExclusive ? "oneOf" : "anyOf", i]
   }));
@@ -13273,7 +13663,7 @@ var recordProcessor = (schema, ctx, _json, params) => {
   }
   const keyValues = keyType._zod.values;
   if (keyValues) {
-    const validKeyValues = [...keyValues].filter((v2) => typeof v2 === "string" || typeof v2 === "number");
+    const validKeyValues = [...keyValues].filter((v) => typeof v === "string" || typeof v === "number");
     if (validKeyValues.length > 0) {
       json.required = validKeyValues;
     }
@@ -13530,12 +13920,12 @@ function _installLazyMethods(inst, group, methods) {
         });
         return bound;
       },
-      set(v2) {
+      set(v) {
         Object.defineProperty(this, key, {
           configurable: true,
           writable: true,
           enumerable: true,
-          value: v2
+          value: v
         });
       }
     });
@@ -14173,7 +14563,7 @@ var ZodEnum = /* @__PURE__ */ $constructor("ZodEnum", (inst, def) => {
   };
 });
 function _enum(values, params) {
-  const entries = Array.isArray(values) ? Object.fromEntries(values.map((v2) => [v2, v2])) : values;
+  const entries = Array.isArray(values) ? Object.fromEntries(values.map((v) => [v, v])) : values;
   return new ZodEnum({
     type: "enum",
     entries,
@@ -14439,7 +14829,7 @@ var LATEST_PROTOCOL_VERSION = "2025-11-25";
 var SUPPORTED_PROTOCOL_VERSIONS = [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 var RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task";
 var JSONRPC_VERSION = "2.0";
-var AssertObjectSchema = custom((v2) => v2 !== null && (typeof v2 === "object" || typeof v2 === "function"));
+var AssertObjectSchema = custom((v) => v !== null && (typeof v === "object" || typeof v === "function"));
 var ProgressTokenSchema = union([string2(), number2().int()]);
 var CursorSchema = string2();
 var TaskCreationParamsSchema = looseObject({
@@ -16926,15 +17316,15 @@ function isPlainObject2(value) {
 function mergeCapabilities(base, additional) {
   const result = { ...base };
   for (const key in additional) {
-    const k2 = key;
-    const addValue = additional[k2];
+    const k = key;
+    const addValue = additional[k];
     if (addValue === void 0)
       continue;
-    const baseValue = result[k2];
+    const baseValue = result[k];
     if (isPlainObject2(baseValue) && isPlainObject2(addValue)) {
-      result[k2] = { ...baseValue, ...addValue };
+      result[k] = { ...baseValue, ...addValue };
     } else {
-      result[k2] = addValue;
+      result[k] = addValue;
     }
   }
   return result;
@@ -17756,7 +18146,7 @@ function createFetchWithInit(baseFetch = fetch, baseInit) {
 var crypto;
 crypto = globalThis.crypto?.webcrypto ?? // Node.js [18-16] REPL
 globalThis.crypto ?? // Node.js >18
-import("node:crypto").then((m2) => m2.webcrypto);
+import("node:crypto").then((m) => m.webcrypto);
 async function getRandomValues(size) {
   return (await crypto).getRandomValues(new Uint8Array(size));
 }
@@ -19350,7 +19740,7 @@ var BB_REQUEST_TIMEOUT_MS = 2e4;
 async function bbFetch(path, query, keyring, defaultWorkspace) {
   const creds = await loadCreds(keyring, defaultWorkspace);
   const url2 = new URL(`https://api.bitbucket.org/2.0${path}`);
-  for (const [k2, v2] of Object.entries(query)) url2.searchParams.set(k2, v2);
+  for (const [k, v] of Object.entries(query)) url2.searchParams.set(k, v);
   const res = await fetch(url2, {
     headers: {
       Authorization: "Basic " + Buffer.from(`${creds.email}:${creds.token}`).toString("base64"),
@@ -19374,25 +19764,25 @@ async function listWorkspaceRepos(workspace, keyring) {
       keyring,
       workspace
     );
-    slugs.push(...data.values.map((v2) => v2.slug));
+    slugs.push(...data.values.map((v) => v.slug));
     if (!data.next) break;
     page++;
   }
   return slugs;
 }
-async function searchRepoPRs(workspace, repo, q2, keyring) {
+async function searchRepoPRs(workspace, repo, q, keyring) {
   const data = await bbFetch(
     `/repositories/${workspace}/${repo}/pullrequests`,
-    { pagelen: "50", q: q2, fields: "values.id,values.title,values.state,values.source.branch.name,values.destination.branch.name,values.links.html.href" },
+    { pagelen: "50", q, fields: "values.id,values.title,values.state,values.source.branch.name,values.destination.branch.name,values.links.html.href" },
     keyring,
     workspace
   );
   return data.values;
 }
-async function searchRepoBranches(workspace, repo, q2, keyring) {
+async function searchRepoBranches(workspace, repo, q, keyring) {
   const data = await bbFetch(
     `/repositories/${workspace}/${repo}/refs/branches`,
-    { pagelen: "50", q: q2, fields: "values.name,values.target.hash" },
+    { pagelen: "50", q, fields: "values.name,values.target.hash" },
     keyring,
     workspace
   );
@@ -19429,14 +19819,14 @@ function similarity(repoSlug, taskText2) {
   return overlap / Math.sqrt(rt.size);
 }
 function topReposBySimilarity(allRepos, taskText2, n) {
-  return allRepos.map((slug) => ({ slug, score: similarity(slug, taskText2) })).filter((x2) => x2.score > 0).sort((a, b) => b.score - a.score).slice(0, n).map((x2) => x2.slug);
+  return allRepos.map((slug) => ({ slug, score: similarity(slug, taskText2) })).filter((x) => x.score > 0).sort((a, b) => b.score - a.score).slice(0, n).map((x) => x.slug);
 }
 function taskText(task, jiraSummaries) {
   return [task.title, task.description ?? "", ...jiraSummaries].join(" ");
 }
 async function fetchTaskDevLinks(task, settings, keyring, atlassian) {
   const taskKey = task.human_key;
-  const jiraKeys = (task.jira_issues ?? []).map((j2) => j2.issue_key);
+  const jiraKeys = (task.jira_issues ?? []).map((j) => j.issue_key);
   const errors = [];
   const prs = [];
   const branches = [];
@@ -19570,7 +19960,7 @@ async function fetchTaskDevLinks(task, settings, keyring, atlassian) {
     if (!found) {
       try {
         const allRepos = await listWorkspaceRepos(ws, keyring);
-        const jiraSummaries = (task.jira_issues ?? []).map((j2) => j2.summary ?? "");
+        const jiraSummaries = (task.jira_issues ?? []).map((j) => j.summary ?? "");
         const candidates = topReposBySimilarity(allRepos, taskText(task, jiraSummaries), 5).filter((r) => !preferred.includes(r));
         for (const repo of candidates) {
           await tryRepo(repo);
@@ -19621,15 +20011,15 @@ async function buildAtlassianClient(serverName = "atlassian") {
 function keyOf(input) {
   return canonicalize(input);
 }
-function canonicalize(v2) {
-  if (v2 === null || v2 === void 0) return "null";
-  const t = typeof v2;
-  if (t === "string") return JSON.stringify(v2);
-  if (t === "number" || t === "boolean") return String(v2);
+function canonicalize(v) {
+  if (v === null || v === void 0) return "null";
+  const t = typeof v;
+  if (t === "string") return JSON.stringify(v);
+  if (t === "number" || t === "boolean") return String(v);
   if (t === "object") {
-    if (Array.isArray(v2)) return "[" + v2.map(canonicalize).join(",") + "]";
-    const obj = v2;
-    return "{" + Object.keys(obj).sort().map((k2) => JSON.stringify(k2) + ":" + canonicalize(obj[k2])).join(",") + "}";
+    if (Array.isArray(v)) return "[" + v.map(canonicalize).join(",") + "]";
+    const obj = v;
+    return "{" + Object.keys(obj).sort().map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k])).join(",") + "}";
   }
   throw new Error(`keyOf: unhashable value of type ${t}`);
 }
@@ -20010,10 +20400,9 @@ function readDashboardUrl(serverUrlPath = defaultServerUrlPath()) {
     return null;
   }
 }
-var nextEventId = 0;
 function wrapEvent(payload) {
   return {
-    id: ++nextEventId,
+    id: 0,
     ts: (/* @__PURE__ */ new Date()).toISOString(),
     dir: "agent\u2192page",
     type: "progress",
@@ -20089,7 +20478,7 @@ var NOTIF_FETCH_CAP = 500;
 var NOTIF_OLDER_FETCH = 20;
 var NOTIF_BOUNDARY_MARGIN_MS = 5 * 60 * 1e3;
 function humanStatus(status) {
-  return status.toLowerCase().split("_").map((w2) => w2.charAt(0).toUpperCase() + w2.slice(1)).join(" ");
+  return status.toLowerCase().split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 }
 function pctToHours(pct) {
   if (pct === null) return null;
@@ -20099,8 +20488,8 @@ function fmtHours(hours) {
   if (hours === null) return "\u2014";
   const rounded = Math.round(hours / 0.25) * 0.25;
   const h = Math.floor(rounded);
-  const m2 = Math.round((rounded - h) * 60);
-  return `~${h}:${String(m2).padStart(2, "0")}`;
+  const m = Math.round((rounded - h) * 60);
+  return `~${h}:${String(m).padStart(2, "0")}`;
 }
 function gitColumnSummary(link) {
   if (!link) return "";
@@ -20115,8 +20504,8 @@ function gitColumnSummary(link) {
   if (link.branches.length > 0) parts.push(`${link.branches.length}: \u{1F33F}`);
   return parts.join(", ");
 }
-function safeString(v2) {
-  return typeof v2 === "string" ? v2 : "";
+function safeString(v) {
+  return typeof v === "string" ? v : "";
 }
 function fmtPct(pct) {
   if (pct === null) return "\u2014";
@@ -20355,10 +20744,10 @@ async function fetchAction() {
     reviewById.set(a.id, r);
   }
   for (const item of summary.waiting_on_others?.items ?? []) {
-    const m2 = safeString(item.link).match(/artifact=([0-9a-f-]+)/i);
-    if (m2 && !reviewById.has(m2[1])) {
+    const m = safeString(item.link).match(/artifact=([0-9a-f-]+)/i);
+    if (m && !reviewById.has(m[1])) {
       const r = {
-        artifact_id: m2[1],
+        artifact_id: m[1],
         title: item.title ?? "",
         version: 0,
         // filled below from getArtifactApprovals
@@ -20368,7 +20757,7 @@ async function fetchAction() {
         total_required: item.approvals_pending ?? 0
       };
       reviews.push(r);
-      reviewById.set(m2[1], r);
+      reviewById.set(m[1], r);
     }
   }
   const waitingOnOthersLinks = (summary.waiting_on_others?.items ?? []).map(
@@ -20381,8 +20770,8 @@ async function fetchAction() {
   );
   const verifications = await verifyArtifacts(aura, artifactsToVerify);
   const approvalsById = /* @__PURE__ */ new Map();
-  for (const v2 of verifications) {
-    if (v2.current) approvalsById.set(v2.artifact_id, v2.current);
+  for (const v of verifications) {
+    if (v.current) approvalsById.set(v.artifact_id, v.current);
   }
   for (const r of reviews) {
     const ap = approvalsById.get(r.artifact_id);
@@ -20438,7 +20827,7 @@ async function fetchAction() {
           const childKeys = (detail.children ?? []).map((c) => c.human_key).filter(Boolean);
           if (childKeys.length > 0) {
             const childDetails = await Promise.all(
-              childKeys.map((k2) => aura.getTaskByHumanKey(k2).catch(() => null))
+              childKeys.map((k) => aura.getTaskByHumanKey(k).catch(() => null))
             );
             const childJira = childDetails.filter((c) => c !== null).flatMap((c) => c.jira_issues ?? []);
             if (childJira.length > 0) {
@@ -20496,8 +20885,6 @@ async function fetchAction() {
           const node = ctx.progress.create(reviewsPhaseNode, `review ${id}`);
           candidateNodes.push(node);
         }
-        for (const node of rowNodes) ctx.progress.finish(node, { deferCloseForChildren: true });
-        for (const node of candidateNodes) ctx.progress.finish(node, { deferCloseForChildren: true });
         ctx.progress.finish(tasksPhaseNode, { deferCloseForChildren: true });
         ctx.progress.finish(reviewsPhaseNode, { deferCloseForChildren: true });
         return { rows: queueRows.length, candidates: candidateIds.size };
@@ -20542,7 +20929,7 @@ async function fetchAction() {
         `Digest task cap hit (${finalCap}); some dev-links/reviews work was dropped. This indicates a runaway spawn \u2014 please report it.`
       );
     }
-    for (const w2 of runWarnings) warnings.push(w2);
+    for (const w of runWarnings) warnings.push(w);
     for (const row of queueRows) {
       const dl = state.devLinks.get(row.key);
       if (dl) devLinks.push(dl);
@@ -20610,7 +20997,7 @@ async function fetchAction() {
   console.error(`  raw:     ${rawPath}`);
   console.error(`  digest:  ${digestPath}`);
   console.error(`  report:  ${reportPath}`);
-  console.error(`  queue rows: ${queueRows.length}, artifacts verified: ${verifications.length} (${verifications.filter((v2) => v2.stale).length} stale), dev links: ${devLinks.length} tasks`);
+  console.error(`  queue rows: ${queueRows.length}, artifacts verified: ${verifications.length} (${verifications.filter((v) => v.stale).length} stale), dev links: ${devLinks.length} tasks`);
 }
 async function verifyArtifacts(client2, candidates) {
   const isActionable = (d) => d === "REJECTED" || d === "NEEDS_REVISION";
@@ -20725,10 +21112,10 @@ function extractVerifyTargets(notifications, pendingArtifacts, waitingOnOthersLi
     }
   }
   for (const link of waitingOnOthersLinks) {
-    const m2 = link.match(/artifact=([0-9a-f-]+)/i);
-    if (m2 && !byId.has(m2[1])) {
-      byId.set(m2[1], {
-        artifact_id: m2[1],
+    const m = link.match(/artifact=([0-9a-f-]+)/i);
+    if (m && !byId.has(m[1])) {
+      byId.set(m[1], {
+        artifact_id: m[1],
         title: "",
         reported_version: null,
         reported_decision: null,
@@ -20872,7 +21259,7 @@ function renderWarnings(d) {
   const warnings = d.warnings ?? [];
   if (warnings.length === 0) return "";
   const lines = ["### \u26A0\uFE0F Warnings", ""];
-  for (const w2 of warnings) lines.push(`- ${w2}`);
+  for (const w of warnings) lines.push(`- ${w}`);
   return lines.join("\n");
 }
 function stateEmoji(state) {
@@ -20935,8 +21322,8 @@ function render(d) {
   sections.push(renderCorrections(d), "");
   sections.push(renderDevLinks(d), "");
   sections.push(renderSuggestedActions(d), "");
-  const w2 = renderWarnings(d);
-  if (w2) sections.push(w2, "");
+  const w = renderWarnings(d);
+  if (w) sections.push(w, "");
   return sections.join("\n") + "\n";
 }
 function renderAction() {

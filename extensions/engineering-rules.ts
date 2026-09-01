@@ -1,10 +1,15 @@
 /**
  * Engineering Rules Extension
  *
- * Reads the 15 included `.mdc` Cursor rule files from
- * `skills/core/engineering-foundation/resources/rules/` and dispatches each by its
- * frontmatter attach mode, provides a universal `@mention` overlay for all
- * 15, and lists the non-auto-loaded rules in the system prompt every turn.
+ * Reads the repo's `.mdc` Cursor rule files from `<cwd>/.cursor/rules/`
+ * (recursively) and dispatches each by its frontmatter attach mode, provides
+ * a universal `@mention` overlay for all loaded rules, and lists the
+ * non-auto-loaded rules in the system prompt every turn.
+ *
+ * Syncing the `.mdc` files into a repo's `.cursor/rules/` is a per-repo
+ * concern — this package ships no rules of its own. The extension reads
+ * whatever the repo (its cwd) has deposited there. Until a repo populates
+ * `.cursor/rules/`, the extension no-ops (no rules are injected).
  *
  * Frontmatter-driven dispatch (read from each `.mdc`):
  *   - `alwaysApply: true`  → append the rule body to the system prompt every turn.
@@ -12,9 +17,9 @@
  *     prompt every turn; the agent `read`s the rule on demand.
  *   - neither (manual) → list in the system prompt + `@mention`-able.
  *
- * Universal `@mention` overlay (all 15 rules):
+ * Universal `@mention` overlay (all loaded rules):
  *   - `ctx.ui.addAutocompleteProvider` with `triggerCharacters: ["@", ...]`.
- *   - When the text after `@` starts with `rule:`, offer the 15 rules;
+ *   - When the text after `@` starts with `rule:`, offer the loaded rules;
  *     selecting one inserts `@rule:<name>`.
  *   - Defer to the built-in path provider when the token after `@` doesn't
  *     start with `rule:` (avoid clobbering pi's `@file` path syntax).
@@ -23,19 +28,25 @@
  * `@rule:<name>` tokens and appends the corresponding rule body to the
  * system prompt for that turn.
  *
- * `tracker-aura` is skipped via the drift manifest's `ignored: true` flag
- *  (`.pi/engineering-foundation.json`), which the sync utility writes. The
- *  extension reads that manifest to build the ignored-rule set — no hardcoded
- *  rule names. If the manifest is absent (before the seeding run), no rules
- *  are skipped.
+ * Configurable skip (`aura.cursorRules.ignore`):
+ *   - An array of glob patterns matched against the rule path **relative to
+ *     `.cursor/rules/`** (e.g. `"tracker-aura.mdc"`, a pattern matching any
+ *     file ending in `-aura.mdc` under a `universal/` subtree).
+ *   - Read from BOTH `~/.pi/agent/settings.json` (global, applies to all
+ *     CWDs) and `<cwd>/.pi/settings.json` (project-local); the two lists are
+ *     unioned, so a rule matching either is skipped.
+ *   - Lives under the `aura` settings block (this package's namespace); the
+ *     setting is repo-controlled, not package-controlled — there is no
+ *     package-wide ignore list and no drift manifest.
  *
  * Rules are resources, NOT pi skills (no `/skill:<rule>`). One concern per
  * extension — this file owns rule dispatch + `@mention`; it does not touch
  * the aura-skill reminder (that's `aura-skill-instruction.ts`).
  */
 
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { join, sep } from "node:path";
+import { homedir } from "node:os";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // ---------------------------------------------------------------------------
@@ -92,15 +103,25 @@ interface AutocompleteProvider {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Directory holding the 15 included `.mdc` rule files (relative to the
- *  project root). The rules are deposited by the `engineering-sync` skill's
- *  seeding run; until then the dir is empty/absent and the extension no-ops. */
-const RULES_DIR = "skills/core/engineering-foundation/resources/rules";
+/** Directory holding the repo's `.mdc` Cursor rule files (relative to the
+ *  project root / cwd). The repo is responsible for syncing rules here; this
+ *  package ships none. Until the dir is populated the extension no-ops. */
+const RULES_DIR = ".cursor/rules";
 
-/** Path to the drift manifest (relative to the project root), which carries
- *  the `ignored: true` flags the sync utility writes for rules like
- *  `tracker-aura`. */
-const MANIFEST_PATH = ".pi/engineering-foundation.json";
+/** Global settings file (pi agent settings). Computed lazily from homedir()
+ *  so tests can override HOME before calling loadIgnoreGlobs. */
+function globalSettingsPath(): string {
+  return join(homedir(), ".pi", "agent", "settings.json");
+}
+
+/** Project-local settings file, relative to cwd (pi's CONFIG_DIR_NAME = ".pi"). */
+const PROJECT_SETTINGS_REL = join(".pi", "settings.json");
+
+/** Settings key path for the configurable skip list. Lives under the `aura`
+ *  block: `aura.cursorRules.ignore`. Globs are relative to `.cursor/rules/`. */
+const SETTINGS_BLOCK = "aura";
+const SETTINGS_KEY = "cursorRules";
+const IGNORE_FIELD = "ignore";
 
 /** The `@mention` token prefix. */
 const RULE_TOKEN_PREFIX = "rule:";
@@ -116,7 +137,8 @@ interface Rule {
   name: string;
   /** Absolute path to the `.mdc` file. */
   path: string;
-  /** Path relative to the project root, for the system-prompt listing. */
+  /** Path relative to RULES_DIR (no leading sep), for the system-prompt listing
+   *  and for glob-matching against the ignore list. */
   relPath: string;
   /** Frontmatter attach mode. */
   attach: AttachMode;
@@ -225,54 +247,136 @@ function parseYamlListBlock(yamlBlock: string, key: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Glob matching (minimal, dependency-free — supports *, **, ?)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compile a glob pattern into a RegExp. Supports `*` (non-separator span),
+ * `**` (any span including separators), and `?` (single non-separator char).
+ * Separator is the OS path separator. Patterns are matched against the rule
+ * path **relative to `.cursor/rules/`** (forward-slash-joined on all platforms
+ * for cross-platform settings portability).
+ *
+ * We implement this here instead of pulling in a glob dep so the extension
+ * stays dependency-free for end users of the package (the peer dep is pi only).
+ */
+export function globToRegExp(pattern: string): RegExp {
+  // Normalize: match on forward-slash-separated relpaths.
+  let re = "^";
+  let i = 0;
+  while (i < pattern.length) {
+    const ch = pattern[i];
+    if (ch === "*") {
+      if (pattern[i + 1] === "*") {
+        // `**` — any span including separators. Consume an optional following `/`
+        // so `a/**/b` matches `a/b` (zero dirs) too.
+        i += 2;
+        if (pattern[i] === "/") i++;
+        re += "(?:.*/)?";
+      } else {
+        // `*` — non-separator span.
+        re += "[^/]*";
+        i++;
+      }
+    } else if (ch === "?") {
+      re += "[^/]";
+      i++;
+    } else if (".+^$(){}|[]\\".includes(ch)) {
+      re += "\\" + ch;
+      i++;
+    } else if (ch === "/") {
+      re += "/";
+      i++;
+    } else {
+      re += ch;
+      i++;
+    }
+  }
+  re += "$";
+  return new RegExp(re);
+}
+
+/** Match a rule's relPath (forward-slash-joined, relative to `.cursor/rules/`)
+ *  against a list of glob patterns. True if any pattern matches. */
+export function matchesAnyGlob(relPath: string, patterns: string[]): boolean {
+  // Normalize relPath to forward slashes (relPath is built with OS sep).
+  const norm = relPath.split(sep).join("/");
+  for (const p of patterns) {
+    if (globToRegExp(p).test(norm)) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Settings: read `aura.cursorRules.ignore` from global + project, union
+// ---------------------------------------------------------------------------
+
+/** Read the `aura.cursorRules.ignore` array from a single settings file.
+ *  Returns [] when the file or the key is absent, or the value isn't a
+ *  string array. Never throws — a malformed file just contributes no globs. */
+function readIgnoreGlobs(settingsPath: string): string[] {
+  if (!existsSync(settingsPath)) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(settingsPath, "utf8"));
+  } catch {
+    return [];
+  }
+  if (typeof parsed !== "object" || parsed === null) return [];
+  const block = (parsed as Record<string, unknown>)[SETTINGS_BLOCK];
+  if (typeof block !== "object" || block === null) return [];
+  const key = (block as Record<string, unknown>)[SETTINGS_KEY];
+  if (typeof key !== "object" || key === null) return [];
+  const ignore = (key as Record<string, unknown>)[IGNORE_FIELD];
+  if (!Array.isArray(ignore)) return [];
+  return ignore.filter((g): g is string => typeof g === "string");
+}
+
+/** Load the union of `aura.cursorRules.ignore` globs from global settings
+ *  (`~/.pi/agent/settings.json`, applies to all CWDs) and project-local
+ *  settings (`<cwd>/.pi/settings.json`). Globs are relative to `.cursor/rules/`. */
+export function loadIgnoreGlobs(cwd: string): string[] {
+  const globalGlobs = readIgnoreGlobs(globalSettingsPath());
+  const projectGlobs = readIgnoreGlobs(join(cwd, PROJECT_SETTINGS_REL));
+  // Union (dedupe).
+  return Array.from(new Set([...globalGlobs, ...projectGlobs]));
+}
+
+// ---------------------------------------------------------------------------
 // Rule loading
 // ---------------------------------------------------------------------------
 
-/** Read the `ignored: true` rule names from the drift manifest. Returns a
- *  Set of rule names (filename without `.mdc`) to skip. Empty if the manifest
- *  is absent or has no ignored entries.
- *
- *  The manifest is keyed by wiki canonical identity (blueprint path or
- *  knowledge-node uuid), and each rule entry carries a `localPath` pointing
- *  into `resources/rules/<name>.mdc`. We derive the rule name from the
- *  `localPath` basename so the match is by file, not by key shape. */
-function loadIgnoredRuleNames(cwd: string): Set<string> {
-  const manifestPath = join(cwd, MANIFEST_PATH);
-  if (!existsSync(manifestPath)) return new Set();
-  let manifest: { entries?: Record<string, { ignored?: boolean; localPath?: string }> };
-  try {
-    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  } catch {
-    // Malformed manifest — don't crash the extension; just skip nothing.
-    return new Set();
-  }
-  const ignored = new Set<string>();
-  for (const entry of Object.values(manifest.entries ?? {})) {
-    if (entry.ignored !== true) continue;
-    const lp = entry.localPath ?? "";
-    // localPath is repo-relative, e.g.
-    // `skills/core/engineering-foundation/resources/rules/tracker-aura.mdc`.
-    const filename = lp.split("/").pop() ?? "";
-    if (filename.endsWith(".mdc")) {
-      ignored.add(filename.slice(0, -4));
+/** Recursively collect all `.mdc` file paths under `dir`. Returns absolute
+ *  paths. Empty if `dir` is absent. */
+function collectMdcFiles(dir: string, acc: string[] = []): string[] {
+  if (!existsSync(dir)) return acc;
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    const st = statSync(full);
+    if (st.isDirectory()) {
+      collectMdcFiles(full, acc);
+    } else if (entry.endsWith(".mdc")) {
+      acc.push(full);
     }
   }
-  return ignored;
+  return acc;
 }
 
-/** Load all non-ignored `.mdc` rules from the rules dir. Returns [] if the
- *  dir is absent or empty (the extension no-ops until the seeding runs).
- *  Rules marked `ignored: true` in the drift manifest are skipped. */
+/** Load all non-ignored `.mdc` rules from `<cwd>/.cursor/rules/` recursively.
+ *  Returns [] if the dir is absent or empty (the extension no-ops until the
+ *  repo populates it). Rules matching any `aura.cursorRules.ignore` glob are
+ *  skipped. */
 export function loadRules(cwd: string): Rule[] {
   const dir = join(cwd, RULES_DIR);
   if (!existsSync(dir)) return [];
-  const ignored = loadIgnoredRuleNames(cwd);
+  const ignoreGlobs = loadIgnoreGlobs(cwd);
   const rules: Rule[] = [];
-  for (const name of readdirSync(dir)) {
-    if (!name.endsWith(".mdc")) continue;
-    const base = name.slice(0, -4);
-    if (ignored.has(base)) continue;
-    const path = join(dir, name);
+  for (const path of collectMdcFiles(dir)) {
+    // relPath keeps the ".mdc" extension and is forward-slash-joined, relative
+    // to RULES_DIR. It is what glob patterns (e.g. "tracker-aura.mdc",
+    // "universal/**/*-aura.mdc") match against.
+    const relWithExt = path.slice(dir.length + 1).split(sep).join("/");
+    if (ignoreGlobs.length > 0 && matchesAnyGlob(relWithExt, ignoreGlobs)) continue;
     const full = readFileSync(path, "utf8");
     const { fm, body } = parseFrontmatter(full);
     const alwaysApply = fm.alwaysApply === true;
@@ -282,10 +386,13 @@ export function loadRules(cwd: string): Rule[] {
       : globs.length > 0
         ? "glob"
         : "manual";
+    // name = filename without ".mdc" (last path segment, extension stripped).
+    const lastSeg = relWithExt.split("/").pop() ?? relWithExt;
+    const name = lastSeg.endsWith(".mdc") ? lastSeg.slice(0, -4) : lastSeg;
     rules.push({
-      name: base,
+      name,
       path,
-      relPath: `${RULES_DIR}/${name}`,
+      relPath: relWithExt,
       attach,
       globs,
       body,
@@ -319,7 +426,7 @@ export function buildListedRulesSection(rules: Rule[]): string {
   if (listed.length === 0) return "";
   const lines = listed.map((r) => {
     const globsStr = r.globs.length > 0 ? ` (globs: ${r.globs.join(", ")})` : "";
-    return `- ${r.relPath}${globsStr}`;
+    return `- ${RULES_DIR}/${r.relPath}${globsStr}`;
   }).join("\n");
   return `\n\n## Engineering Rules (on-demand)\n\nThe following house rules are available but not auto-loaded. Use the \`read\` tool to load a rule when its topic is relevant, or mention it with \`@rule:<name>\` to inject its body for this turn.\n\n${lines}\n`;
 }
@@ -434,8 +541,8 @@ export default function (pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     rules = loadRules(ctx.cwd);
     if (rules.length === 0) {
-      // No rules deposited yet (the seeding hasn't run). The extension no-ops;
-      // do not notify — this is the expected state until the mirror is seeded.
+      // No rules in <cwd>/.cursor/rules/ — the extension no-ops. Do not
+      // notify: this is the expected state until the repo syncs its rules.
       return;
     }
     // Register the universal `@mention` overlay for all rules.

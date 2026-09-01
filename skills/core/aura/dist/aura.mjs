@@ -185,7 +185,7 @@ function packKey2(key) {
 }
 function unpackKey(service, account) {
   if (service !== NAMESPACE2) return void 0;
-  const known = KNOWN_SECRET_KEYS2.find((k2) => `${k2.service}/${k2.name}` === account);
+  const known = KNOWN_SECRET_KEYS2.find((k) => `${k.service}/${k.name}` === account);
   return known;
 }
 function indicatesLockedKeychain(stderr) {
@@ -619,16 +619,136 @@ import { tmpdir } from "node:os";
 import { join as join3, resolve } from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
 
-// ../node_modules/@hey-api/client-fetch/dist/index.js
-var A = async (s, r) => {
-  let e = typeof r == "function" ? await r(s) : r;
-  if (e) return s.scheme === "bearer" ? `Bearer ${e}` : s.scheme === "basic" ? `Basic ${btoa(e)}` : e;
-};
-var O = { bodySerializer: (s) => JSON.stringify(s, (r, e) => typeof e == "bigint" ? e.toString() : e) };
-var U = { $body_: "body", $headers_: "headers", $path_: "path", $query_: "query" };
-var D = Object.entries(U);
-var B = (s) => {
-  switch (s) {
+// ../packages/shared/src/generated/core/serverSentEvents.gen.ts
+function createSseClient({
+  onRequest,
+  onSseError,
+  onSseEvent,
+  responseTransformer,
+  responseValidator,
+  sseDefaultRetryDelay,
+  sseMaxRetryAttempts,
+  sseMaxRetryDelay,
+  sseSleepFn,
+  url,
+  ...options
+}) {
+  let lastEventId;
+  const sleep = sseSleepFn ?? ((ms) => new Promise((resolve2) => setTimeout(resolve2, ms)));
+  const createStream = async function* () {
+    let retryDelay = sseDefaultRetryDelay ?? 3e3;
+    let attempt = 0;
+    const signal = options.signal ?? new AbortController().signal;
+    while (true) {
+      if (signal.aborted) break;
+      attempt++;
+      const headers = options.headers instanceof Headers ? options.headers : new Headers(options.headers);
+      if (lastEventId !== void 0) {
+        headers.set("Last-Event-ID", lastEventId);
+      }
+      try {
+        const requestInit = {
+          redirect: "follow",
+          ...options,
+          body: options.serializedBody,
+          headers,
+          signal
+        };
+        let request = new Request(url, requestInit);
+        if (onRequest) {
+          request = await onRequest(url, requestInit);
+        }
+        const _fetch = options.fetch ?? globalThis.fetch;
+        const response = await _fetch(request);
+        if (!response.ok) throw new Error(`SSE failed: ${response.status} ${response.statusText}`);
+        if (!response.body) throw new Error("No body in SSE response");
+        const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buffer = "";
+        const abortHandler = () => {
+          try {
+            reader.cancel();
+          } catch {
+          }
+        };
+        signal.addEventListener("abort", abortHandler);
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += value;
+            buffer = buffer.replace(/\r\n?/g, "\n");
+            const chunks = buffer.split("\n\n");
+            buffer = chunks.pop() ?? "";
+            for (const chunk of chunks) {
+              const lines = chunk.split("\n");
+              const dataLines = [];
+              let eventName;
+              for (const line of lines) {
+                if (line.startsWith("data:")) {
+                  dataLines.push(line.replace(/^data:\s*/, ""));
+                } else if (line.startsWith("event:")) {
+                  eventName = line.replace(/^event:\s*/, "");
+                } else if (line.startsWith("id:")) {
+                  lastEventId = line.replace(/^id:\s*/, "");
+                } else if (line.startsWith("retry:")) {
+                  const parsed = Number.parseInt(line.replace(/^retry:\s*/, ""), 10);
+                  if (!Number.isNaN(parsed)) {
+                    retryDelay = parsed;
+                  }
+                }
+              }
+              let data;
+              let parsedJson = false;
+              if (dataLines.length) {
+                const rawData = dataLines.join("\n");
+                try {
+                  data = JSON.parse(rawData);
+                  parsedJson = true;
+                } catch {
+                  data = rawData;
+                }
+              }
+              if (parsedJson) {
+                if (responseValidator) {
+                  await responseValidator(data);
+                }
+                if (responseTransformer) {
+                  data = await responseTransformer(data);
+                }
+              }
+              onSseEvent?.({
+                data,
+                event: eventName,
+                id: lastEventId,
+                retry: retryDelay
+              });
+              if (dataLines.length) {
+                yield data;
+              }
+            }
+          }
+        } finally {
+          signal.removeEventListener("abort", abortHandler);
+          reader.releaseLock();
+        }
+        break;
+      } catch (error) {
+        onSseError?.(error);
+        if (sseMaxRetryAttempts !== void 0 && attempt >= sseMaxRetryAttempts) {
+          break;
+        }
+        const backoff = Math.min(retryDelay * 2 ** (attempt - 1), sseMaxRetryDelay ?? 3e4);
+        await sleep(backoff);
+      }
+    }
+  };
+  const stream = createStream();
+  return { stream };
+}
+
+// ../packages/shared/src/generated/core/pathSerializer.gen.ts
+var separatorArrayExplode = (style) => {
+  switch (style) {
     case "label":
       return ".";
     case "matrix":
@@ -639,8 +759,8 @@ var B = (s) => {
       return "&";
   }
 };
-var N = (s) => {
-  switch (s) {
+var separatorArrayNoExplode = (style) => {
+  switch (style) {
     case "form":
       return ",";
     case "pipeDelimited":
@@ -651,8 +771,8 @@ var N = (s) => {
       return ",";
   }
 };
-var Q = (s) => {
-  switch (s) {
+var separatorObjectExplode = (style) => {
+  switch (style) {
     case "label":
       return ".";
     case "matrix":
@@ -663,202 +783,616 @@ var Q = (s) => {
       return "&";
   }
 };
-var S = ({ allowReserved: s, explode: r, name: e, style: a, value: i }) => {
-  if (!r) {
-    let t = (s ? i : i.map((l) => encodeURIComponent(l))).join(N(a));
-    switch (a) {
+var serializeArrayParam = ({
+  allowReserved,
+  explode,
+  name,
+  style,
+  value
+}) => {
+  if (!explode) {
+    const joinedValues2 = (allowReserved ? value : value.map((v) => encodeURIComponent(v))).join(separatorArrayNoExplode(style));
+    switch (style) {
       case "label":
-        return `.${t}`;
+        return `.${joinedValues2}`;
       case "matrix":
-        return `;${e}=${t}`;
+        return `;${name}=${joinedValues2}`;
       case "simple":
-        return t;
+        return joinedValues2;
       default:
-        return `${e}=${t}`;
+        return `${name}=${joinedValues2}`;
     }
   }
-  let o = B(a), n = i.map((t) => a === "label" || a === "simple" ? s ? t : encodeURIComponent(t) : m({ allowReserved: s, name: e, value: t })).join(o);
-  return a === "label" || a === "matrix" ? o + n : n;
-};
-var m = ({ allowReserved: s, name: r, value: e }) => {
-  if (e == null) return "";
-  if (typeof e == "object") throw new Error("Deeply-nested arrays/objects aren\u2019t supported. Provide your own `querySerializer()` to handle these.");
-  return `${r}=${s ? e : encodeURIComponent(e)}`;
-};
-var q = ({ allowReserved: s, explode: r, name: e, style: a, value: i, valueOnly: o }) => {
-  if (i instanceof Date) return o ? i.toISOString() : `${e}=${i.toISOString()}`;
-  if (a !== "deepObject" && !r) {
-    let l = [];
-    Object.entries(i).forEach(([p, d]) => {
-      l = [...l, p, s ? d : encodeURIComponent(d)];
+  const separator = separatorArrayExplode(style);
+  const joinedValues = value.map((v) => {
+    if (style === "label" || style === "simple") {
+      return allowReserved ? v : encodeURIComponent(v);
+    }
+    return serializePrimitiveParam({
+      allowReserved,
+      name,
+      value: v
     });
-    let u = l.join(",");
-    switch (a) {
+  }).join(separator);
+  return style === "label" || style === "matrix" ? separator + joinedValues : joinedValues;
+};
+var serializePrimitiveParam = ({
+  allowReserved,
+  name,
+  value
+}) => {
+  if (value === void 0 || value === null) {
+    return "";
+  }
+  if (typeof value === "object") {
+    throw new Error(
+      "Deeply-nested arrays/objects aren\u2019t supported. Provide your own `querySerializer()` to handle these."
+    );
+  }
+  return `${name}=${allowReserved ? value : encodeURIComponent(value)}`;
+};
+var serializeObjectParam = ({
+  allowReserved,
+  explode,
+  name,
+  style,
+  value,
+  valueOnly
+}) => {
+  if (value instanceof Date) {
+    return valueOnly ? value.toISOString() : `${name}=${value.toISOString()}`;
+  }
+  if (style !== "deepObject" && !explode) {
+    let values = [];
+    Object.entries(value).forEach(([key, v]) => {
+      values = [...values, key, allowReserved ? v : encodeURIComponent(v)];
+    });
+    const joinedValues2 = values.join(",");
+    switch (style) {
       case "form":
-        return `${e}=${u}`;
+        return `${name}=${joinedValues2}`;
       case "label":
-        return `.${u}`;
+        return `.${joinedValues2}`;
       case "matrix":
-        return `;${e}=${u}`;
+        return `;${name}=${joinedValues2}`;
       default:
-        return u;
+        return joinedValues2;
     }
   }
-  let n = Q(a), t = Object.entries(i).map(([l, u]) => m({ allowReserved: s, name: a === "deepObject" ? `${e}[${l}]` : l, value: u })).join(n);
-  return a === "label" || a === "matrix" ? n + t : t;
+  const separator = separatorObjectExplode(style);
+  const joinedValues = Object.entries(value).map(
+    ([key, v]) => serializePrimitiveParam({
+      allowReserved,
+      name: style === "deepObject" ? `${name}[${key}]` : key,
+      value: v
+    })
+  ).join(separator);
+  return style === "label" || style === "matrix" ? separator + joinedValues : joinedValues;
 };
-var J = /\{[^{}]+\}/g;
-var M = ({ path: s, url: r }) => {
-  let e = r, a = r.match(J);
-  if (a) for (let i of a) {
-    let o = false, n = i.substring(1, i.length - 1), t = "simple";
-    n.endsWith("*") && (o = true, n = n.substring(0, n.length - 1)), n.startsWith(".") ? (n = n.substring(1), t = "label") : n.startsWith(";") && (n = n.substring(1), t = "matrix");
-    let l = s[n];
-    if (l == null) continue;
-    if (Array.isArray(l)) {
-      e = e.replace(i, S({ explode: o, name: n, style: t, value: l }));
+
+// ../packages/shared/src/generated/core/utils.gen.ts
+var PATH_PARAM_RE = /\{[^{}]+\}/g;
+var defaultPathSerializer = ({ path, url: _url }) => {
+  let url = _url;
+  const matches = _url.match(PATH_PARAM_RE);
+  if (matches) {
+    for (const match of matches) {
+      let explode = false;
+      let name = match.substring(1, match.length - 1);
+      let style = "simple";
+      if (name.endsWith("*")) {
+        explode = true;
+        name = name.substring(0, name.length - 1);
+      }
+      if (name.startsWith(".")) {
+        name = name.substring(1);
+        style = "label";
+      } else if (name.startsWith(";")) {
+        name = name.substring(1);
+        style = "matrix";
+      }
+      const value = path[name];
+      if (value === void 0 || value === null) {
+        continue;
+      }
+      if (Array.isArray(value)) {
+        url = url.replace(match, serializeArrayParam({ explode, name, style, value }));
+        continue;
+      }
+      if (typeof value === "object") {
+        url = url.replace(
+          match,
+          serializeObjectParam({
+            explode,
+            name,
+            style,
+            value,
+            valueOnly: true
+          })
+        );
+        continue;
+      }
+      if (style === "matrix") {
+        url = url.replace(
+          match,
+          `;${serializePrimitiveParam({
+            name,
+            value
+          })}`
+        );
+        continue;
+      }
+      const replaceValue = encodeURIComponent(
+        style === "label" ? `.${value}` : value
+      );
+      url = url.replace(match, replaceValue);
+    }
+  }
+  return url;
+};
+var getUrl = ({
+  baseUrl,
+  path,
+  query,
+  querySerializer,
+  url: _url
+}) => {
+  const pathUrl = _url.startsWith("/") ? _url : `/${_url}`;
+  let url = (baseUrl ?? "") + pathUrl;
+  if (path) {
+    url = defaultPathSerializer({ path, url });
+  }
+  let search = query ? querySerializer(query) : "";
+  if (search.startsWith("?")) {
+    search = search.substring(1);
+  }
+  if (search) {
+    url += `?${search}`;
+  }
+  return url;
+};
+function getValidRequestBody(options) {
+  const hasBody = options.body !== void 0;
+  const isSerializedBody = hasBody && options.bodySerializer;
+  if (isSerializedBody) {
+    if ("serializedBody" in options) {
+      const hasSerializedBody = options.serializedBody !== void 0 && options.serializedBody !== "";
+      return hasSerializedBody ? options.serializedBody : null;
+    }
+    return options.body !== "" ? options.body : null;
+  }
+  if (hasBody) {
+    return options.body;
+  }
+  return void 0;
+}
+
+// ../packages/shared/src/generated/core/auth.gen.ts
+var getAuthToken = async (auth, callback) => {
+  const token = typeof callback === "function" ? await callback(auth) : callback;
+  if (!token) {
+    return;
+  }
+  if (auth.scheme === "bearer") {
+    return `Bearer ${token}`;
+  }
+  if (auth.scheme === "basic") {
+    return `Basic ${btoa(token)}`;
+  }
+  return token;
+};
+
+// ../packages/shared/src/generated/core/bodySerializer.gen.ts
+var jsonBodySerializer = {
+  bodySerializer: (body) => JSON.stringify(body, (_key, value) => typeof value === "bigint" ? value.toString() : value)
+};
+
+// ../packages/shared/src/generated/client/utils.gen.ts
+var createQuerySerializer = ({
+  parameters = {},
+  ...args
+} = {}) => {
+  const querySerializer = (queryParams) => {
+    const search = [];
+    if (queryParams && typeof queryParams === "object") {
+      for (const name in queryParams) {
+        const value = queryParams[name];
+        if (value === void 0 || value === null) {
+          continue;
+        }
+        const options = parameters[name] || args;
+        if (Array.isArray(value)) {
+          const serializedArray = serializeArrayParam({
+            allowReserved: options.allowReserved,
+            explode: true,
+            name,
+            style: "form",
+            value,
+            ...options.array
+          });
+          if (serializedArray) search.push(serializedArray);
+        } else if (typeof value === "object") {
+          const serializedObject = serializeObjectParam({
+            allowReserved: options.allowReserved,
+            explode: true,
+            name,
+            style: "deepObject",
+            value,
+            ...options.object
+          });
+          if (serializedObject) search.push(serializedObject);
+        } else {
+          const serializedPrimitive = serializePrimitiveParam({
+            allowReserved: options.allowReserved,
+            name,
+            value
+          });
+          if (serializedPrimitive) search.push(serializedPrimitive);
+        }
+      }
+    }
+    return search.join("&");
+  };
+  return querySerializer;
+};
+var getParseAs = (contentType) => {
+  if (!contentType) {
+    return "stream";
+  }
+  const cleanContent = contentType.split(";")[0]?.trim();
+  if (!cleanContent) {
+    return;
+  }
+  if (cleanContent.startsWith("application/json") || cleanContent.endsWith("+json")) {
+    return "json";
+  }
+  if (cleanContent === "multipart/form-data") {
+    return "formData";
+  }
+  if (["application/", "audio/", "image/", "video/"].some((type) => cleanContent.startsWith(type))) {
+    return "blob";
+  }
+  if (cleanContent.startsWith("text/")) {
+    return "text";
+  }
+  return;
+};
+var checkForExistence = (options, name) => {
+  if (!name) {
+    return false;
+  }
+  if (options.headers.has(name) || options.query?.[name] || options.headers.get("Cookie")?.includes(`${name}=`)) {
+    return true;
+  }
+  return false;
+};
+async function setAuthParams(options) {
+  for (const auth of options.security ?? []) {
+    if (checkForExistence(options, auth.name)) {
       continue;
     }
-    if (typeof l == "object") {
-      e = e.replace(i, q({ explode: o, name: n, style: t, value: l, valueOnly: true }));
+    const token = await getAuthToken(auth, options.auth);
+    if (!token) {
       continue;
     }
-    if (t === "matrix") {
-      e = e.replace(i, `;${m({ name: n, value: l })}`);
-      continue;
-    }
-    let u = encodeURIComponent(t === "label" ? `.${l}` : l);
-    e = e.replace(i, u);
-  }
-  return e;
-};
-var k = ({ allowReserved: s, array: r, object: e } = {}) => (i) => {
-  let o = [];
-  if (i && typeof i == "object") for (let n in i) {
-    let t = i[n];
-    if (t != null) if (Array.isArray(t)) {
-      let l = S({ allowReserved: s, explode: true, name: n, style: "form", value: t, ...r });
-      l && o.push(l);
-    } else if (typeof t == "object") {
-      let l = q({ allowReserved: s, explode: true, name: n, style: "deepObject", value: t, ...e });
-      l && o.push(l);
-    } else {
-      let l = m({ allowReserved: s, name: n, value: t });
-      l && o.push(l);
-    }
-  }
-  return o.join("&");
-};
-var E = (s) => {
-  if (!s) return "stream";
-  let r = s.split(";")[0]?.trim();
-  if (r) {
-    if (r.startsWith("application/json") || r.endsWith("+json")) return "json";
-    if (r === "multipart/form-data") return "formData";
-    if (["application/", "audio/", "image/", "video/"].some((e) => r.startsWith(e))) return "blob";
-    if (r.startsWith("text/")) return "text";
-  }
-};
-var $ = async ({ security: s, ...r }) => {
-  for (let e of s) {
-    let a = await A(e, r.auth);
-    if (!a) continue;
-    let i = e.name ?? "Authorization";
-    switch (e.in) {
+    const name = auth.name ?? "Authorization";
+    switch (auth.in) {
       case "query":
-        r.query || (r.query = {}), r.query[i] = a;
+        if (!options.query) {
+          options.query = {};
+        }
+        options.query[name] = token;
         break;
       case "cookie":
-        r.headers.append("Cookie", `${i}=${a}`);
+        options.headers.append("Cookie", `${name}=${token}`);
         break;
       case "header":
       default:
-        r.headers.set(i, a);
+        options.headers.set(name, token);
         break;
     }
-    return;
   }
-};
-var C = (s) => L({ baseUrl: s.baseUrl, path: s.path, query: s.query, querySerializer: typeof s.querySerializer == "function" ? s.querySerializer : k(s.querySerializer), url: s.url });
-var L = ({ baseUrl: s, path: r, query: e, querySerializer: a, url: i }) => {
-  let o = i.startsWith("/") ? i : `/${i}`, n = (s ?? "") + o;
-  r && (n = M({ path: r, url: n }));
-  let t = e ? a(e) : "";
-  return t.startsWith("?") && (t = t.substring(1)), t && (n += `?${t}`), n;
-};
-var x = (s, r) => {
-  let e = { ...s, ...r };
-  return e.baseUrl?.endsWith("/") && (e.baseUrl = e.baseUrl.substring(0, e.baseUrl.length - 1)), e.headers = j(s.headers, r.headers), e;
-};
-var j = (...s) => {
-  let r = new Headers();
-  for (let e of s) {
-    if (!e || typeof e != "object") continue;
-    let a = e instanceof Headers ? e.entries() : Object.entries(e);
-    for (let [i, o] of a) if (o === null) r.delete(i);
-    else if (Array.isArray(o)) for (let n of o) r.append(i, n);
-    else o !== void 0 && r.set(i, typeof o == "object" ? JSON.stringify(o) : o);
+}
+var buildUrl = (options) => getUrl({
+  baseUrl: options.baseUrl,
+  path: options.path,
+  query: options.query,
+  querySerializer: typeof options.querySerializer === "function" ? options.querySerializer : createQuerySerializer(options.querySerializer),
+  url: options.url
+});
+var mergeConfigs = (a, b) => {
+  const config = { ...a, ...b };
+  if (config.baseUrl?.endsWith("/")) {
+    config.baseUrl = config.baseUrl.substring(0, config.baseUrl.length - 1);
   }
-  return r;
+  config.headers = mergeHeaders(a.headers, b.headers);
+  return config;
 };
-var g = class {
-  _fns;
-  constructor() {
-    this._fns = [];
+var headersEntries = (headers) => {
+  const entries = [];
+  headers.forEach((value, key) => {
+    entries.push([key, value]);
+  });
+  return entries;
+};
+var mergeHeaders = (...headers) => {
+  const mergedHeaders = new Headers();
+  for (const header of headers) {
+    if (!header) {
+      continue;
+    }
+    const iterator = header instanceof Headers ? headersEntries(header) : Object.entries(header);
+    for (const [key, value] of iterator) {
+      if (value === null) {
+        mergedHeaders.delete(key);
+      } else if (Array.isArray(value)) {
+        for (const v of value) {
+          mergedHeaders.append(key, v);
+        }
+      } else if (value !== void 0) {
+        mergedHeaders.set(
+          key,
+          typeof value === "object" ? JSON.stringify(value) : value
+        );
+      }
+    }
   }
+  return mergedHeaders;
+};
+var Interceptors = class {
+  fns = [];
   clear() {
-    this._fns = [];
+    this.fns = [];
   }
-  getInterceptorIndex(r) {
-    return typeof r == "number" ? this._fns[r] ? r : -1 : this._fns.indexOf(r);
+  eject(id) {
+    const index = this.getInterceptorIndex(id);
+    if (this.fns[index]) {
+      this.fns[index] = null;
+    }
   }
-  exists(r) {
-    let e = this.getInterceptorIndex(r);
-    return !!this._fns[e];
+  exists(id) {
+    const index = this.getInterceptorIndex(id);
+    return Boolean(this.fns[index]);
   }
-  eject(r) {
-    let e = this.getInterceptorIndex(r);
-    this._fns[e] && (this._fns[e] = null);
+  getInterceptorIndex(id) {
+    if (typeof id === "number") {
+      return this.fns[id] ? id : -1;
+    }
+    return this.fns.indexOf(id);
   }
-  update(r, e) {
-    let a = this.getInterceptorIndex(r);
-    return this._fns[a] ? (this._fns[a] = e, r) : false;
+  update(id, fn) {
+    const index = this.getInterceptorIndex(id);
+    if (this.fns[index]) {
+      this.fns[index] = fn;
+      return id;
+    }
+    return false;
   }
-  use(r) {
-    return this._fns = [...this._fns, r], this._fns.length - 1;
+  use(fn) {
+    this.fns.push(fn);
+    return this.fns.length - 1;
   }
 };
-var v = () => ({ error: new g(), request: new g(), response: new g() });
-var V = k({ allowReserved: false, array: { explode: true, style: "form" }, object: { explode: true, style: "deepObject" } });
-var F = { "Content-Type": "application/json" };
-var w = (s = {}) => ({ ...O, headers: F, parseAs: "auto", querySerializer: V, ...s });
-var G = (s = {}) => {
-  let r = x(w(), s), e = () => ({ ...r }), a = (n) => (r = x(r, n), e()), i = v(), o = async (n) => {
-    let t = { ...r, ...n, fetch: n.fetch ?? r.fetch ?? globalThis.fetch, headers: j(r.headers, n.headers) };
-    t.security && await $({ ...t, security: t.security }), t.body && t.bodySerializer && (t.body = t.bodySerializer(t.body)), (t.body === void 0 || t.body === "") && t.headers.delete("Content-Type");
-    let l = C(t), u = { redirect: "follow", ...t }, p = new Request(l, u);
-    for (let f of i.request._fns) f && (p = await f(p, t));
-    let d = t.fetch, c = await d(p);
-    for (let f of i.response._fns) f && (c = await f(c, p, t));
-    let b = { request: p, response: c };
-    if (c.ok) {
-      if (c.status === 204 || c.headers.get("Content-Length") === "0") return t.responseStyle === "data" ? {} : { data: {}, ...b };
-      let f = (t.parseAs === "auto" ? E(c.headers.get("Content-Type")) : t.parseAs) ?? "json";
-      if (f === "stream") return t.responseStyle === "data" ? c.body : { data: c.body, ...b };
-      let h = await c[f]();
-      return f === "json" && (t.responseValidator && await t.responseValidator(h), t.responseTransformer && (h = await t.responseTransformer(h))), t.responseStyle === "data" ? h : { data: h, ...b };
-    }
-    let R = await c.text();
-    try {
-      R = JSON.parse(R);
-    } catch {
-    }
-    let y = R;
-    for (let f of i.error._fns) f && (y = await f(R, c, p, t));
-    if (y = y || {}, t.throwOnError) throw y;
-    return t.responseStyle === "data" ? void 0 : { error: y, ...b };
+var createInterceptors = () => ({
+  error: new Interceptors(),
+  request: new Interceptors(),
+  response: new Interceptors()
+});
+var defaultQuerySerializer = createQuerySerializer({
+  allowReserved: false,
+  array: {
+    explode: true,
+    style: "form"
+  },
+  object: {
+    explode: true,
+    style: "deepObject"
+  }
+});
+var defaultHeaders = {
+  "Content-Type": "application/json"
+};
+var createConfig = (override = {}) => ({
+  ...jsonBodySerializer,
+  headers: defaultHeaders,
+  parseAs: "auto",
+  querySerializer: defaultQuerySerializer,
+  ...override
+});
+
+// ../packages/shared/src/generated/client/client.gen.ts
+var createClient = (config = {}) => {
+  let _config = mergeConfigs(createConfig(), config);
+  const getConfig = () => ({ ..._config });
+  const setConfig = (config2) => {
+    _config = mergeConfigs(_config, config2);
+    return getConfig();
   };
-  return { buildUrl: C, connect: (n) => o({ ...n, method: "CONNECT" }), delete: (n) => o({ ...n, method: "DELETE" }), get: (n) => o({ ...n, method: "GET" }), getConfig: e, head: (n) => o({ ...n, method: "HEAD" }), interceptors: i, options: (n) => o({ ...n, method: "OPTIONS" }), patch: (n) => o({ ...n, method: "PATCH" }), post: (n) => o({ ...n, method: "POST" }), put: (n) => o({ ...n, method: "PUT" }), request: o, setConfig: a, trace: (n) => o({ ...n, method: "TRACE" }) };
+  const interceptors = createInterceptors();
+  const beforeRequest = async (options) => {
+    const opts = {
+      ..._config,
+      ...options,
+      fetch: options.fetch ?? _config.fetch ?? globalThis.fetch,
+      headers: mergeHeaders(_config.headers, options.headers),
+      serializedBody: void 0
+    };
+    if (opts.security) {
+      await setAuthParams(opts);
+    }
+    if (opts.requestValidator) {
+      await opts.requestValidator(opts);
+    }
+    if (opts.body !== void 0 && opts.bodySerializer) {
+      opts.serializedBody = opts.bodySerializer(opts.body);
+    }
+    if (opts.body === void 0 || opts.serializedBody === "") {
+      opts.headers.delete("Content-Type");
+    }
+    const resolvedOpts = opts;
+    const url = buildUrl(resolvedOpts);
+    return { opts: resolvedOpts, url };
+  };
+  const request = async (options) => {
+    const throwOnError = options.throwOnError ?? _config.throwOnError;
+    const responseStyle = options.responseStyle ?? _config.responseStyle;
+    let request2;
+    let response;
+    try {
+      const { opts, url } = await beforeRequest(options);
+      const requestInit = {
+        redirect: "follow",
+        ...opts,
+        body: getValidRequestBody(opts)
+      };
+      request2 = new Request(url, requestInit);
+      for (const fn of interceptors.request.fns) {
+        if (fn) {
+          request2 = await fn(request2, opts);
+        }
+      }
+      const _fetch = opts.fetch;
+      response = await _fetch(request2);
+      for (const fn of interceptors.response.fns) {
+        if (fn) {
+          response = await fn(response, request2, opts);
+        }
+      }
+      const result = {
+        request: request2,
+        response
+      };
+      if (response.ok) {
+        const parseAs = (opts.parseAs === "auto" ? getParseAs(response.headers.get("Content-Type")) : opts.parseAs) ?? "json";
+        if (response.status === 204 || response.headers.get("Content-Length") === "0") {
+          let emptyData;
+          switch (parseAs) {
+            case "arrayBuffer":
+            case "blob":
+            case "text":
+              emptyData = await response[parseAs]();
+              break;
+            case "formData":
+              emptyData = new FormData();
+              break;
+            case "stream":
+              emptyData = response.body;
+              break;
+            case "json":
+            default:
+              emptyData = {};
+              break;
+          }
+          return opts.responseStyle === "data" ? emptyData : {
+            data: emptyData,
+            ...result
+          };
+        }
+        let data;
+        switch (parseAs) {
+          case "arrayBuffer":
+          case "blob":
+          case "formData":
+          case "text":
+            data = await response[parseAs]();
+            break;
+          case "json": {
+            const text = await response.text();
+            data = text ? JSON.parse(text) : {};
+            break;
+          }
+          case "stream":
+            return opts.responseStyle === "data" ? response.body : {
+              data: response.body,
+              ...result
+            };
+        }
+        if (parseAs === "json") {
+          if (opts.responseValidator) {
+            await opts.responseValidator(data);
+          }
+          if (opts.responseTransformer) {
+            data = await opts.responseTransformer(data);
+          }
+        }
+        return opts.responseStyle === "data" ? data : {
+          data,
+          ...result
+        };
+      }
+      const textError = await response.text();
+      let jsonError;
+      try {
+        jsonError = JSON.parse(textError);
+      } catch {
+      }
+      throw jsonError ?? textError;
+    } catch (error) {
+      let finalError = error;
+      for (const fn of interceptors.error.fns) {
+        if (fn) {
+          finalError = await fn(finalError, response, request2, options);
+        }
+      }
+      finalError = finalError || {};
+      if (throwOnError) {
+        throw finalError;
+      }
+      return responseStyle === "data" ? void 0 : {
+        error: finalError,
+        request: request2,
+        response
+      };
+    }
+  };
+  const makeMethodFn = (method) => (options) => request({ ...options, method });
+  const makeSseFn = (method) => async (options) => {
+    const { opts, url } = await beforeRequest(options);
+    return createSseClient({
+      ...opts,
+      body: opts.body,
+      method,
+      onRequest: async (url2, init) => {
+        let request2 = new Request(url2, init);
+        for (const fn of interceptors.request.fns) {
+          if (fn) {
+            request2 = await fn(request2, opts);
+          }
+        }
+        return request2;
+      },
+      serializedBody: getValidRequestBody(opts),
+      url
+    });
+  };
+  const _buildUrl = (options) => buildUrl({ ..._config, ...options });
+  return {
+    buildUrl: _buildUrl,
+    connect: makeMethodFn("CONNECT"),
+    delete: makeMethodFn("DELETE"),
+    get: makeMethodFn("GET"),
+    getConfig,
+    head: makeMethodFn("HEAD"),
+    interceptors,
+    options: makeMethodFn("OPTIONS"),
+    patch: makeMethodFn("PATCH"),
+    post: makeMethodFn("POST"),
+    put: makeMethodFn("PUT"),
+    request,
+    setConfig,
+    sse: {
+      connect: makeSseFn("CONNECT"),
+      delete: makeSseFn("DELETE"),
+      get: makeSseFn("GET"),
+      head: makeSseFn("HEAD"),
+      options: makeSseFn("OPTIONS"),
+      patch: makeSseFn("PATCH"),
+      post: makeSseFn("POST"),
+      put: makeSseFn("PUT"),
+      trace: makeSseFn("TRACE")
+    },
+    trace: makeMethodFn("TRACE")
+  };
 };
 
 // ../packages/shared/src/keyring/index.ts
@@ -882,449 +1416,283 @@ function loadAuraClientSettings(settingsPath = SETTINGS_PATH) {
   }
 }
 
+// ../packages/shared/src/generated/core/params.gen.ts
+var extraPrefixesMap = {
+  $body_: "body",
+  $headers_: "headers",
+  $path_: "path",
+  $query_: "query"
+};
+var extraPrefixes = Object.entries(extraPrefixesMap);
+
 // ../packages/shared/src/generated/client.gen.ts
-var client = G(w({
-  baseUrl: "http://localhost:3000/api"
-}));
+var client = createClient(createConfig({ baseUrl: "http://localhost:3000/api" }));
 
 // ../packages/shared/src/generated/sdk.gen.ts
-var getBlueprintFiles = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/mcp/blueprint/files",
-    ...options
-  });
-};
-var mcpCreateArtifact = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/mcp/artifacts",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var mcpUpdateArtifact = (options) => {
-  return (options.client ?? client).patch({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/mcp/artifacts/{id}",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var mcpCreateUploadDocument = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/mcp/upload-documents",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var mcpGetUploadDocument = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/mcp/upload-documents/{id}",
-    ...options
-  });
-};
-var mcpWikiSearch = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/mcp/wiki-search",
-    ...options
-  });
-};
-var listTasks = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/tasks",
-    ...options
-  });
-};
-var getMyPriorityQueue = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/tasks/my-priority",
-    ...options
-  });
-};
-var getTaskByHumanKey = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/tasks/by-key/{key}",
-    ...options
-  });
-};
-var getMyCapacity = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/capacity/me",
-    ...options
-  });
-};
-var listArtifacts = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts",
-    ...options
-  });
-};
-var getArtifact = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}",
-    ...options
-  });
-};
-var requestArtifactReview = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}/review-request",
-    ...options
-  });
-};
-var submitArtifactDecision = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}/decisions",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var getArtifactApprovals = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}/approvals",
-    ...options
-  });
-};
-var startArtifactReview = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}/review-start",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var reopenArtifactReview = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}/review-reopen",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var getArtifactReview = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/artifacts/{id}/review",
-    ...options
-  });
-};
-var getKnowledgeTree = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      }
-    ],
-    url: "/knowledge/spaces/{slug}/nodes",
-    ...options
-  });
-};
-var createKnowledgeNode = (options) => {
-  return (options.client ?? client).post({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      }
-    ],
-    url: "/knowledge/spaces/{slug}/nodes",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var getKnowledgeNodeByPath = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      }
-    ],
-    url: "/knowledge/spaces/{slug}/nodes/by-path",
-    ...options
-  });
-};
-var getKnowledgeNode = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      }
-    ],
-    url: "/knowledge/nodes/{uuid}",
-    ...options
-  });
-};
-var saveKnowledgeNodeBody = (options) => {
-  return (options.client ?? client).put({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      }
-    ],
-    url: "/knowledge/nodes/{uuid}/body",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers
-    }
-  });
-};
-var getKnowledgeNodeVersion = (options) => {
-  return (options.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      }
-    ],
-    url: "/knowledge/nodes/{uuid}/versions/{version}",
-    ...options
-  });
-};
-var getBoardSummary = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/boards",
-    ...options
-  });
-};
-var getBoardBriefing = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/boards/briefing",
-    ...options
-  });
-};
-var listNotifications = (options) => {
-  return (options?.client ?? client).get({
-    security: [
-      {
-        in: "cookie",
-        name: "aura-session",
-        type: "apiKey"
-      },
-      {
-        scheme: "bearer",
-        type: "http"
-      }
-    ],
-    url: "/notifications",
-    ...options
-  });
-};
+var getBlueprintFiles = (options) => (options.client ?? client).get({
+  security: [{ scheme: "bearer", type: "http" }],
+  url: "/mcp/blueprint/files",
+  ...options
+});
+var mcpCreateArtifact = (options) => (options.client ?? client).post({
+  security: [{ scheme: "bearer", type: "http" }],
+  url: "/mcp/artifacts",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var mcpUpdateArtifact = (options) => (options.client ?? client).patch({
+  security: [{ scheme: "bearer", type: "http" }],
+  url: "/mcp/artifacts/{id}",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var mcpCreateUploadDocument = (options) => (options.client ?? client).post({
+  security: [{ scheme: "bearer", type: "http" }],
+  url: "/mcp/upload-documents",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var mcpGetUploadDocument = (options) => (options.client ?? client).get({
+  security: [{ scheme: "bearer", type: "http" }],
+  url: "/mcp/upload-documents/{id}",
+  ...options
+});
+var mcpWikiSearch = (options) => (options.client ?? client).get({
+  security: [{ scheme: "bearer", type: "http" }],
+  url: "/mcp/wiki-search",
+  ...options
+});
+var listTasks = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/tasks",
+  ...options
+});
+var getMyPriorityQueue = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/tasks/my-priority",
+  ...options
+});
+var getTaskByHumanKey = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/tasks/by-key/{key}",
+  ...options
+});
+var getMyCapacity = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/capacity/me",
+  ...options
+});
+var createFeedback = (options) => (options.client ?? client).post({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/feedback",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var listArtifacts = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts",
+  ...options
+});
+var getArtifact = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}",
+  ...options
+});
+var requestArtifactReview = (options) => (options.client ?? client).post({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}/review-request",
+  ...options
+});
+var submitArtifactDecision = (options) => (options.client ?? client).post({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}/decisions",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var getArtifactApprovals = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}/approvals",
+  ...options
+});
+var startArtifactReview = (options) => (options.client ?? client).post({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}/review-start",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var reopenArtifactReview = (options) => (options.client ?? client).post({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}/review-reopen",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var getArtifactReview = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/artifacts/{id}/review",
+  ...options
+});
+var getKnowledgeTree = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }],
+  url: "/knowledge/spaces/{slug}/nodes",
+  ...options
+});
+var createKnowledgeNode = (options) => (options.client ?? client).post({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }],
+  url: "/knowledge/spaces/{slug}/nodes",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var getKnowledgeNodeByPath = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }],
+  url: "/knowledge/spaces/{slug}/nodes/by-path",
+  ...options
+});
+var getKnowledgeNode = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }],
+  url: "/knowledge/nodes/{uuid}",
+  ...options
+});
+var saveKnowledgeNodeBody = (options) => (options.client ?? client).put({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }],
+  url: "/knowledge/nodes/{uuid}/body",
+  ...options,
+  headers: {
+    "Content-Type": "application/json",
+    ...options.headers
+  }
+});
+var getKnowledgeNodeVersion = (options) => (options.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }],
+  url: "/knowledge/nodes/{uuid}/versions/{version}",
+  ...options
+});
+var getBoardSummary = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/boards",
+  ...options
+});
+var getBoardBriefing = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/boards/briefing",
+  ...options
+});
+var listNotifications = (options) => (options?.client ?? client).get({
+  security: [{
+    in: "cookie",
+    name: "aura-session",
+    type: "apiKey"
+  }, { scheme: "bearer", type: "http" }],
+  url: "/notifications",
+  ...options
+});
 
 // ../packages/shared/src/hey-api-aura-client.ts
 var AuraApiError = class extends Error {
@@ -1372,12 +1740,15 @@ var HeyApiAuraClient = class {
   pat;
   constructor(opts) {
     this.keyring = opts.keyring;
-    this.client = G({ baseUrl: opts.baseUrl });
+    this.client = createClient({ baseUrl: opts.baseUrl });
     this.pat = opts.pat ?? null;
     this.client.interceptors.request.use(async (req) => {
       const pat = await this.ensurePat();
       req.headers.set("Authorization", `Bearer ${pat}`);
       return req;
+    });
+    this.client.interceptors.error.use((err) => {
+      throw err;
     });
   }
   /** Lazily read the PAT from the keyring on first request, cache it. */
@@ -1425,14 +1796,14 @@ var HeyApiAuraClient = class {
       }
     });
     return unwrap(res, (d) => {
-      const g2 = d;
+      const g = d;
       return {
-        status: g2.status,
-        id: g2.id,
-        title: g2.title,
-        version: g2.version,
-        mode: g2.mode,
-        affected_heading: g2.affected_heading
+        status: g.status,
+        id: g.id,
+        title: g.title,
+        version: g.version,
+        mode: g.mode,
+        affected_heading: g.affected_heading
       };
     });
   }
@@ -1472,9 +1843,9 @@ var HeyApiAuraClient = class {
       query: { query: input.query, space_slug: input.space_slug, limit: input.limit }
     });
     return unwrap(res, (d) => {
-      const g2 = d;
+      const g = d;
       return {
-        items: g2.items.map((h) => ({
+        items: g.items.map((h) => ({
           id: h.id,
           space_slug: h.space_slug,
           space_kind: h.space_kind,
@@ -1493,10 +1864,10 @@ var HeyApiAuraClient = class {
       path: { slug: spaceSlug }
     });
     return unwrap(res, (d) => {
-      const g2 = d;
+      const g = d;
       return {
-        space_id: g2.space_id,
-        nodes: g2.nodes.map(mapKnowledgeNode)
+        space_id: g.space_id,
+        nodes: g.nodes.map(mapKnowledgeNode)
       };
     });
   }
@@ -1523,11 +1894,11 @@ var HeyApiAuraClient = class {
       const status = res.response?.status ?? 0;
       throw new AuraApiError(status, sdkErrorMessage(res.error));
     }
-    const g2 = res.data ?? {};
-    if (g2.ok === false && g2.error) {
-      throw new AuraApiError(0, `${g2.error.code}: ${g2.error.detail}`);
+    const g = res.data ?? {};
+    if (g.ok === false && g.error) {
+      throw new AuraApiError(0, `${g.error.code}: ${g.error.detail}`);
     }
-    const files = (g2.files ?? []).map((f) => ({
+    const files = (g.files ?? []).map((f) => ({
       path: f.path,
       filename: f.filename,
       encoding: f.encoding,
@@ -1540,9 +1911,9 @@ var HeyApiAuraClient = class {
       }
     }));
     return {
-      ok: g2.ok ?? true,
+      ok: g.ok ?? true,
       files,
-      error: g2.error
+      error: g.error
     };
   }
   async getKnowledgeNodeVersion(uuid, version) {
@@ -1551,15 +1922,15 @@ var HeyApiAuraClient = class {
       path: { uuid, version }
     });
     return unwrap(res, (d) => {
-      const g2 = d;
+      const g = d;
       return {
-        id: g2.id,
-        node_id: g2.node_id,
-        version: g2.version,
-        body: g2.body,
-        summary: g2.summary ?? null,
-        created_by_user_id: g2.created_by_user_id,
-        created_at: g2.created_at
+        id: g.id,
+        node_id: g.node_id,
+        version: g.version,
+        body: g.body,
+        summary: g.summary ?? null,
+        created_by_user_id: g.created_by_user_id,
+        created_at: g.created_at
       };
     });
   }
@@ -1590,10 +1961,10 @@ var HeyApiAuraClient = class {
       query: opts
     });
     return unwrap(res, (d) => {
-      const g2 = d;
+      const g = d;
       return {
-        text: g2.text,
-        generated_at: g2.generated_at
+        text: g.text,
+        generated_at: g.generated_at
       };
     });
   }
@@ -1625,6 +1996,25 @@ var HeyApiAuraClient = class {
   async listTasks(opts) {
     const res = await listTasks({ client: this.client, query: opts });
     return unwrap(res, mapTaskList);
+  }
+  // -------------------------------------------------------------------------
+  // Feedback
+  // -------------------------------------------------------------------------
+  /** Submit a feedback entry via the generated `POST /feedback` SDK function.
+   *  `source` is forced to `"MCP"` by the caller (the `aura_feedback` tool) so
+   *  the row records its true origin; the API stores whatever is passed. */
+  async createFeedback(input) {
+    const res = await createFeedback({
+      client: this.client,
+      body: {
+        title: input.title,
+        body: input.body,
+        is_anonymous: input.is_anonymous,
+        source: input.source,
+        notify_author: input.notify_author
+      }
+    });
+    return unwrap(res, (d) => d);
   }
   // -------------------------------------------------------------------------
   // Reviews / approvals
@@ -1687,74 +2077,74 @@ function mapPagination(p) {
   return { page: d.page, limit: d.limit, total: d.total, total_pages: d.total_pages };
 }
 function mapArtifact(d) {
-  const g2 = d;
+  const g = d;
   return {
-    id: g2.id,
-    title: g2.title,
-    latest_version: g2.latest_version,
-    version: g2.version,
-    body: g2.body,
-    summary: g2.summary,
-    kind: g2.kind,
-    created_at: g2.created_at,
-    updated_at: g2.updated_at
+    id: g.id,
+    title: g.title,
+    latest_version: g.latest_version,
+    version: g.version,
+    body: g.body,
+    summary: g.summary,
+    kind: g.kind,
+    created_at: g.created_at,
+    updated_at: g.updated_at
   };
 }
 function mapArtifactListItem(d) {
-  const g2 = d;
+  const g = d;
   return {
-    id: g2.id,
-    title: g2.title,
-    latest_version: g2.latest_version,
-    created_at: g2.created_at,
-    updated_at: g2.updated_at,
-    kind: g2.kind,
-    pending_for_me: g2.pending_for_me
+    id: g.id,
+    title: g.title,
+    latest_version: g.latest_version,
+    created_at: g.created_at,
+    updated_at: g.updated_at,
+    kind: g.kind,
+    pending_for_me: g.pending_for_me
   };
 }
 function mapArtifactList(d) {
-  const g2 = d;
+  const g = d;
   return {
-    items: g2.items.map(mapArtifactListItem),
-    pagination: mapPagination(g2.pagination)
+    items: g.items.map(mapArtifactListItem),
+    pagination: mapPagination(g.pagination)
   };
 }
 function mapKnowledgeNode(d) {
-  const g2 = d;
+  const g = d;
   return {
-    id: g2.id,
-    space_id: g2.space_id,
-    space_slug: g2.space_slug,
-    kind: g2.kind,
-    title: g2.title,
-    slug: g2.slug,
-    latest_version: g2.latest_version,
-    body: g2.body,
-    // Surface the provenance Aura carries on every node (used by the
-    // engineering-sync manifest); kept off the named interface via the index
-    // signature so callers opt in explicitly.
-    updated_at: g2.updated_at,
-    body_hash: g2.body_hash,
+    id: g.id,
+    space_id: g.space_id,
+    space_slug: g.space_slug,
+    kind: g.kind,
+    title: g.title,
+    slug: g.slug,
+    latest_version: g.latest_version,
+    body: g.body,
+    // Surface the provenance Aura carries on every node; kept off the
+    // named interface via the index signature so callers opt in explicitly.
+    updated_at: g.updated_at,
+    body_hash: g.body_hash,
     // Preserve the nested `children` the REST tree carries (the wiki tree is
     // recursive: folders contain documents/other folders). The named
     // KnowledgeNode interface hides this behind its index signature so callers
-    // opt in explicitly (engineering-sync recurses it; pretty-printers ignore
-    // it). Without this the nested docs (guides/*, workflow/*) are invisible.
-    children: (g2.children ?? []).map(mapKnowledgeNode)
+    // opt in explicitly (tree-walking callers recurse it; pretty-printers
+    // ignore it). Without this the nested docs (guides/*, workflow/*) are
+    // invisible.
+    children: (g.children ?? []).map(mapKnowledgeNode)
   };
 }
 function mapUploadDocument(d) {
-  const g2 = d;
+  const g = d;
   return {
-    id: g2.id,
-    filename: g2.filename,
-    mime_type: g2.mime_type,
-    byte_size: g2.byte_size,
-    summary: g2.summary,
-    page_count: g2.page_count,
-    ingest_status: g2.ingest_status,
-    portal_url: g2.portal_url,
-    pages: g2.pages
+    id: g.id,
+    filename: g.filename,
+    mime_type: g.mime_type,
+    byte_size: g.byte_size,
+    summary: g.summary,
+    page_count: g.page_count,
+    ingest_status: g.ingest_status,
+    portal_url: g.portal_url,
+    pages: g.pages
   };
 }
 function mapBoardBucketItem(d) {
@@ -1769,9 +2159,9 @@ function mapBoardBucketItem(d) {
   };
 }
 function mapBoardSummary(d) {
-  const g2 = d;
+  const g = d;
   return {
-    overdue: g2.overdue ? { count: g2.overdue.count, items: g2.overdue.items.map((i) => ({
+    overdue: g.overdue ? { count: g.overdue.count, items: g.overdue.items.map((i) => ({
       // BoardOverdueItem has task + deadline + days, not kind/title/since.
       kind: void 0,
       task: i.task ? { uuid: i.task.uuid, human_key: i.task.human_key, title: i.task.title, status: i.task.status, status_type: i.task.status_type } : void 0,
@@ -1781,87 +2171,87 @@ function mapBoardSummary(d) {
       link: void 0,
       approvals_pending: void 0
     })) } : void 0,
-    waiting_on_me: g2.waiting_on_me ? { count: g2.waiting_on_me.count, items: g2.waiting_on_me.items.map(mapBoardBucketItem) } : void 0,
-    waiting_on_others: g2.waiting_on_others ? { count: g2.waiting_on_others.count, items: g2.waiting_on_others.items.map(mapBoardBucketItem) } : void 0
+    waiting_on_me: g.waiting_on_me ? { count: g.waiting_on_me.count, items: g.waiting_on_me.items.map(mapBoardBucketItem) } : void 0,
+    waiting_on_others: g.waiting_on_others ? { count: g.waiting_on_others.count, items: g.waiting_on_others.items.map(mapBoardBucketItem) } : void 0
   };
 }
 function mapNotification(d) {
-  const g2 = d;
+  const g = d;
   return {
-    id: g2.id,
-    type: g2.type,
-    read: g2.read,
-    created_at: g2.created_at
+    id: g.id,
+    type: g.type,
+    read: g.read,
+    created_at: g.created_at
   };
 }
 function mapNotificationList(d) {
-  const g2 = d;
+  const g = d;
   return {
-    items: g2.items.map(mapNotification),
-    pagination: mapPagination(g2.pagination)
+    items: g.items.map(mapNotification),
+    pagination: mapPagination(g.pagination)
   };
 }
 function mapHumanKeyRef(d) {
-  const g2 = d;
-  return { id: g2.id, title: g2.title, level: g2.level ?? "" };
+  const g = d;
+  return { id: g.id, title: g.title, level: g.level ?? "" };
 }
 function mapPriorityQueueItem(d) {
-  const g2 = d;
+  const g = d;
   return {
-    id: g2.id,
-    human_key: g2.human_key,
-    title: g2.title,
-    status: g2.status,
-    status_type: g2.status_type,
-    level: g2.level,
-    block: g2.block,
-    rank: g2.rank,
-    asap: g2.asap,
-    blocked_by: g2.blocked_by.map((b) => b.human_key),
-    context_path: g2.context_path.map((c) => mapHumanKeyRef(c)),
-    governing_date: g2.governing_date,
-    capacity_percent: g2.capacity_percent
+    id: g.id,
+    human_key: g.human_key,
+    title: g.title,
+    status: g.status,
+    status_type: g.status_type,
+    level: g.level,
+    block: g.block,
+    rank: g.rank,
+    asap: g.asap,
+    blocked_by: g.blocked_by.map((b) => b.human_key),
+    context_path: g.context_path.map((c) => mapHumanKeyRef(c)),
+    governing_date: g.governing_date,
+    capacity_percent: g.capacity_percent
   };
 }
 function mapPriorityQueue(d) {
-  const g2 = d;
+  const g = d;
   return {
-    items: g2.items.map(mapPriorityQueueItem),
-    total: g2.total,
-    unordered_count: g2.unordered_count
+    items: g.items.map(mapPriorityQueueItem),
+    total: g.total,
+    unordered_count: g.unordered_count
   };
 }
 function mapCapacityTask(d) {
-  const g2 = d;
+  const g = d;
   return {
-    task_id: g2.task_id,
-    human_key: g2.human_key,
-    task_title: g2.task_title,
-    task_status: g2.task_status,
-    roles: g2.roles,
-    capacity_percent: g2.capacity_percent,
-    task_level: g2.task_level,
-    hierarchy_path: g2.hierarchy_path.map(mapHumanKeyRef)
+    task_id: g.task_id,
+    human_key: g.human_key,
+    task_title: g.task_title,
+    task_status: g.task_status,
+    roles: g.roles,
+    capacity_percent: g.capacity_percent,
+    task_level: g.task_level,
+    hierarchy_path: g.hierarchy_path.map(mapHumanKeyRef)
   };
 }
 function mapCapacity(d) {
-  const g2 = d;
+  const g = d;
   return {
-    base_percent: g2.base_percent,
-    committed_percent: g2.committed_percent,
-    free_percent: g2.free_percent,
-    utilization_percent: g2.utilization_percent,
-    over: g2.over,
-    base_capacity_note: g2.base_capacity_note,
-    tasks: g2.tasks.map(mapCapacityTask)
+    base_percent: g.base_percent,
+    committed_percent: g.committed_percent,
+    free_percent: g.free_percent,
+    utilization_percent: g.utilization_percent,
+    over: g.over,
+    base_capacity_note: g.base_capacity_note,
+    tasks: g.tasks.map(mapCapacityTask)
   };
 }
 function mapTask(d) {
-  const g2 = d;
-  const jira = "jira_issues" in g2 ? g2.jira_issues ?? [] : [];
-  const children = "children" in g2 ? g2.children ?? [] : [];
-  const repositories = "repositories" in g2 ? g2.repositories ?? [] : [];
-  const inherited = "inherited_repositories" in g2 ? g2.inherited_repositories ?? [] : [];
+  const g = d;
+  const jira = "jira_issues" in g ? g.jira_issues ?? [] : [];
+  const children = "children" in g ? g.children ?? [] : [];
+  const repositories = "repositories" in g ? g.repositories ?? [] : [];
+  const inherited = "inherited_repositories" in g ? g.inherited_repositories ?? [] : [];
   const mapRepo = (r) => ({
     id: r.id,
     display_name: r.display_name,
@@ -1872,40 +2262,40 @@ function mapTask(d) {
     browse_url: r.browse_url ?? null
   });
   return {
-    id: g2.id,
-    human_key: g2.human_key,
-    title: g2.title,
-    description: g2.description,
-    status: g2.status,
-    status_type: g2.status_type,
-    level: g2.level,
-    jira_issues: jira.map((j2) => ({ issue_key: j2.issue_key, summary: j2.summary })),
+    id: g.id,
+    human_key: g.human_key,
+    title: g.title,
+    description: g.description,
+    status: g.status,
+    status_type: g.status_type,
+    level: g.level,
+    jira_issues: jira.map((j) => ({ issue_key: j.issue_key, summary: j.summary })),
     children: children.map((c) => ({ human_key: c.human_key, title: c.title })),
     repositories: repositories.map(mapRepo),
     inherited_repositories: inherited.map(mapRepo),
-    suggested_branch: "suggested_branch" in g2 ? g2.suggested_branch ?? null : null
+    suggested_branch: "suggested_branch" in g ? g.suggested_branch ?? null : null
   };
 }
 function mapTaskList(d) {
-  const g2 = d;
+  const g = d;
   return {
-    items: g2.items.map((t) => mapTask(t)),
-    pagination: mapPagination(g2.pagination)
+    items: g.items.map((t) => mapTask(t)),
+    pagination: mapPagination(g.pagination)
   };
 }
 function mapArtifactApprovals(d) {
-  const g2 = d;
+  const g = d;
   return {
-    version: g2.version,
-    latest_version: g2.latest_version,
-    decided_count: g2.decided_count,
-    total_required: g2.total_required,
-    open_reviews: g2.open_reviews.map((r) => ({
+    version: g.version,
+    latest_version: g.latest_version,
+    decided_count: g.decided_count,
+    total_required: g.total_required,
+    open_reviews: g.open_reviews.map((r) => ({
       user_id: r.user_id ?? "",
       user_name: r.user_name ?? "",
       decided: r.decided
     })),
-    decisions: g2.decisions.map((dec) => ({
+    decisions: g.decisions.map((dec) => ({
       user_name: dec.user_name,
       decision: dec.decision,
       decided: true
@@ -1913,20 +2303,20 @@ function mapArtifactApprovals(d) {
   };
 }
 function mapArtifactReview(d) {
-  const g2 = d;
+  const g = d;
   return {
-    version: g2.version,
-    review_state: g2.review_state,
-    reviewers: g2.reviewers.map((r) => ({
+    version: g.version,
+    review_state: g.review_state,
+    reviewers: g.reviewers.map((r) => ({
       user_id: r.user_id,
       user_name: r.user_name,
       status: r.status
     })),
-    review_artifacts: g2.review_artifacts.map((a) => ({ title: a.title })),
-    initiator: g2.initiator ? { user_id: g2.initiator.user_id, user_name: g2.initiator.user_name } : null,
-    review_started_at: g2.review_started_at,
-    review_deadline_at: g2.review_deadline_at,
-    is_initiator: g2.is_initiator
+    review_artifacts: g.review_artifacts.map((a) => ({ title: a.title })),
+    initiator: g.initiator ? { user_id: g.initiator.user_id, user_name: g.initiator.user_name } : null,
+    review_started_at: g.review_started_at,
+    review_deadline_at: g.review_deadline_at,
+    is_initiator: g.is_initiator
   };
 }
 async function createDefaultAuraClient() {

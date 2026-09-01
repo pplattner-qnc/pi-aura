@@ -58,33 +58,12 @@ task openapi-sync     # refresh packages/shared/openapi/openapi.yaml from the Au
   pulled in transitively via `@pi-aura/shared` must be added to
   `scripts/esbuild.config.mjs`'s `external` array or the bundle breaks.
 
-## `scripts/src/engineering-sync.test.ts`
-
-A logic-only unit test for the sync utility's pure helpers (`suffixed`,
-`hasSuffix`, `consumeIgnoreTombstones`, stem matching). It imports from
-`./engineering-sync.ts`, which in turn re-exports from `@pi-aura/shared`.
-
-**Run it with `tsx`, not `node --experimental-strip-types`:**
-
-```bash
-node_modules/.bin/tsx scripts/src/engineering-sync.test.ts
-```
-
-`node --experimental-strip-types` fails with `ERR_MODULE_NOT_FOUND` for
-`packages/shared/src/hey-api-aura-client.js` because the `.ts` sources
-re-export with a `.js` extension that the raw-node strip-types loader cannot
-resolve through the workspace package boundary. `tsx` resolves it correctly.
-This is a pre-existing `@pi-aura/shared` module-resolution issue, not a test
-logic failure — all 5 sub-tests pass under `tsx`.
-
 ## `scripts/src/{build-actions,followup-working-on,write-dashboard-digest}.test.ts`
 
 Pure-logic unit tests for the digest data half (the `actions[]` routing table,
 the `followup.currentlyWorkingOn` default, the `~/.pi/aura/digest.json`
 write). They import only `./types.ts` + the helper under test — no
-`@pi-aura/shared` boundary — so `node --experimental-strip-types` works
-(the `.js`-extension issue that forces `tsx` for `engineering-sync.test.ts`
-does not apply here).
+`@pi-aura/shared` boundary — so `node --experimental-strip-types` works.
 
 ```bash
 node --experimental-strip-types scripts/src/build-actions.test.ts

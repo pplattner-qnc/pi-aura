@@ -1,4 +1,4 @@
-// Tests for the two AuraClient verbs added by the engineering-sync-skill task:
+// Tests for the two wiki/blueprint AuraClient verbs:
 // `getBlueprintFiles` and `getKnowledgeNodeVersion`.
 //
 // Seam: mock the generated SDK calls by replacing the `.get` method on the

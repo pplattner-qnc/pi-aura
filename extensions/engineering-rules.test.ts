@@ -5,9 +5,11 @@
  *   node --experimental-strip-types extensions/engineering-rules.test.ts
  *
  * Covers the pure logic: frontmatter parsing (all three attach modes),
- * the @rule: token extractor, the @rule: resolver, and the system-prompt
- * section builders. The extension factory itself is verified by jiti load
- * (see engineering-sync build) + the pi runtime once the rules are seeded.
+ * glob compilation + matching, the @rule: token extractor, the @rule:
+ * resolver, the system-prompt section builders, and the settings-driven
+ * ignore-glob loader (global + project union). The extension factory itself
+ * is verified by jiti load + the pi runtime once a repo populates
+ * `.cursor/rules/`.
  */
 
 import assert from "node:assert/strict";
@@ -18,12 +20,29 @@ import engineeringRules, {
   buildAlwaysOnSection,
   buildListedRulesSection,
   extractRuleToken,
+  globToRegExp,
+  loadIgnoreGlobs,
   loadRules,
+  matchesAnyGlob,
   parseFrontmatter,
   parseYamlScalar,
   resolveRuleMentions,
   type Rule,
 } from "./engineering-rules.ts";
+
+// Helper to set up a fake "global" settings dir and return its path, so the
+// test does not touch the real ~/.pi/agent/settings.json. We override the
+// HOME env var per-test (loadIgnoreGlobs reads GLOBAL_SETTINGS_PATH which is
+// built from homedir()).
+function withFakeHome<T>(home: string, fn: () => T): T {
+  const oldHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    return fn();
+  } finally {
+    process.env.HOME = oldHome;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // parseFrontmatter
@@ -71,85 +90,200 @@ import engineeringRules, {
 console.log("parseFrontmatter: ok");
 
 // ---------------------------------------------------------------------------
-// loadRules + attach classification + tracker-aura skip (manifest-driven)
+// globToRegExp + matchesAnyGlob
+// ---------------------------------------------------------------------------
+
+{
+  // Bare filename
+  assert.ok(globToRegExp("tracker-aura.mdc").test("tracker-aura.mdc"));
+  assert.ok(!globToRegExp("tracker-aura.mdc").test("tracker-jira.mdc"));
+
+  // * (non-separator span)
+  assert.ok(globToRegExp("*-aura.mdc").test("tracker-aura.mdc"));
+  assert.ok(!globToRegExp("*-aura.mdc").test("universal/tracker-aura.mdc"), "* must not cross /");
+
+  // ** with path segments
+  assert.ok(globToRegExp("universal/**/*-aura.mdc").test("universal/tracker-aura.mdc"));
+  assert.ok(globToRegExp("universal/**/*-aura.mdc").test("universal/nested/deep/tracker-aura.mdc"));
+  // **/ matches zero dirs too (a/**/b matches a/b)
+  assert.ok(globToRegExp("a/**/b").test("a/b"));
+
+  // matchesAnyGlob helper (forward-slash normalized)
+  assert.ok(matchesAnyGlob("tracker-aura.mdc", ["tracker-aura.mdc"]));
+  assert.ok(matchesAnyGlob("universal/tracker-aura.mdc", ["universal/**/*-aura.mdc"]));
+  assert.ok(matchesAnyGlob("universal/nested/x-aura.mdc", ["**/*-aura.mdc"]));
+  assert.ok(!matchesAnyGlob("tracker-jira.mdc", ["*-aura.mdc"]));
+  assert.ok(!matchesAnyGlob("tracker-aura.mdc", []), "no globs -> no match");
+}
+
+console.log("globToRegExp + matchesAnyGlob: ok");
+
+// ---------------------------------------------------------------------------
+// loadRules + attach classification + settings-driven ignore
 // ---------------------------------------------------------------------------
 
 {
   const dir = mkdtempSync(join(tmpdir(), "eng-rules-test-"));
+  const home = mkdtempSync(join(tmpdir(), "eng-rules-home-"));
   try {
-    const rulesDir = join(dir, "skills", "core", "engineering-foundation", "resources", "rules");
-    mkdirSync(rulesDir, { recursive: true });
+    // Repo: .cursor/rules/ with nested subdirs (recursive read).
+    const rulesDir = join(dir, ".cursor", "rules");
+    mkdirSync(join(rulesDir, "universal"), { recursive: true });
     writeFileSync(join(rulesDir, "general-code-quality.mdc"),
       "---\nalwaysApply: true\n---\nBe excellent.\n");
     writeFileSync(join(rulesDir, "general-markdown-format.mdc"),
       "---\nalwaysApply: false\nglobs: \"**/*.md\"\n---\nFormat markdown.\n");
     writeFileSync(join(rulesDir, "tracker-jira.mdc"),
       "---\nalwaysApply: false\n---\nManual rule.\n");
-    writeFileSync(join(rulesDir, "tracker-aura.mdc"),
+    writeFileSync(join(rulesDir, "universal", "tracker-aura.mdc"),
       "---\nalwaysApply: true\n---\nShould be ignored.\n");
-    // Manifest marks tracker-aura as ignored via its localPath.
-    mkdirSync(join(dir, ".pi"), { recursive: true });
-    writeFileSync(join(dir, ".pi", "engineering-foundation.json"), JSON.stringify({
-      version: 1,
-      space: "engineering-foundation",
-      entries: {
-        "<tracker-aura-uuid>": {
-          wikiPathOrUuid: "<tracker-aura-uuid>",
-          localPath: "skills/core/engineering-foundation/resources/rules/tracker-aura.mdc",
-          sourceSha256: "sha256:x",
-          auraChecksumOrVersion: "1",
-          auraUpdatedAt: "",
-          ignored: true,
-          ignoreReason: "this repo talks to Aura via the aura skill / REST client",
+
+    // Global settings ignore tracker-aura via a **/*-aura.mdc glob.
+    mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+    writeFileSync(join(home, ".pi", "agent", "settings.json"), JSON.stringify({
+      aura: {
+        cursorRules: {
+          ignore: ["universal/**/*-aura.mdc"],
         },
       },
     }) + "\n");
 
-    const rules = loadRules(dir);
-    assert.equal(rules.length, 3, "tracker-aura must be skipped (3 of 4 loaded)");
+    withFakeHome(home, () => {
+      const rules = loadRules(dir);
+      assert.equal(rules.length, 3, "tracker-aura must be skipped (3 of 4 loaded)");
 
-    const byName = new Map(rules.map((r) => [r.name, r]));
-    assert.equal(byName.get("general-code-quality")?.attach, "always");
-    assert.equal(byName.get("general-markdown-format")?.attach, "glob");
-    assert.deepEqual(byName.get("general-markdown-format")?.globs, ["**/*.md"]);
-    assert.equal(byName.get("tracker-jira")?.attach, "manual");
-    assert.equal(byName.get("tracker-aura"), undefined, "tracker-aura must not be loaded");
+      const byName = new Map(rules.map((r) => [r.name, r]));
+      assert.equal(byName.get("general-code-quality")?.attach, "always");
+      assert.equal(byName.get("general-markdown-format")?.attach, "glob");
+      assert.deepEqual(byName.get("general-markdown-format")?.globs, ["**/*.md"]);
+      assert.equal(byName.get("tracker-jira")?.attach, "manual");
+      assert.equal(byName.get("tracker-aura"), undefined, "tracker-aura must not be loaded");
+      // relPath is forward-slash-joined, relative to .cursor/rules/.
+      assert.equal(byName.get("tracker-jira")?.relPath, "tracker-jira.mdc");
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
   }
 }
 
-console.log("loadRules + tracker-aura skip (manifest-driven): ok");
+console.log("loadRules + settings-driven ignore (recursive): ok");
 
 // ---------------------------------------------------------------------------
-// loadRules loads ALL rules when no manifest exists (no hardcoded skip)
+// loadRules: project-local settings add to the union
 // ---------------------------------------------------------------------------
 
 {
-  const dir = mkdtempSync(join(tmpdir(), "eng-rules-test-nomanifest-"));
+  const dir = mkdtempSync(join(tmpdir(), "eng-rules-proj-"));
+  const home = mkdtempSync(join(tmpdir(), "eng-rules-home2-"));
   try {
-    const rulesDir = join(dir, "skills", "core", "engineering-foundation", "resources", "rules");
+    const rulesDir = join(dir, ".cursor", "rules");
     mkdirSync(rulesDir, { recursive: true });
     writeFileSync(join(rulesDir, "tracker-aura.mdc"),
-      "---\nalwaysApply: true\n---\nWould be loaded without a manifest.\n");
-    // No .pi/engineering-foundation.json — nothing is skipped.
-    const rules = loadRules(dir);
-    assert.equal(rules.length, 1, "without a manifest, tracker-aura IS loaded (no hardcoded skip)");
-    assert.equal(rules[0].name, "tracker-aura");
+      "---\nalwaysApply: true\n---\nIgnored by global glob.\n");
+    writeFileSync(join(rulesDir, "general-code-quality.mdc"),
+      "---\nalwaysApply: true\n---\nKept.\n");
+
+    // Global ignores *-aura.mdc; project does NOT override it away.
+    mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+    writeFileSync(join(home, ".pi", "agent", "settings.json"), JSON.stringify({
+      aura: { cursorRules: { ignore: ["*-aura.mdc"] } },
+    }) + "\n");
+
+    withFakeHome(home, () => {
+      const rules = loadRules(dir);
+      assert.equal(rules.length, 1, "global ignore applies");
+      assert.equal(rules[0].name, "general-code-quality");
+    });
+
+    // Now add a project-local ignore for general-code-quality — union skips it too.
+    mkdirSync(join(dir, ".pi"), { recursive: true });
+    writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({
+      aura: { cursorRules: { ignore: ["general-code-quality.mdc"] } },
+    }) + "\n");
+    withFakeHome(home, () => {
+      const rules = loadRules(dir);
+      assert.equal(rules.length, 0, "global + project ignore union skips both rules");
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
   }
 }
 
-console.log("loadRules without manifest loads all (no hardcoding): ok");
+console.log("loadRules project-local union: ok");
+
+// ---------------------------------------------------------------------------
+// loadRules loads ALL rules when no settings ignore exists (no hardcoding)
+// ---------------------------------------------------------------------------
+
+{
+  const dir = mkdtempSync(join(tmpdir(), "eng-rules-nosettings-"));
+  const home = mkdtempSync(join(tmpdir(), "eng-rules-home3-"));
+  try {
+    const rulesDir = join(dir, ".cursor", "rules");
+    mkdirSync(rulesDir, { recursive: true });
+    writeFileSync(join(rulesDir, "tracker-aura.mdc"),
+      "---\nalwaysApply: true\n---\nWould be loaded without an ignore glob.\n");
+    // No settings at all — nothing is skipped (no hardcoded rule-name skip).
+    mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+    withFakeHome(home, () => {
+      const rules = loadRules(dir);
+      assert.equal(rules.length, 1, "without ignore globs, tracker-aura IS loaded");
+      assert.equal(rules[0].name, "tracker-aura");
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+console.log("loadRules without ignore globs loads all (no hardcoding): ok");
+
+// ---------------------------------------------------------------------------
+// loadIgnoreGlobs: union of global + project, dedup
+// ---------------------------------------------------------------------------
+
+{
+  const dir = mkdtempSync(join(tmpdir(), "eng-globs-"));
+  const home = mkdtempSync(join(tmpdir(), "eng-globs-home-"));
+  try {
+    mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+    writeFileSync(join(home, ".pi", "agent", "settings.json"), JSON.stringify({
+      aura: { cursorRules: { ignore: ["a.mdc", "b.mdc"] } },
+    }) + "\n");
+    mkdirSync(join(dir, ".pi"), { recursive: true });
+    writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({
+      aura: { cursorRules: { ignore: ["b.mdc", "c.mdc"] } },
+    }) + "\n");
+    withFakeHome(home, () => {
+      const globs = loadIgnoreGlobs(dir);
+      // Union + dedup.
+      assert.deepEqual(globs.sort(), ["a.mdc", "b.mdc", "c.mdc"]);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+console.log("loadIgnoreGlobs union (global + project, dedup): ok");
 
 // ---------------------------------------------------------------------------
 // loadRules on absent dir no-ops
 // ---------------------------------------------------------------------------
 
 {
-  const rules = loadRules(join(tmpdir(), "does-not-exist-xyz"));
-  assert.deepEqual(rules, []);
+  const home = mkdtempSync(join(tmpdir(), "eng-rules-home4-"));
+  mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+  try {
+    withFakeHome(home, () => {
+      const rules = loadRules(join(tmpdir(), "does-not-exist-xyz"));
+      assert.deepEqual(rules, []);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 }
 
 console.log("loadRules absent dir: ok");
@@ -161,15 +295,15 @@ console.log("loadRules absent dir: ok");
 {
   const rules: Rule[] = [
     {
-      name: "general-code-quality", path: "/x", relPath: "skills/core/engineering-foundation/resources/rules/general-code-quality.mdc",
+      name: "general-code-quality", path: "/x", relPath: "general-code-quality",
       attach: "always", globs: [], body: "Be excellent.", full: "",
     },
     {
-      name: "general-markdown-format", path: "/x", relPath: "skills/core/engineering-foundation/resources/rules/general-markdown-format.mdc",
+      name: "general-markdown-format", path: "/x", relPath: "general-markdown-format",
       attach: "glob", globs: ["**/*.md"], body: "Format markdown.", full: "",
     },
     {
-      name: "tracker-jira", path: "/x", relPath: "skills/core/engineering-foundation/resources/rules/tracker-jira.mdc",
+      name: "tracker-jira", path: "/x", relPath: "tracker-jira",
       attach: "manual", globs: [], body: "Manual rule.", full: "",
     },
   ];
@@ -222,11 +356,11 @@ console.log("extractRuleToken (@ deferral): ok");
 {
   const rules: Rule[] = [
     {
-      name: "tracker-jira", path: "/x", relPath: "skills/core/engineering-foundation/resources/rules/tracker-jira.mdc",
+      name: "tracker-jira", path: "/x", relPath: "tracker-jira",
       attach: "manual", globs: [], body: "Use Jira for tracking.", full: "",
     },
     {
-      name: "general-code-quality", path: "/x", relPath: "skills/core/engineering-foundation/resources/rules/general-code-quality.mdc",
+      name: "general-code-quality", path: "/x", relPath: "general-code-quality",
       attach: "always", globs: [], body: "Be excellent.", full: "",
     },
   ];

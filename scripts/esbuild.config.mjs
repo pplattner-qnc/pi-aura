@@ -47,13 +47,6 @@ const entries = [
     // The `aura` skill's artifact + wiki file-based-workflow script.
     outfile: "../skills/core/aura/dist/aura.mjs",
   },
-  {
-    entryPoints: ["src/engineering-sync.ts"],
-    // The `engineering-sync` skill's fetch/finish utility (package-author-only).
-    // Repo-local skill at .pi/skills/engineering-sync/ — dist is committed so
-    // the author can run it without rebuilding.
-    outfile: "../.pi/skills/engineering-sync/dist/engineering-sync.mjs",
-  },
 ];
 
 if (watch) {

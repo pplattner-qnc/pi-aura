@@ -656,16 +656,16 @@ function mapKnowledgeNode(d: unknown): KnowledgeNode {
     slug: g.slug,
     latest_version: g.latest_version,
     body: g.body,
-    // Surface the provenance Aura carries on every node (used by the
-    // engineering-sync manifest); kept off the named interface via the index
-    // signature so callers opt in explicitly.
+    // Surface the provenance Aura carries on every node; kept off the
+    // named interface via the index signature so callers opt in explicitly.
     updated_at: g.updated_at,
     body_hash: g.body_hash,
     // Preserve the nested `children` the REST tree carries (the wiki tree is
     // recursive: folders contain documents/other folders). The named
     // KnowledgeNode interface hides this behind its index signature so callers
-    // opt in explicitly (engineering-sync recurses it; pretty-printers ignore
-    // it). Without this the nested docs (guides/*, workflow/*) are invisible.
+    // opt in explicitly (tree-walking callers recurse it; pretty-printers
+    // ignore it). Without this the nested docs (guides/*, workflow/*) are
+    // invisible.
     children: (g.children ?? []).map(mapKnowledgeNode),
   } as KnowledgeNode;
 }
