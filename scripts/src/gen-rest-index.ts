@@ -150,6 +150,28 @@ export async function buildSemanticVectors(
 }
 
 // ---------------------------------------------------------------------------
+// buildSearchableOps — shared helper (sort + searchable text)
+// ---------------------------------------------------------------------------
+
+/**
+ * Sort operations by operationId and build SearchableOp[] with searchable text.
+ * Shared by buildRestIndex and buildRestIndexAsync to avoid duplicate loads.
+ */
+function buildSearchableOps(
+  index: OpenApiIndex,
+  codeTags: CodeTags,
+  resolveFn: (op: OpMeta, tags: CodeTags) => string[],
+): SearchableOp[] {
+  const ops = Object.values(index).sort((a, b) =>
+    a.operationId.localeCompare(b.operationId),
+  );
+  return ops.map((op) => ({
+    operationId: op.operationId,
+    text: buildSearchableText(op, codeTags, resolveFn),
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // buildRestIndex — the pure builder
 // ---------------------------------------------------------------------------
 
@@ -171,20 +193,14 @@ export function buildRestIndex(
 ): RestIndexBlob {
   const index: OpenApiIndex = loadOpenApi(openApiPath);
 
-  // Sort operations by operationId for determinism
-  const ops = Object.values(index).sort((a, b) =>
-    a.operationId.localeCompare(b.operationId),
-  );
-
   // --- Build searchable text + FTS index ---
-  const searchableOps: SearchableOp[] = ops.map((op) => ({
-    operationId: op.operationId,
-    text: buildSearchableText(op, codeTags, resolveFn),
-  }));
-
+  const searchableOps = buildSearchableOps(index, codeTags, resolveFn);
   const fts = buildFtsIndex(searchableOps);
 
   // --- Build slim metadata ---
+  const ops = Object.values(index).sort((a, b) =>
+    a.operationId.localeCompare(b.operationId),
+  );
   const metadata: SlimOpMeta[] = ops.map((op) => ({
     operationId: op.operationId,
     method: op.method,
@@ -228,14 +244,10 @@ export async function buildRestIndexAsync(
   const blob = buildRestIndex(openApiPath, codeTags, resolveFn);
 
   if (embedOpts?.embedFn && embedOpts?.embedModelId) {
+    // Reuse the loaded index (loader caches per-process) to build searchableOps
+    // without a second load + duplicate sort/map/buildSearchableText.
     const index: OpenApiIndex = loadOpenApi(openApiPath);
-    const ops = Object.values(index).sort((a, b) =>
-      a.operationId.localeCompare(b.operationId),
-    );
-    const searchableOps: SearchableOp[] = ops.map((op) => ({
-      operationId: op.operationId,
-      text: buildSearchableText(op, codeTags, resolveFn),
-    }));
+    const searchableOps = buildSearchableOps(index, codeTags, resolveFn);
 
     const provider = {
       modelId: embedOpts.embedModelId,
