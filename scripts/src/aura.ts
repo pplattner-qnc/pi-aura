@@ -69,7 +69,7 @@ const USAGE = `Usage:
   node aura.mjs rest describe <operationId>                  print the full shape of one REST operation
   node aura.mjs rest call <operationId> [--param name=val …] [--body-file F] [--body <json>]
                                                             invoke a REST operation by id
-  node aura.mjs rest search "<natural-language intent>"     find REST operations by full-text search`;
+  node aura.mjs rest search "<natural-language intent>"     find REST operations by semantic + full-text search (local model, on by default)`;
 
 function fail(msg: string, usage = false, code = 2): never {
   console.error(msg);
