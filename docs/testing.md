@@ -57,6 +57,23 @@ task openapi-sync     # refresh packages/shared/openapi/openapi.yaml from the Au
   binding / optional `x11` require that can't bundle). Any new native-ish dep
   pulled in transitively via `@pi-aura/shared` must be added to
   `scripts/esbuild.config.mjs`'s `external` array or the bundle breaks.
+- **Generated SDK imports need `.js` extensions under NodeNext** (the
+  `tsConfigPath` lesson). The generated client in `packages/shared/src/generated/`
+  is consumed by BOTH `scripts/` (`moduleResolution: bundler`) and the
+  `digest-dashboard` extension (`moduleResolution: NodeNext`). Under NodeNext,
+  relative import specifiers MUST carry a `.js` extension or `tsc` fails with
+  TS2307/TS2834. `@hey-api/openapi-ts` (v0.67+) auto-appends `.js` to generated
+  relative imports when the resolved `output.tsConfigPath` tsconfig has
+  `moduleResolution: "nodenext"`. `packages/shared/openapi-ts.config.ts` points
+  `tsConfigPath` at `packages/shared/tsconfig.codegen.json` (a tiny NodeNext
+  tsconfig), so `npm run codegen` emits the `.js` extensions natively — the
+  generated tree is correct out-of-the-box and survives regeneration. **Do NOT
+  hand-patch `.js` extensions onto generated files** (a prior attempt did;
+  the next codegen run wiped them). `tsConfigPath` is resolved relative to the
+  openapi-ts package dir, not the config file, so it must be an absolute path
+  (the config derives it from `import.meta.url`). `.js`-extended specifiers
+  also resolve under `bundler`, so the shared package's own `tsc --noEmit` is
+  unaffected.
 
 ## `packages/shared/test/digest/{build-actions,write-dashboard-digest,scheduler,aura-digest-progress}.test.ts`
 
