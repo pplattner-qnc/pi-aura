@@ -25,9 +25,8 @@
 // the persistent last-digest store at ~/.pi/aura/last-digest.json.
 
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { resolve, join } from "node:path";
-import { tmpdir, homedir } from "node:os";
-import { randomBytes } from "node:crypto";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { createDefaultAuraClient } from "@pi-aura/shared/aura-client";
 import { loadAuraClientSettings } from "@pi-aura/shared/settings";
 import type {
@@ -45,8 +44,6 @@ import { runTasks, type Kind, type KindMap, type TaskRef, type Hashable, type No
 import { loadSettings } from "@pi-aura/shared/digest/settings";
 import { createKeyring } from "@pi-aura/shared/keyring";
 import { buildActions } from "@pi-aura/shared/digest/build-actions";
-import { writeDashboardDigest } from "@pi-aura/shared/digest/write-dashboard-digest";
-import { readDashboardUrl, createProgressEmitter } from "@pi-aura/shared/digest/progress-emitter";
 import type {
   ArtifactToVerify,
   ArtifactVerification,
@@ -159,8 +156,10 @@ export const USAGE = `Usage:
 
 /** Path to the persistent last-digest store. */
 const LAST_DIGEST_PATH = join(homedir(), ".pi", "aura", "last-digest.json");
-/** Path to the live dashboard digest file (SPA data source). */
-const DASHBOARD_DIGEST_PATH = join(homedir(), ".pi", "aura", "digest.json");
+/** Path to the live dashboard digest file (SPA data source). Exported so
+ *  the CLI shim can write ~/.pi/aura/digest.json (fetchAction no longer
+ *  writes it — it's a pure function returning the object). */
+export const DASHBOARD_DIGEST_PATH = join(homedir(), ".pi", "aura", "digest.json");
 const LAST_DIGEST_SCHEMA_VERSION = 1;
 
 // ===========================================================================
@@ -252,25 +251,18 @@ async function fetchNotifications(
   return { since, older };
 }
 
-export async function fetchAction(): Promise<void> {
-  const outDir = join(tmpdir(), `aura-morning-${randomBytes(6).toString("hex")}`);
-  mkdirSync(outDir, { recursive: true });
-
-  const aura = await createDefaultAuraClient();
+export async function fetchAction(opts: {
+  onProgress?: (e: ProgressEvent) => void;
+  auraClient?: AuraClient;
+} = {}): Promise<{ digest: Digest; report: AuraReport; raw: RawAuraData }> {
+  const aura = opts.auraClient ?? await createDefaultAuraClient();
+  const onProgress = opts.onProgress ?? (() => {});
   const warnings: string[] = [];
-
-  // --- Live progress tree (slice 3) ---------------------------------------
-  // Read ~/.pi/aura/server-url.json ONCE at fetch start. If absent, the
-  // progress emitter is a no-op for the whole run (digest still writes
-  // digest.json). The hook batches events on a ~50ms timer and flushes at
-  // run end via progressHook.flush().
-  const dashboardUrl = readDashboardUrl();
-  const progressHook = createProgressEmitter(dashboardUrl);
 
   // Emit a synthetic progress event (for inline phase nodes outside the
   // scheduler run). Stable ids prevent coalescing across phases.
   const emitPhase = (id: string, label: string, status: "running" | "done", startedAt: number, endedAt?: number): void => {
-    progressHook({ id, label, status, startedAt, endedAt, kind: "fetchAction" });
+    onProgress({ id, label, status, startedAt, endedAt, kind: "fetchAction" });
   };
 
   // --- Notifications phase node (inline, before the parallel fetch) --------
@@ -705,7 +697,7 @@ export async function fetchAction(): Promise<void> {
         { kind: "start", input: null }, kinds, state, {
           concurrency: 6,
           initialMaxTasks: 30,
-          onProgress: (e: ProgressEvent) => progressHook(e),
+          onProgress: (e: ProgressEvent) => onProgress(e),
         },
       );
       capped = result.capped;
@@ -713,8 +705,6 @@ export async function fetchAction(): Promise<void> {
       finalCap = result.maxTasks;
     } finally {
       if (atlassian) await atlassian.close();
-      // Flush any pending progress events at the end of the scheduler run.
-      await progressHook.flush();
     }
     if (capped) {
       warnings.push(
@@ -742,10 +732,6 @@ export async function fetchAction(): Promise<void> {
     row.git_summary = gitColumnSummary(devLinksByTask.get(row.key));
   }
 
-  const rawPath = resolve(outDir, "raw.json");
-  const digestPath = resolve(outDir, "digest.json");
-  const reportPath = resolve(outDir, "report.json");
-
   const digest: Digest = {
     date,
     summary: null,
@@ -762,8 +748,8 @@ export async function fetchAction(): Promise<void> {
     followup: { currentlyWorkingOn: null },
     meta: {
       generated_at: fetchedAt,
-      raw_path: rawPath,
-      report_path: reportPath,
+      raw_path: "",
+      report_path: "",
     },
   };
 
@@ -775,7 +761,7 @@ export async function fetchAction(): Promise<void> {
   const report: AuraReport = {
     fetched_at: fetchedAt,
     warnings,
-    raw_path: rawPath,
+    raw_path: "",
     artifacts_to_verify: artifactsToVerify,
     verifications,
     pending_review_summary: (pendingReviews.items ?? []).map((a) => ({
@@ -786,29 +772,7 @@ export async function fetchAction(): Promise<void> {
     notification_review_events: notificationReviewEvents,
   };
 
-  writeFileSync(rawPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
-  writeFileSync(digestPath, JSON.stringify(digest, null, 2) + "\n", "utf8");
-  writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
-
-  // Write the full corrected digest to the stable dashboard path.
-  // Failure is non-fatal: the temp-dir digest is the source of truth for
-  // render/save/diff, and the dashboard file is a best-effort SPA data source.
-  try {
-    writeDashboardDigest(digest, DASHBOARD_DIGEST_PATH);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    warnings.push(`Could not write dashboard digest to ${DASHBOARD_DIGEST_PATH}: ${message}`);
-  }
-
-  // stdout: a single machine-parseable line. stderr: human progress.
-  // Flush any remaining progress events (inline phase nodes) at the very end.
-  await progressHook.flush();
-  console.log(`output directory: ${outDir}/`);
-  console.error(`fetched ${fetchedAt}`);
-  console.error(`  raw:     ${rawPath}`);
-  console.error(`  digest:  ${digestPath}`);
-  console.error(`  report:  ${reportPath}`);
-  console.error(`  queue rows: ${queueRows.length}, artifacts verified: ${verifications.length} (${verifications.filter((v) => v.stale).length} stale), dev links: ${devLinks.length} tasks`);
+  return { digest, report, raw };
 }
 
 /**

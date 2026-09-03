@@ -1,2 +1,2 @@
-task: in-process-server
+task: in-process-fetch
 slice: None
