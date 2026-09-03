@@ -191,14 +191,13 @@ export async function startDashboard(
     listenerHandle = undefined;
   }
 
-  const { dashboardPath, statePath } = defaultAuraPaths();
+  const { statePath } = defaultAuraPaths();
 
   // Start the server in-process — no spawn, no writePid, no waitForServerUrl.
+  // startServer no longer needs dashboardPath/statePath (in-memory backing).
   let started;
   try {
     started = await startServer({
-      dashboardPath,
-      statePath,
       openBrowser: false,
     });
   } catch (err) {
