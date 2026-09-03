@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import type { StateEvent } from "./state.ts";
 import {
   getCurrentDigest,
+  getEvents,
   pushEvent,
   registerSseClient,
 } from "./store.ts";
@@ -149,6 +150,16 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Digest
         req.on("close", () => {
           unregister();
         });
+        return;
+      }
+
+      if (req.url === "/api/state" && req.method === "GET") {
+        // Serve the in-memory event stream — the browser's loadStateEvents()
+        // GETs this on SSE connect + on each state-change to load progress +
+        // agent_log events for the live tree + the augment log list. Shape:
+        // { events: StateEvent[] } (matches the view's `data?.events ?? []`).
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ events: getEvents() }));
         return;
       }
 

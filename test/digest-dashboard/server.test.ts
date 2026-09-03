@@ -255,6 +255,39 @@ describe("digest-dashboard server (in-memory backing)", () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it("GET /api/state returns the in-memory events the browser's loadStateEvents loads (closes the live-tree + log-list loop)", async () => {
+    server = await startServer({ openBrowser: false });
+
+    // No events yet — empty array (the view's `data?.events ?? []`).
+    const empty = await request(`${server.url}api/state`, "GET");
+    expect(empty.res.statusCode).toBe(200);
+    expect(JSON.parse(empty.body)).toEqual({ events: [] });
+
+    // Push a progress event + an agent_log event (what digest-fetch + digest-log produce).
+    pushEvent(createProgressEvent());
+    pushEvent(createAgentLogEvent("Verifying review states…"));
+
+    // GET /api/state returns them in order — this is the shape loadStateEvents
+    // parses: extractProgressEvents + extractAgentLogEvents read data.events.
+    const res = await request(`${server.url}api/state`, "GET");
+    expect(res.res.statusCode).toBe(200);
+    const data = JSON.parse(res.body) as { events: StateEvent[] };
+    expect(data.events).toHaveLength(2);
+    expect(data.events[0]).toMatchObject({
+      dir: "agent→page",
+      type: "progress",
+      payload: { id: "node-1", label: "Fetching tasks", status: "running", kind: "start" },
+    });
+    expect(data.events[1]).toMatchObject({
+      dir: "agent→page",
+      type: "agent_log",
+      payload: { message: "Verifying review states…" },
+    });
+    // The store assigned monotonic ids (overwrote the client id:0).
+    expect(data.events[0].id).toBe(1);
+    expect(data.events[1].id).toBe(2);
+  });
+
   it("POST /api/state fans out to SSE clients as state-change", async () => {
     server = await startServer({ openBrowser: false });
 
