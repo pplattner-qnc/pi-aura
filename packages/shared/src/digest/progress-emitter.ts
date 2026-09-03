@@ -173,7 +173,7 @@ export function createProgressEmitter(
 }
 
 /** Join a base URL with a path, handling trailing slashes. */
-function joinUrl(base: string, path: string): string {
+export function joinUrl(base: string, path: string): string {
   const b = base.endsWith("/") ? base.slice(0, -1) : base;
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${b}${p}`;
