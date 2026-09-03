@@ -430,7 +430,7 @@ export default function (pi: ExtensionAPI): void {
     name: "digest-log",
     label: "Log a status line to the digest dashboard",
     description:
-      "Push a single status line to the running digest dashboard's log list (below the progress tree). A no-op if the dashboard is not running — it never fails the agent's call.",
+      "Push a single status line to the running digest dashboard's log list (below the progress tree). Always records the status line to the in-memory event stream; it renders in the dashboard log list when the dashboard is running. Never fails the agent call (the line is recorded regardless of whether the dashboard is open).",
     promptSnippet: "digest-log — append a status line to the live digest dashboard.",
     promptGuidelines: [
       "Use digest-log to push status lines during the augment phase so the user sees live progress in the dashboard.",
