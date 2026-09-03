@@ -21264,12 +21264,8 @@ function loadLastDigest() {
     return null;
   }
 }
-function saveAction() {
-  const dir = process.argv[3];
-  if (!dir) fail("save: missing <dir> argument", USAGE);
-  const digestPath = join5(dir, "digest.json");
-  if (!existsSync4(digestPath)) fail(`save: ${digestPath} not found`);
-  const digest = JSON.parse(readFileSync4(digestPath, "utf8"));
+function saveLastDigest(digest, lastDigestPath) {
+  const dest = lastDigestPath ?? join5(homedir5(), ".pi", "aura", "last-digest.json");
   const presentedAt = (/* @__PURE__ */ new Date()).toISOString();
   const store = {
     schema_version: LAST_DIGEST_SCHEMA_VERSION,
@@ -21278,8 +21274,16 @@ function saveAction() {
     digest
   };
   mkdirSync(join5(homedir5(), ".pi", "aura"), { recursive: true });
-  writeFileSync(LAST_DIGEST_PATH, JSON.stringify(store, null, 2) + "\n", "utf8");
-  console.error(`saved last digest to ${LAST_DIGEST_PATH} (presented ${presentedAt})`);
+  writeFileSync(dest, JSON.stringify(store, null, 2) + "\n", "utf8");
+  console.error(`saved last digest to ${dest} (presented ${presentedAt})`);
+}
+function saveAction() {
+  const dir = process.argv[3];
+  if (!dir) fail("save: missing <dir> argument", USAGE);
+  const digestPath = join5(dir, "digest.json");
+  if (!existsSync4(digestPath)) fail(`save: ${digestPath} not found`);
+  const digest = JSON.parse(readFileSync4(digestPath, "utf8"));
+  saveLastDigest(digest);
 }
 function daysBetween(aIso, bIso) {
   const a = (/* @__PURE__ */ new Date(aIso.slice(0, 10) + "T00:00:00")).getTime();

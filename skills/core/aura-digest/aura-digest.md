@@ -23,20 +23,20 @@ between `digest-fetch` and `digest-save`.
 ```
  ┌─────────────────────┐  ┌─────────────────┐  {digest, report}   ┌──────────────┐
  │ digest-dashboard-  │→ │  digest-fetch    │ ───────────────────→ │  orchestrator │
- │ start (ready      │  │  (wraps          │  details.dir        │  fill summary + │
- │  state, browser)  │  │   aura-digest   │                     │  corrections + │
- └─────────────────────┘  │   .mjs fetch)   │                     │  re-rank actions │
-                           │  (streams live  │                     │  (digest-log    │
-                           │   tree to the  │                     │   per sub-step)  │
-                           │   dashboard)   │                     └──────┬───────┘
-                           └─────────────────┘                            │
+ │ start (ready      │  │  (in-process     │  (in-memory;         │  fill summary + │
+ │  state, browser)  │  │   fetchAction)  │  no details.dir)     │  corrections + │
+ └─────────────────────┘  │  (streams live  │                     │  re-rank actions │
+                           │   tree to the  │                     │  (digest-log    │
+                           │   dashboard)   │                     │   per sub-step)  │
+                           └─────────────────┘                     └──────┬───────┘
                                                        corrected digest    │
                                                                 ─────────→│
                                                                            ↓
                                                                  ┌──────────────┐
                                                                  │  digest-save  │
-                                                                 │  (pass        │
-                                                                 │  details.dir) │
+                                                                 │  (saves the   │
+                                                                 │   in-memory  │
+                                                                 │   digest)    │
                                                                  │  (last-digest │
                                                                  │   store)      │
                                                                  └──────────────┘
@@ -106,22 +106,17 @@ the message to the user and stop — do not continue the pipeline.
 
 ## Step 2: Fetch
 
-Call the `digest-fetch` tool. It runs `aura-digest.mjs fetch` under the hood,
-creates its own random temp directory (`/tmp/aura-morning-<hex>/`), fetches all
-Aura data via MCP-over-HTTP, **and verifies review states** by calling
-`getArtifactApprovals` per candidate.
+Call the `digest-fetch` tool. It calls `fetchAction()` in-process, fetches all
+Aura data, **and verifies review states** by calling `getArtifactApprovals`
+per candidate. No spawned child, no temp dir.
 
-The tool returns a single text content containing `JSON.stringify({ digest, report })`
-plus `details.dir` (the temp directory path). Parse the JSON and capture both
-objects and `details.dir`.
+The tool returns a single text content containing `JSON.stringify({ digest, report })`.
+Parse the JSON and capture both objects.
 
-`digest-fetch` also writes `~/.pi/aura/digest.json` for the dashboard (including
-`actions[]` + `followup`).
-
-While the fetch runs, the bundle emits `progress` events to the dashboard's
-`/api/state` so the browser shows a live tree of operations. If the dashboard
-was not running when `digest-fetch` started (no `~/.pi/aura/server-url.json`),
-the fetch still succeeds and writes the digest — a one-shot pi-TUI warning is
+While the fetch runs, progress events stream to the in-memory store (and fan
+out via SSE to the dashboard) so the browser shows a live tree of operations.
+If the dashboard was not running when `digest-fetch` started, the fetch still
+succeeds and populates the in-memory digest — a one-shot pi-TUI warning is
 shown at the end instead of a live tree.
 
 The `report` object is the orchestrator's research basis, including:
@@ -152,9 +147,8 @@ do not continue the pipeline.
   suggested actions.
 
 Then update the parsed `digest` object in place:
-1. Fill `summary` — 2-3 sentence situation based on `getBoardBriefing` in
-   `<dir>/raw.json` (where `<dir>` is `details.dir` from `digest-fetch`) + the
-   verification findings.
+1. Fill `summary` — 2-3 sentence situation based on the briefing data from the
+   tool result's `digest` + the verification findings.
 2. Update each `reviews` entry with the current `version`, `decided_count`,
    `total_required`, and `decisions` from the matching
    `verifications[].current`. Build the decisions list from `open_reviews`
@@ -164,9 +158,9 @@ Then update the parsed `digest` object in place:
    you → current (non-stale) rejections needing revision → active committed
    work. Drop actions for stale rejections that are already addressed.
 
-Write the corrected `digest` back to `<dir>/digest.json` (where `<dir>` is the
-`details.dir` from the `digest-fetch` result). This ensures the subsequent
-`digest-save` persists the corrected version.
+Write the corrected `digest` back to the in-memory store by calling
+`digest-fetch` again or by updating the parsed object you hold. The subsequent
+`digest-save` persists the corrected version from the in-memory current digest.
 
 ### `digest-log` — push status lines to the dashboard
 
@@ -194,10 +188,10 @@ After start → fetch → augment (Steps 1–3), save the digest and drive the
 interactive dashboard.
 
 1. **Save** the corrected digest as the last-digest store. Call the
-   `digest-save` tool with the required `dir` parameter set to the
-   `details.dir` value from `digest-fetch`.
-2. **The dashboard digest is already written** — `digest-fetch` writes
-   `~/.pi/aura/digest.json` (including `actions[]` + `followup`) automatically.
+   `digest-save` tool (no `dir` parameter — it saves the current in-memory
+digest). Run `digest-fetch` first to populate the in-memory store.
+2. **The dashboard digest is already populated** — `digest-fetch` populates
+   the in-memory store (including `actions[]` + `followup`) automatically.
    No extra step.
 3. **Wait for a click.** Do not poll or prompt. The listener forwards a
    `page→agent` `action_click` event as a custom message
@@ -317,8 +311,7 @@ Interaction is via the dashboard's action buttons (Step 4); teardown is
 
 Lives at `~/.pi/aura/last-digest.json`. See `src/types.ts` (`LastDigestStore`
 + `DigestDiff`) for the authoritative definitions. `digest-save` writes this
-store from the corrected digest in the temp directory returned by
-`digest-fetch`.
+store from the current in-memory digest (populated by `digest-fetch`).
 
 | Field | Purpose |
 |-------|---------|
