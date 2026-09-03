@@ -14,7 +14,12 @@ import { fileURLToPath } from "node:url";
 import { startListener, type ListenerHandle } from "./listener.ts";
 import { startServer, openBrowser } from "./server.ts";
 import { joinUrl } from "@pi-aura/shared/digest/progress-emitter";
-import { resetStore } from "./store.ts";
+import { fetchAction } from "@pi-aura/shared/digest/aura-digest";
+import type { AuraClient } from "@pi-aura/shared/aura-client";
+import type { ProgressEvent } from "@pi-aura/shared/digest/scheduler";
+import { resetStore, pushEvent, setCurrentDigest } from "./store.ts";
+import type { StateEvent } from "./state.ts";
+import type { ProgressPayload } from "./digest-types.ts";
 
 export interface TeardownResult {
   ok: boolean;
@@ -86,6 +91,43 @@ let serverHandle: ServerHandle | null = null;
 /** Return the in-process dashboard URL, or null when the dashboard is stopped. */
 export function getDashboardUrl(): string | null {
   return serverHandle?.url ?? null;
+}
+
+// Test-injection seam for fetchAction's AuraClient. When set, digest-fetch
+// calls fetchAction({ auraClient: injectedAuraClient }) instead of letting
+// fetchAction construct the default client. Tests use this to inject a fake
+// AuraClient (per docs/testing.md: inject a fake AuraClient, don't module-
+// mock the internal collaborator). Undefined in production — fetchAction
+// calls createDefaultAuraClient() internally.
+let injectedAuraClient: AuraClient | undefined;
+
+/** @internal Test-only seam to inject a fake AuraClient into digest-fetch. */
+export function _setAuraClientForTesting(client: AuraClient | undefined): void {
+  injectedAuraClient = client;
+}
+
+/** Translate a scheduler ProgressEvent into a progress StateEvent and push
+ *  it to the in-memory store. 1 event = 1 push (no batching — the in-memory
+ *  push has no network cost). The store assigns the monotonic id
+ *  (overwriting the id:0 placeholder). */
+function adaptProgressToStore(e: ProgressEvent): void {
+  const payload: ProgressPayload = {
+    id: e.id,
+    label: e.label,
+    parentId: e.parentId,
+    status: e.status,
+    startedAt: e.startedAt,
+    endedAt: e.endedAt,
+    kind: e.kind,
+  };
+  const stateEvent: StateEvent = {
+    id: 0,
+    ts: new Date().toISOString(),
+    dir: "agent→page",
+    type: "progress",
+    payload,
+  };
+  pushEvent(stateEvent);
 }
 
 function defaultAuraPaths(): {
@@ -326,7 +368,7 @@ export default function (pi: ExtensionAPI): void {
     name: "digest-fetch",
     label: "Fetch Aura digest",
     description:
-      "Fetch today's Aura digest data. Returns the digest and report JSON plus the output directory. Also writes ~/.pi/aura/digest.json for the dashboard.",
+      "Fetch today's Aura digest data in-process. Returns the digest and report JSON. Populates the in-memory dashboard store (progress events stream live + the digest is served from /api/digest).",
     parameters: fetchToolParameters,
     async execute(
       _toolCallId: string,
@@ -334,59 +376,43 @@ export default function (pi: ExtensionAPI): void {
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
       ctx: ExtensionContext,
-    ): Promise<AgentToolResult<{ dir?: string }>> {
+    ): Promise<AgentToolResult<Record<string, never>>> {
       // Check whether the dashboard was running before the fetch started. The
       // flag is read once here and evaluated once at the end of the success
       // path — a one-shot warning, never per-event.
       const dashboardWasDown = getDashboardUrl() === null;
 
-      const result = await runAuraDigest(["fetch"]);
-      if (result.exitCode !== 0) {
-        const errorText = result.stderr.trim() || `digest-fetch exited with code ${result.exitCode}`;
-        return {
-          content: [{ type: "text", text: `digest-fetch failed: ${errorText}` }],
-          details: {},
-        };
-      }
-
-      const match = result.stdout.match(/output directory:\s*(.+?)\/?\s*$/m);
-      if (!match) {
-        return {
-          content: [{ type: "text", text: "digest-fetch failed: could not parse output directory from script stdout" }],
-          details: {},
-        };
-      }
-
-      const dir = path.normalize(match[1]);
-      const digestPath = path.join(dir, "digest.json");
-      const reportPath = path.join(dir, "report.json");
-
       try {
-        const digest = JSON.parse(readFileSync(digestPath, "utf-8")) as unknown;
-        const report = JSON.parse(readFileSync(reportPath, "utf-8")) as unknown;
-        const dashboardPath = defaultAuraPaths().dashboardPath;
-        if (!existsSync(dashboardPath)) {
-          return {
-            content: [{ type: "text", text: `digest-fetch failed: dashboard digest not written to ${dashboardPath}` }],
-            details: {},
-          };
-        }
+        const result = await fetchAction({
+          onProgress: adaptProgressToStore,
+          ...(injectedAuraClient ? { auraClient: injectedAuraClient } : {}),
+        });
 
-        let text = JSON.stringify({ digest, report });
-        // One-shot end-of-run warning when the dashboard was absent: a pi-TUI
-        // notify + a warning line prepended to the result text. The fetch
-        // still succeeds — the digest is written and returned.
+        // Populate the in-memory current digest — ends the task-2 empty-
+        // dashboard regression (/api/digest serves it; the 'change' SSE fans
+        // out and the browser re-fetches).
+        setCurrentDigest(result.digest);
+
+        let text = JSON.stringify({ digest: result.digest, report: result.report });
+
+        // One-shot end-of-run warning when the dashboard was absent. The
+        // fetch still succeeds — the digest is populated in the store
+        // regardless (setCurrentDigest ran). The warning is only about the
+        // live tree not rendering (events won't fan out to a browser if the
+        // server is down).
         if (dashboardWasDown) {
-          ctx.ui.notify(
-            "digest-fetch: dashboard was not running, no live tree shown",
-            "warning",
-          );
+          if (ctx.ui) {
+            ctx.ui.notify(
+              "digest-fetch: dashboard was not running, no live tree shown",
+              "warning",
+            );
+          }
           text = `⚠️ digest-fetch: dashboard was not running, no live tree shown.\n${text}`;
         }
 
         return {
           content: [{ type: "text", text }],
-          details: { dir },
+          details: {},
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
