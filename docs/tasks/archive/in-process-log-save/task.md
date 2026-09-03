@@ -4,9 +4,13 @@ type: feature
 slug: in-process-log-save
 title: digest-log pushes events in-process; digest-save writes only last-digest.json
 map: in-process-aura-digest
-status: ready
-blocked_by: [in-process-server, in-process-fetch]
-slices: [1-digest-log-direct-push, 2-cleanup-and-final-polish]
+status: done
+blocked_by:
+- in-process-server
+- in-process-fetch
+slices:
+- 1-digest-log-direct-push
+- 2-cleanup-and-final-polish
 ---
 
 ## User-visible outcome
