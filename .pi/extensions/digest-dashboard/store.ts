@@ -46,7 +46,7 @@ export function getEvents(): StateEvent[] {
 
 /**
  * Push an event to the in-memory store. Assigns a server-side monotonic id
- * (overwriting any client-supplied id, like the old appendEvent did),
+ * (overwriting any client-supplied id, like the old file-based appendEvent did),
  * appends to the events array, writes an SSE state-change event to each
  * connected SSE client, and notifies all subscribers.
  */

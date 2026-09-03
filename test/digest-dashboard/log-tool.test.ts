@@ -231,7 +231,7 @@ describe("digest-log tool", () => {
     );
 
     // Each concurrent call fires its own POST (the server serializes via
-    // appendEvent's write queue; the tool just POSTs)
+    // the in-memory pushEvent queue; the tool just POSTs)
     expect(fetchCalls).toHaveLength(3);
 
     const bodies = fetchCalls.map((c) => {
