@@ -30,14 +30,14 @@ export interface ProgressNode {
   children: ProgressNode[];
 }
 
-/** Extract progress events (agent→page) from a StateFile's events array. */
+/** Extract progress events (agent→page) from an events array. */
 export function extractProgressEvents(events: StateEvent[]): ProgressPayload[] {
   return events
     .filter((e) => e.dir === "agent→page" && e.type === "progress")
     .map((e) => e.payload as ProgressPayload);
 }
 
-/** Extract agent_log events (agent→page) from a StateFile's events array. */
+/** Extract agent_log events (agent→page) from an events array. */
 export function extractAgentLogEvents(events: StateEvent[]): AgentLogPayload[] {
   return events
     .filter((e) => e.dir === "agent→page" && e.type === "agent_log")

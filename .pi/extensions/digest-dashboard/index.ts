@@ -195,7 +195,7 @@ export async function startDashboard(
     listenerHandle = undefined;
   }
 
-  // Start the server in-process — no spawn, no writePid, no waitForServerUrl.
+  // Start the server in-process — no spawn, no waitForServerUrl.
   // startServer no longer needs dashboardPath/statePath (in-memory backing).
   let started;
   try {

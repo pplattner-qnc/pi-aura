@@ -4,12 +4,11 @@
 // appends in-memory via pushEvent. No file reads or writes.
 
 import { createServer, type Server, type ServerResponse } from "node:http";
-import { readFileSync, existsSync, rmSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { exec } from "node:child_process";
 import { platform } from "node:process";
 import { fileURLToPath } from "node:url";
-import os from "node:os";
 import type { StateEvent } from "./state.ts";
 import {
   getCurrentDigest,
@@ -107,14 +106,6 @@ export function openBrowser(url: string): void {
       console.error("openBrowser failed:", err.message);
     }
   });
-}
-
-function defaultAuraPaths(): { statePath: string; serverUrlPath: string } {
-  const auraDir = path.join(os.homedir(), ".pi", "aura");
-  return {
-    statePath: path.join(auraDir, "state.json"),
-    serverUrlPath: path.join(auraDir, "server-url.json"),
-  };
 }
 
 export async function startServer(opts: StartServerOptions = {}): Promise<DigestServer> {
@@ -225,45 +216,3 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Digest
   });
 }
 
-// When this module is run directly (as the detached server entry), start the
-// server using ~/.pi/aura paths or env overrides.
-const modulePath = fileURLToPath(import.meta.url);
-const invokedPath = process.argv[1];
-if (invokedPath && path.resolve(invokedPath) === path.resolve(modulePath)) {
-  const defaults = defaultAuraPaths();
-  const serverUrlPath = process.env.DASHBOARD_SERVER_URL_PATH ?? defaults.serverUrlPath;
-  const statePath = process.env.DASHBOARD_STATE_PATH ?? defaults.statePath;
-
-  // Self-cleanup: delete the server-url.json (+ the state.json the parent
-  // wrote) when the server dies, so a killed/crashed server leaves no stale
-  // URL for the browser to hit on reload. Covers SIGTERM (graceful teardown
-  // from the parent), SIGINT (Ctrl-C), and unexpected exit. Best-effort:
-  // a hard SIGKILL or host reboot can't run this, but the parent's
-  // teardownDashboard is the backstop for those.
-  let shuttingDown = false;
-  const cleanup = (): void => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    for (const f of [serverUrlPath, statePath]) {
-      try {
-        if (existsSync(f)) rmSync(f, { force: true });
-      } catch {
-        // ignore — best-effort
-      }
-    }
-  };
-  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
-    process.on(sig, () => {
-      cleanup();
-      process.exit(0);
-    });
-  }
-  process.on("exit", cleanup);
-  process.on("beforeExit", cleanup);
-
-  startServer().catch((err) => {
-    console.error("Failed to start digest-dashboard server:", err);
-    cleanup();
-    process.exit(1);
-  });
-}

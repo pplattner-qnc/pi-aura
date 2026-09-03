@@ -176,7 +176,7 @@ describe("start-dashboard (in-process)", () => {
 
     await startDashboard(pi, ctx);
 
-    // state.json may or may not exist (no writePid is called), but if it
+    // state.json may or may not exist (no pid is written), but if it
     // does, it must not contain a pid.
     if (existsSync(statePath)) {
       const state = JSON.parse(
