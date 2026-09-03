@@ -27,10 +27,12 @@ vars:
   SHARED_DIR: packages/shared
   DIGEST_DIST: skills/core/aura-digest/dist
   AURA_DIST: skills/core/aura/dist
-  # The two bundled entry points build produces; verified to exist after build.
+  # The bundled entry point build produces; verified to exist after build.
+  # (The aura-digest CLI bundle was deleted — digest tools now run
+  # in-process; only the aura skill's aura.mjs bundle remains.)
   ENTRY_OUTS:
     sh: |
-      echo "{{.DIGEST_DIST}}/aura-digest.mjs {{.AURA_DIST}}/aura.mjs"
+      echo "{{.AURA_DIST}}/aura.mjs"
 
 tasks:
   # Default: install build deps, then typecheck + bundle + verify.
