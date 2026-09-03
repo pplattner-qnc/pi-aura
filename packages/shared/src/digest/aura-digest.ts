@@ -130,13 +130,26 @@ function fmtPct(pct: number | null): string {
   return `${pct}%`;
 }
 
-function fail(msg: string, usage?: string, code = 2): never {
-  console.error(msg);
-  if (usage) console.error(usage);
-  process.exit(code);
+/** Error subclass thrown by fail() instead of process.exit-ing. The
+ *  CLI shim catches this, prints the message (+ usage if present), and
+ *  exits with the code. This keeps the shared core side-effect-free for
+ *  in-process callers (the extension's fetchAction call). */
+export class FailError extends Error {
+  readonly code: number;
+  readonly usage: string | undefined;
+  constructor(msg: string, usage?: string, code = 2) {
+    super(msg);
+    this.name = "FailError";
+    this.usage = usage;
+    this.code = code;
+  }
 }
 
-const USAGE = `Usage:
+function fail(msg: string, usage?: string, code = 2): never {
+  throw new FailError(msg, usage, code);
+}
+
+export const USAGE = `Usage:
   node aura.mjs fetch                 create temp dir, fetch Aura data (+ verification), print path
   node aura.mjs render <dir> [out]    render <dir>/digest.json to markdown (stdout or <out>)
   node aura.mjs cleanup <dir>         delete <dir>
@@ -239,7 +252,7 @@ async function fetchNotifications(
   return { since, older };
 }
 
-async function fetchAction(): Promise<void> {
+export async function fetchAction(): Promise<void> {
   const outDir = join(tmpdir(), `aura-morning-${randomBytes(6).toString("hex")}`);
   mkdirSync(outDir, { recursive: true });
 
@@ -1186,7 +1199,7 @@ function render(d: Digest): string {
   return sections.join("\n") + "\n";
 }
 
-function renderAction(): void {
+export function renderAction(): void {
   const dir = process.argv[3];
   const outPath = process.argv[4];
   if (!dir) fail("render: missing <dir> argument", USAGE);
@@ -1211,7 +1224,7 @@ function renderAction(): void {
 // cleanup
 // ===========================================================================
 
-function cleanupAction(): void {
+export function cleanupAction(): void {
   const dir = process.argv[3];
   if (!dir) fail("cleanup: missing <dir> argument", USAGE);
   if (!existsSync(dir)) fail(`cleanup: ${dir} not found`);
@@ -1233,7 +1246,7 @@ function loadLastDigest(): LastDigestStore | null {
   }
 }
 
-function saveAction(): void {
+export function saveAction(): void {
   const dir = process.argv[3];
   if (!dir) fail("save: missing <dir> argument", USAGE);
   const digestPath = join(dir, "digest.json");
@@ -1318,7 +1331,7 @@ function computeDiff(prev: Digest, cur: Digest): DigestDiff {
   };
 }
 
-function diffAction(): void {
+export function diffAction(): void {
   const dir = process.argv[3];
   if (!dir) fail("diff: missing <dir> argument", USAGE);
   const curPath = join(dir, "digest.json");
@@ -1334,49 +1347,10 @@ function diffAction(): void {
   process.stdout.write(JSON.stringify(diff, null, 2) + "\n");
 }
 
-function lastAction(): void {
+export function lastAction(): void {
   const last = loadLastDigest();
   if (!last) {
-    console.error(`no last digest found at ${LAST_DIGEST_PATH}`);
-    process.exit(1);
+    throw new FailError(`no last digest found at ${LAST_DIGEST_PATH}`, undefined, 1);
   }
   process.stdout.write(JSON.stringify(last, null, 2) + "\n");
 }
-
-// ===========================================================================
-// dispatch
-// ===========================================================================
-
-async function main(): Promise<void> {
-  const action = process.argv[2];
-  switch (action) {
-    case "fetch":
-      await fetchAction();
-      return;
-    case "render":
-      renderAction();
-      return;
-    case "cleanup":
-      cleanupAction();
-      return;
-    case "save":
-      saveAction();
-      return;
-    case "diff":
-      diffAction();
-      return;
-    case "last":
-      lastAction();
-      return;
-    default:
-      fail(
-        action ? `unknown action: ${action}` : "missing action",
-        USAGE
-      );
-  }
-}
-
-main().catch((e: unknown) => {
-  console.error("aura failed:", e instanceof Error ? e.message : String(e));
-  process.exit(1);
-});
