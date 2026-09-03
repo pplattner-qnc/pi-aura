@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { readState, writePid } from "./state.ts";
 import { startListener, type ListenerHandle } from "./listener.ts";
 import { openBrowser } from "./server.ts";
+import { readDashboardUrl, joinUrl } from "@pi-aura/shared/digest/progress-emitter";
 
 export interface TeardownResult {
   ok: boolean;
@@ -382,29 +383,6 @@ const DIGEST_TOOLS: readonly string[] = [
   "digest-save",
   "digest-log",
 ];
-
-// Read the dashboard server URL from ~/.pi/aura/server-url.json. Returns null if
-// the file is absent or malformed — the caller treats null as "dashboard is
-// down, skip the log POST." Mirrors scripts/src/progress-emitter.ts
-// readDashboardUrl by design (a cross-project import is blocked by this
-// extension's tsconfig rootDir — see TS6059).
-function readDashboardUrl(serverUrlPath: string = defaultAuraPaths().serverUrlPath): string | null {
-  if (!existsSync(serverUrlPath)) return null;
-  try {
-    const raw = readFileSync(serverUrlPath, "utf-8");
-    const parsed = JSON.parse(raw) as { url?: string };
-    if (typeof parsed.url === "string" && parsed.url.length > 0) return parsed.url;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function joinUrl(base: string, p: string): string {
-  const b = base.endsWith("/") ? base.slice(0, -1) : base;
-  const pp = p.startsWith("/") ? p : `/${p}`;
-  return `${b}${pp}`;
-}
 
 export async function digestCommandHandler(
   pi: ExtensionAPI,
