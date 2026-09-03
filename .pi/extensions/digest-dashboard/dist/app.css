@@ -1763,29 +1763,6 @@
       display: inline-flex;
     }
 
-    .stat {
-      grid-template-columns: repeat(1, 1fr);
-      column-gap: 1rem;
-      width: 100%;
-      padding-block: 1rem;
-      padding-inline: 1.5rem;
-      display: inline-grid;
-    }
-
-    .stat:not(:last-child) {
-      border-inline-end: var(--border) dashed currentColor;
-    }
-
-    @supports (color: color-mix(in lab, red, red)) {
-      .stat:not(:last-child) {
-        border-inline-end: var(--border) dashed color-mix(in oklab, currentColor 10%, #0000);
-      }
-    }
-
-    .stat:not(:last-child) {
-      border-block-end: none;
-    }
-
     .link {
       cursor: pointer;
       text-decoration-line: underline;
@@ -2251,31 +2228,6 @@
 
     .stack.stack-end > :first-child {
       grid-area: 1 / 1 / 6 / 4;
-    }
-
-    .stats-horizontal .stat:not(:last-child) {
-      border-inline-end: var(--border) dashed currentColor;
-    }
-
-    @supports (color: color-mix(in lab, red, red)) {
-      .stats-horizontal .stat:not(:last-child) {
-        border-inline-end: var(--border) dashed color-mix(in oklab, currentColor 10%, #0000);
-      }
-    }
-
-    .stats-horizontal .stat:not(:last-child) {
-      border-block-end: none;
-    }
-
-    .stats-vertical .stat:not(:last-child) {
-      border-inline-end: none;
-      border-block-end: var(--border) dashed currentColor;
-    }
-
-    @supports (color: color-mix(in lab, red, red)) {
-      .stats-vertical .stat:not(:last-child) {
-        border-block-end: var(--border) dashed color-mix(in oklab, currentColor 10%, #0000);
-      }
     }
 
     .loading-sm {
