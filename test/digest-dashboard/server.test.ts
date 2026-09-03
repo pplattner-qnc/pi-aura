@@ -1,5 +1,5 @@
 // Unit tests for digest-dashboard server.ts.
-// Uses a temp HOME injected as dashboardPath/statePath/serverUrlPath.
+// Uses a temp HOME injected as dashboardPath/statePath.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, appendFileSync } from "node:fs";
@@ -68,14 +68,12 @@ describe("digest-dashboard server", () => {
   let tmpDir: string;
   let dashboardPath: string;
   let statePath: string;
-  let serverUrlPath: string;
   let server: Awaited<ReturnType<typeof startServer>>;
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(path.join(os.tmpdir(), "digest-dashboard-server-"));
     dashboardPath = path.join(tmpDir, "digest.json");
     statePath = path.join(tmpDir, "state.json");
-    serverUrlPath = path.join(tmpDir, "server-url.json");
   });
 
   afterEach(async () => {
@@ -87,7 +85,6 @@ describe("digest-dashboard server", () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: false,
     };
     server = await startServer(opts);
@@ -109,7 +106,6 @@ describe("digest-dashboard server", () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: false,
     };
     server = await startServer(opts);
@@ -124,7 +120,6 @@ describe("digest-dashboard server", () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: false,
     };
     server = await startServer(opts);
@@ -133,19 +128,17 @@ describe("digest-dashboard server", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("writes server-url.json on listen", async () => {
+  it("does not write server-url.json on listen", async () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: false,
     };
     server = await startServer(opts);
 
-    expect(existsSync(serverUrlPath)).toBe(true);
-    const payload = JSON.parse(readFileSync(serverUrlPath, "utf-8"));
-    expect(payload.url).toBe(server.url);
-    expect(payload.pid).toBe(process.pid);
+    // No server-url.json should be written — the in-process caller has the
+    // URL from the returned handle.
+    expect(existsSync(path.join(tmpDir, "server-url.json"))).toBe(false);
   });
 
   it("emits SSE change events when digest.json changes", async () => {
@@ -154,7 +147,6 @@ describe("digest-dashboard server", () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: false,
     };
     server = await startServer(opts);
@@ -189,7 +181,6 @@ describe("digest-dashboard server", () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: false,
     };
     server = await startServer(opts);
@@ -227,7 +218,6 @@ describe("digest-dashboard server", () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: false,
     };
     server = await startServer(opts);
@@ -241,7 +231,6 @@ describe("digest-dashboard server", () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: false,
     };
     server = await startServer(opts);
@@ -273,7 +262,6 @@ describe("digest-dashboard server", () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: true,
       browserOpener: (url) => opened.push(url),
     };
@@ -286,7 +274,6 @@ describe("digest-dashboard server", () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: false,
     };
     server = await startServer(opts);
@@ -326,7 +313,6 @@ describe("digest-dashboard server", () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: false,
     };
     server = await startServer(opts);
@@ -389,7 +375,6 @@ describe("digest-dashboard server", () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: false,
     };
     server = await startServer(opts);
@@ -441,7 +426,6 @@ describe("digest-dashboard server", () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: false,
     };
     server = await startServer(opts);
@@ -476,7 +460,6 @@ describe("digest-dashboard server", () => {
     const opts: StartServerOptions = {
       dashboardPath,
       statePath,
-      serverUrlPath,
       openBrowser: false,
     };
     server = await startServer(opts);

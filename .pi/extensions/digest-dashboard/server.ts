@@ -4,7 +4,7 @@
 
 import { createServer, type Server } from "node:http";
 import { readFile, stat } from "node:fs/promises";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { readFileSync, existsSync, rmSync } from "node:fs";
 import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { exec } from "node:child_process";
@@ -24,7 +24,6 @@ export interface DigestServer {
 export interface StartServerOptions {
   dashboardPath: string;
   statePath: string;
-  serverUrlPath: string;
   openBrowser?: boolean;
   browserOpener?: (url: string) => void;
 }
@@ -247,12 +246,6 @@ export async function startServer(opts: StartServerOptions): Promise<DigestServe
       const port = address.port;
       const url = `http://127.0.0.1:${port}/`;
 
-      // Record the URL + PID so the spawning parent can find us.
-      const serverUrlPayload = { url, pid: process.pid };
-      mkdirSync(path.dirname(opts.serverUrlPath), { recursive: true });
-      writeFileSync(opts.serverUrlPath, JSON.stringify(serverUrlPayload, null, 2), "utf-8");
-      console.log(url);
-
       const done = async (): Promise<void> => {
         for (const w of watchers.slice()) {
           w.close();
@@ -323,7 +316,6 @@ if (invokedPath && path.resolve(invokedPath) === path.resolve(modulePath)) {
   startServer({
     dashboardPath: process.env.DASHBOARD_DIGEST_PATH ?? defaults.dashboardPath,
     statePath,
-    serverUrlPath,
   }).catch((err) => {
     console.error("Failed to start digest-dashboard server:", err);
     cleanup();

@@ -1,2 +1,2 @@
-task: core-move
+task: in-process-server
 slice: None
