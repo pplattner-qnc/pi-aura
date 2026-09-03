@@ -20014,7 +20014,7 @@ async function buildAtlassianClient(serverName = "atlassian") {
   }
 }
 
-// src/scheduler.ts
+// ../packages/shared/src/digest/scheduler.ts
 function keyOf(input) {
   return canonicalize(input);
 }
@@ -20251,7 +20251,7 @@ async function runTasks(root, kinds, init, opts = {}) {
   return { state, capped, taskCount, runWarnings, maxTasks };
 }
 
-// src/settings.ts
+// ../packages/shared/src/digest/settings.ts
 import { readFileSync as readFileSync3, existsSync as existsSync3 } from "node:fs";
 import { homedir as homedir4 } from "node:os";
 import { join as join4 } from "node:path";
@@ -20278,7 +20278,7 @@ function loadSettings(settingsPath = SETTINGS_PATH2) {
   }
 }
 
-// src/build-actions.ts
+// ../packages/shared/src/digest/build-actions.ts
 function buildActions(digest) {
   const overdue = digest.attention?.overdue ?? [];
   const waitingOnYou = digest.attention?.waiting_on_you ?? [];
@@ -20381,7 +20381,7 @@ function buildQueueAction(row) {
   };
 }
 
-// src/write-dashboard-digest.ts
+// ../packages/shared/src/digest/write-dashboard-digest.ts
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname as dirname2 } from "node:path";
 function writeDashboardDigest(digest, dashboardPath) {
@@ -20389,7 +20389,7 @@ function writeDashboardDigest(digest, dashboardPath) {
   writeFileSync(dashboardPath, JSON.stringify(digest, null, 2) + "\n", "utf8");
 }
 
-// src/progress-emitter.ts
+// ../packages/shared/src/digest/progress-emitter.ts
 import { existsSync as existsSync4, readFileSync as readFileSync4 } from "node:fs";
 import { join as join5 } from "node:path";
 import { homedir as homedir5 } from "node:os";

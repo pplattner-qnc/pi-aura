@@ -6,7 +6,7 @@
  */
 
 import assert from "node:assert/strict";
-import type { Digest } from "./types.ts";
+import type { Digest } from "@pi-aura/shared/digest/types";
 
 const minimalDigest: Digest = {
   date: "2026-01-01",

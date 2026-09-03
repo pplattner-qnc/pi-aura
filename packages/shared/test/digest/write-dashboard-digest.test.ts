@@ -9,8 +9,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, mkdirSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeDashboardDigest } from "./write-dashboard-digest.ts";
-import type { Digest } from "./types.ts";
+import { writeDashboardDigest } from "../../src/digest/write-dashboard-digest.js";
+import type { Digest } from "../../src/digest/types.js";
 
 function makeDigest(actionsLength = 2): Digest {
   return {
@@ -64,7 +64,7 @@ function makeDigest(actionsLength = 2): Digest {
   };
 }
 
-let baseDir: string;
+let baseDir: string | undefined;
 
 try {
   baseDir = mkdtempSync(join(tmpdir(), "dashboard-digest-test-"));
