@@ -145,3 +145,24 @@ _The land-worker appends a per-slice note here as each slice lands._
 - Accepted regression: `/api/digest` returns 404 until task 3 calls
   `setCurrentDigest`. `digest-fetch` still writes `~/.pi/aura/digest.json` on
   disk, but `/api/digest` reads the in-memory store, not that file.
+
+### Slice 3 — dead-code-and-bundle-sweep (landed — LAST slice)
+
+- Deleted `dist/server.mjs` + extension `esbuild.config.mjs` (the server
+  bundle config); `npm run build` is now vite-only (`vite build`) producing
+  `dist/app.js` + `dist/app.css` only. Extension loads `./index.ts` from source.
+- Removed root `.gitignore` `server.mjs` keep-exception line.
+- `server.ts`: self-run entry block removed (process.argv[1] check, signal/exit
+  cleanup, `defaultAuraPaths`); removed now-unused imports (`rmSync`, `os`).
+  Now a pure library module exporting `startServer` + `openBrowser`.
+- `state.ts`: removed `writePid`/`clearPid`/`readState`/file `appendEvent`/
+  `EMPTY_STATE`/`StateFile`/`writeQueues`/`ensureDir`/`enqueue`; removed now-unused
+  imports (`mkdirSync`/`readFileSync`/`writeFileSync`/`existsSync`/`path`). Kept
+  `StateEvent`/`AckPayload`/`UpdateViewPayload` types (now a pure type module).
+- `progressTree.ts` confirmed NOT dead (imported by `Digest.svelte`); only its
+  comments referencing `StateFile` were updated to "an events array". `store.ts`
+  comment updated. `index.ts` comment updated (no `writePid` reference).
+- Test comments updated in `start.test.ts`, `log-tool.test.ts`,
+  `DigestTree.test.ts` (local `stateFile()` helper kept — not an import).
+- New `test/digest-dashboard/dead-code-sweep.test.ts` (20 structural tests).
+- All 3 slices of in-process-server now landed; task ready for finalize.
