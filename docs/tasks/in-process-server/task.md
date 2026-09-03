@@ -6,7 +6,7 @@ title: Replace the detached dashboard server child with an in-process http.Serve
 map: in-process-aura-digest
 status: ready
 blocked_by: [core-move]
-slices: []
+slices: [1-lifecycle-in-process, 2-backing-in-memory, 3-dead-code-and-bundle-sweep]
 ---
 
 ## User-visible outcome
@@ -64,3 +64,7 @@ in-memory server and serves whatever it holds.)
 - Likely: (a) in-process server + module-scope handle + start/stop; (b)
   in-memory digest/events backing + `/api` + SSE; (c) delete discovery
   files + dead-code sweep of `waitForServerUrl`/`terminateProcess`.
+
+## Implementation notes
+
+_The land-worker appends a per-slice note here as each slice lands._
