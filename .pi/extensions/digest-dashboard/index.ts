@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { startListener, type ListenerHandle } from "./listener.ts";
 import { startServer, openBrowser } from "./server.ts";
 import { joinUrl } from "@pi-aura/shared/digest/progress-emitter";
+import { resetStore } from "./store.ts";
 
 export interface TeardownResult {
   ok: boolean;
@@ -160,7 +161,7 @@ export async function teardownDashboard(
     return { ok: true, message: "No dashboard running." };
   }
 
-  // Delete state.json (events still file-backed this slice).
+  // Delete state.json (best-effort — may linger from a pre-slice-2 session).
   try {
     if (existsSync(statePath)) {
       rmSync(statePath, { force: true });
@@ -168,6 +169,9 @@ export async function teardownDashboard(
   } catch (err) {
     console.error("teardown: failed to delete", statePath, err);
   }
+
+  // Reset the in-memory store so a fresh start is clean (no stale digest/events).
+  resetStore();
 
   return { ok: true, message: "Digest dashboard stopped." };
 }
@@ -191,14 +195,11 @@ export async function startDashboard(
     listenerHandle = undefined;
   }
 
-  const { dashboardPath, statePath } = defaultAuraPaths();
-
   // Start the server in-process — no spawn, no writePid, no waitForServerUrl.
+  // startServer no longer needs dashboardPath/statePath (in-memory backing).
   let started;
   try {
     started = await startServer({
-      dashboardPath,
-      statePath,
       openBrowser: false,
     });
   } catch (err) {
@@ -222,7 +223,7 @@ export async function startDashboard(
   }
 
   try {
-    listenerHandle = startListener({ pi, statePath });
+    listenerHandle = startListener({ pi });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {

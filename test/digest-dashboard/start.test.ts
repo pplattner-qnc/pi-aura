@@ -19,7 +19,7 @@ import {
   getDashboardUrl,
   default as installExtension,
 } from "../../.pi/extensions/digest-dashboard/index.ts";
-import { appendEvent } from "../../.pi/extensions/digest-dashboard/state.ts";
+import { pushEvent } from "../../.pi/extensions/digest-dashboard/store.ts";
 
 interface SentMessage {
   message: { customType: string; content: string; details: unknown; display?: boolean };
@@ -238,8 +238,8 @@ describe("start-dashboard (in-process)", () => {
 
     await startDashboard(pi, ctx);
 
-    appendEvent(statePath, {
-      id: 1,
+    pushEvent({
+      id: 0,
       ts: new Date().toISOString(),
       dir: "page→agent",
       type: "action_click",

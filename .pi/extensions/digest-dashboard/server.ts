@@ -1,18 +1,21 @@
-// Detached dumb file server for the digest dashboard.
-// Built to dist/server.mjs by esbuild.config.mjs and run as a detached Node
-// process by index.ts (slice 6).
+// In-process HTTP server for the digest dashboard.
+// The backing store is in-memory (store.ts): /api/digest serves the
+// module-scope currentDigest, /events SSE fans out pushEvent, /api/state POST
+// appends in-memory via pushEvent. No file reads or writes.
 
-import { createServer, type Server } from "node:http";
-import { readFile, stat } from "node:fs/promises";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import { readFileSync, existsSync, rmSync } from "node:fs";
-import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { exec } from "node:child_process";
 import { platform } from "node:process";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import { appendEvent } from "./state.ts";
-import { readState, type StateEvent } from "./state.ts";
+import type { StateEvent } from "./state.ts";
+import {
+  getCurrentDigest,
+  pushEvent,
+  registerSseClient,
+} from "./store.ts";
 
 export interface DigestServer {
   port: number;
@@ -22,8 +25,6 @@ export interface DigestServer {
 }
 
 export interface StartServerOptions {
-  dashboardPath: string;
-  statePath: string;
   openBrowser?: boolean;
   browserOpener?: (url: string) => void;
 }
@@ -108,18 +109,15 @@ export function openBrowser(url: string): void {
   });
 }
 
-function defaultAuraPaths(): { dashboardPath: string; statePath: string; serverUrlPath: string } {
+function defaultAuraPaths(): { statePath: string; serverUrlPath: string } {
   const auraDir = path.join(os.homedir(), ".pi", "aura");
   return {
-    dashboardPath: path.join(auraDir, "digest.json"),
     statePath: path.join(auraDir, "state.json"),
     serverUrlPath: path.join(auraDir, "server-url.json"),
   };
 }
 
-export async function startServer(opts: StartServerOptions): Promise<DigestServer> {
-  const watchers: FSWatcher[] = [];
-
+export async function startServer(opts: StartServerOptions = {}): Promise<DigestServer> {
   const server = createServer(async (req, res) => {
     try {
       if (req.url === "/" && req.method === "GET") {
@@ -138,20 +136,15 @@ export async function startServer(opts: StartServerOptions): Promise<DigestServe
       }
 
       if (req.url === "/api/digest" && req.method === "GET") {
-        try {
-          const s = await stat(opts.dashboardPath);
-          if (!s.isFile()) {
-            throw new Error("not a file");
-          }
-          const json = await readFile(opts.dashboardPath, "utf-8");
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(json);
-          return;
-        } catch {
+        const digest = getCurrentDigest();
+        if (digest === null) {
           res.writeHead(404, { "Content-Type": "text/plain" });
           res.end("Not found");
           return;
         }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(digest));
+        return;
       }
 
       if (req.url === "/events" && req.method === "GET") {
@@ -161,50 +154,9 @@ export async function startServer(opts: StartServerOptions): Promise<DigestServe
           "Connection": "keep-alive",
         });
 
-        const watcher = watch(opts.dashboardPath, (eventType) => {
-          if (eventType === "change") {
-            res.write("event: change\ndata: {}\n\n");
-          }
-        });
-        watchers.push(watcher);
-
-        // Watch state.json for agent→page events (progress, agent_log). On
-        // change, send the last event's id + type so the browser can
-        // refetch state.json. The statePath file may not exist yet when the
-        // SSE connects; watch lazily once it appears.
-        let stateWatcher: FSWatcher | undefined;
-        const openStateWatcher = (): void => {
-          if (stateWatcher) return;
-          try {
-            stateWatcher = watch(opts.statePath, (eventType) => {
-              if (eventType !== "change") return;
-              let latest: StateEvent | undefined;
-              try {
-                const state = readState(opts.statePath);
-                latest = state.events[state.events.length - 1];
-              } catch {
-                return;
-              }
-              if (latest) {
-                res.write(`event: state-change\ndata: {"id":${latest.id},"type":"${latest.type}"}\n\n`);
-              }
-            });
-            watchers.push(stateWatcher);
-          } catch {
-            // state.json may not exist yet; the next change will retry.
-          }
-        };
-        openStateWatcher();
-
+        const unregister = registerSseClient(res as ServerResponse);
         req.on("close", () => {
-          watcher.close();
-          if (stateWatcher) {
-            stateWatcher.close();
-            const idx = watchers.indexOf(stateWatcher);
-            if (idx !== -1) watchers.splice(idx, 1);
-          }
-          const idx = watchers.indexOf(watcher);
-          if (idx !== -1) watchers.splice(idx, 1);
+          unregister();
         });
         return;
       }
@@ -220,7 +172,7 @@ export async function startServer(opts: StartServerOptions): Promise<DigestServe
           return;
         }
 
-        await appendEvent(opts.statePath, parsed as StateEvent);
+        pushEvent(parsed as StateEvent);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true }));
         return;
@@ -247,10 +199,6 @@ export async function startServer(opts: StartServerOptions): Promise<DigestServe
       const url = `http://127.0.0.1:${port}/`;
 
       const done = async (): Promise<void> => {
-        for (const w of watchers.slice()) {
-          w.close();
-        }
-        watchers.length = 0;
         return new Promise((res) => {
           server.close((err) => {
             if (err) {
@@ -313,10 +261,7 @@ if (invokedPath && path.resolve(invokedPath) === path.resolve(modulePath)) {
   process.on("exit", cleanup);
   process.on("beforeExit", cleanup);
 
-  startServer({
-    dashboardPath: process.env.DASHBOARD_DIGEST_PATH ?? defaults.dashboardPath,
-    statePath,
-  }).catch((err) => {
+  startServer().catch((err) => {
     console.error("Failed to start digest-dashboard server:", err);
     cleanup();
     process.exit(1);
