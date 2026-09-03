@@ -63,4 +63,6 @@ server serves it); `~/.pi/aura/digest.json` is **not** written.
 
 ## Implementation notes
 
-_The land-worker appends a per-slice note here as each slice lands._
+### slice 1 — fetchAction-returns-object
+
+`fetchAction` now returns `{digest, report, raw}` and takes `onProgress?`/`auraClient?`; it writes no files. `DASHBOARD_DIGEST_PATH` is exported. `createProgressEmitter`/`readDashboardUrl` moved to the CLI shim (still exported). The shim writes the temp-dir files + `~/.pi/aura/digest.json` + stdout, byte-identical to before. `meta.raw_path`/`report_path`/`report.raw_path` are left as empty strings by the pure function and filled in by the shim after it creates the temp dir. New `fetchAction.test.ts` injects a mocked `auraClient` and asserts no files are written. No CLI behavior change.
