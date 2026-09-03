@@ -3959,7 +3959,7 @@
   var root_7 = /* @__PURE__ */ from_html(`<ul class="flex flex-col gap-1"></ul>`);
   var root_8 = /* @__PURE__ */ from_html(`<li class="text-base-content/80" data-log-line=""> </li>`);
   var root_9 = /* @__PURE__ */ from_html(`<section class="shrink-0 max-h-[35%] overflow-auto border-t border-base-300 pt-3" data-agent-log=""><h2 class="text-sm font-semibold uppercase tracking-wide text-base-content/70 mb-2">Agent log</h2> <ul class="space-y-0.5 text-sm"></ul></section>`);
-  var root_10 = /* @__PURE__ */ from_html(`<div class="h-screen overflow-hidden bg-base-100 text-base-content p-4 sm:p-6"><div class="h-full max-w-3xl mx-auto flex flex-col gap-4"><header class="shrink-0"><h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Fetching digest…</h1></header> <section class="flex-1 min-h-0 overflow-auto" data-progress-tree=""><!></section> <!></div></div>`);
+  var root_10 = /* @__PURE__ */ from_html(`<div class="h-screen overflow-hidden bg-base-100 text-base-content p-4 sm:p-6"><div class="h-full max-w-3xl mx-auto flex flex-col gap-4"><header class="shrink-0"><h1 class="text-2xl sm:text-3xl font-bold tracking-tight"><!></h1></header> <section class="flex-1 min-h-0 overflow-auto" data-progress-tree=""><!></section> <!></div></div>`);
   var root_11 = /* @__PURE__ */ from_html(`<p class="text-error"> </p>`);
   var root_12 = /* @__PURE__ */ from_html(`<div class="pointer-events-auto alert alert-warning rounded-2xl shadow-lg max-w-sm w-full flex items-start gap-3"><span class="text-sm leading-snug flex-1 min-w-0"> </span> <button type="button" class="btn btn-ghost btn-xs shrink-0" aria-label="Dismiss warning"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg></button></div>`);
   var root_13 = /* @__PURE__ */ from_html(`<div class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>`);
@@ -4106,14 +4106,15 @@
           }
           set(fetchMode, true);
         }
-        maybeTransitionToDigest();
+        const refineDone = events.some((e) => e.dir === "agent→page" && e.type === "refine_done");
+        if (refineDone) {
+          await transitionToDigest();
+        }
       } catch {
       }
     }
-    async function maybeTransitionToDigest() {
+    async function transitionToDigest() {
       if (!get(fetchMode)) return;
-      const tree = buildProgressTree(get(progressNodes));
-      if (!isRootDone(tree)) return;
       try {
         const res = await fetch("/api/digest");
         if (res.ok) {
@@ -4258,7 +4259,7 @@
         var p = root();
         append($$anchor2, p);
       };
-      var consequent_6 = ($$anchor2) => {
+      var consequent_7 = ($$anchor2) => {
         const treeNode = ($$anchor3, node = noop) => {
           var li = root_5();
           var div = child(li);
@@ -4308,117 +4309,135 @@
         const tree = /* @__PURE__ */ user_derived(() => buildProgressTree(get(progressNodes)));
         var div_1 = root_10();
         var div_2 = child(div_1);
-        var section = sibling(child(div_2), 2);
-        var node_4 = child(section);
+        var header = child(div_2);
+        var h1 = child(header);
+        var node_4 = child(h1);
         {
           var consequent_4 = ($$anchor3) => {
+            var text_1 = text("Refining…");
+            append($$anchor3, text_1);
+          };
+          var d_3 = /* @__PURE__ */ user_derived(() => isRootDone(buildProgressTree(get(progressNodes))));
+          var alternate_1 = ($$anchor3) => {
+            var text_2 = text("Fetching digest…");
+            append($$anchor3, text_2);
+          };
+          if_block(node_4, ($$render) => {
+            if (get(d_3)) $$render(consequent_4);
+            else $$render(alternate_1, -1);
+          });
+        }
+        var section = sibling(header, 2);
+        var node_5 = child(section);
+        {
+          var consequent_5 = ($$anchor3) => {
             var p_1 = root_6();
             append($$anchor3, p_1);
           };
-          var alternate_1 = ($$anchor3) => {
+          var alternate_2 = ($$anchor3) => {
             var ul_1 = root_7();
             each(ul_1, 21, () => get(tree), (node) => node.id, ($$anchor4, node) => {
               treeNode($$anchor4, () => get(node));
             });
             append($$anchor3, ul_1);
           };
-          if_block(node_4, ($$render) => {
-            if (get(tree).length === 0) $$render(consequent_4);
-            else $$render(alternate_1, -1);
+          if_block(node_5, ($$render) => {
+            if (get(tree).length === 0) $$render(consequent_5);
+            else $$render(alternate_2, -1);
           });
         }
-        var node_5 = sibling(section, 2);
+        var node_6 = sibling(section, 2);
         {
-          var consequent_5 = ($$anchor3) => {
+          var consequent_6 = ($$anchor3) => {
             var section_1 = root_9();
             var ul_2 = sibling(child(section_1), 2);
             each(ul_2, 21, () => get(agentLogLines), index, ($$anchor4, line) => {
               var li_1 = root_8();
-              var text_1 = child(li_1);
-              template_effect(() => set_text(text_1, get(line)));
+              var text_3 = child(li_1);
+              template_effect(() => set_text(text_3, get(line)));
               append($$anchor4, li_1);
             });
             append($$anchor3, section_1);
           };
-          if_block(node_5, ($$render) => {
-            if (get(agentLogLines).length > 0) $$render(consequent_5);
+          if_block(node_6, ($$render) => {
+            if (get(agentLogLines).length > 0) $$render(consequent_6);
           });
         }
         append($$anchor2, div_1);
       };
-      var consequent_7 = ($$anchor2) => {
+      var consequent_8 = ($$anchor2) => {
         var p_2 = root_11();
-        var text_2 = child(p_2);
-        template_effect(() => set_text(text_2, `Error: ${get(error) ?? ""}`));
+        var text_4 = child(p_2);
+        template_effect(() => set_text(text_4, `Error: ${get(error) ?? ""}`));
         append($$anchor2, p_2);
       };
-      var consequent_44 = ($$anchor2) => {
+      var consequent_45 = ($$anchor2) => {
         const day = /* @__PURE__ */ user_derived(() => (/* @__PURE__ */ new Date(get(digest).date + "T00:00:00")).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }));
         const staleCorrections = /* @__PURE__ */ user_derived(() => get(digest).corrections.filter((c) => c.stale));
         var div_3 = root_53();
         var div_4 = child(div_3);
-        var header = child(div_4);
-        var h1 = child(header);
-        var text_3 = child(h1);
-        var node_6 = sibling(header, 2);
+        var header_1 = child(div_4);
+        var h1_1 = child(header_1);
+        var text_5 = child(h1_1);
+        var node_7 = sibling(header_1, 2);
         {
-          var consequent_8 = ($$anchor3) => {
+          var consequent_9 = ($$anchor3) => {
             var div_5 = root_13();
             each(div_5, 20, () => get(visibleWarningIndices), (i) => i, ($$anchor4, i) => {
               var div_6 = root_12();
               var span_4 = child(div_6);
-              var text_4 = child(span_4);
+              var text_6 = child(span_4);
               var button = sibling(span_4, 2);
-              template_effect(() => set_text(text_4, get(digest).warnings[i]));
+              template_effect(() => set_text(text_6, get(digest).warnings[i]));
               delegated("click", button, () => set(dismissedWarnings, /* @__PURE__ */ new Set([...get(dismissedWarnings), i]), true));
               append($$anchor4, div_6);
             });
             append($$anchor3, div_5);
           };
-          if_block(node_6, ($$render) => {
-            if (get(visibleWarningIndices).length > 0) $$render(consequent_8);
+          if_block(node_7, ($$render) => {
+            if (get(visibleWarningIndices).length > 0) $$render(consequent_9);
           });
         }
-        var main = sibling(node_6, 2);
+        var main = sibling(node_7, 2);
         var div_7 = child(main);
         var section_2 = child(div_7);
-        var node_7 = sibling(child(section_2), 2);
+        var node_8 = sibling(child(section_2), 2);
         {
-          var consequent_9 = ($$anchor3) => {
+          var consequent_10 = ($$anchor3) => {
             var blockquote = root_14();
-            var text_5 = child(blockquote);
-            template_effect(() => set_text(text_5, get(digest).summary));
+            var text_7 = child(blockquote);
+            template_effect(() => set_text(text_7, get(digest).summary));
             append($$anchor3, blockquote);
           };
-          var alternate_2 = ($$anchor3) => {
+          var alternate_3 = ($$anchor3) => {
             var p_3 = root_15();
             append($$anchor3, p_3);
           };
-          if_block(node_7, ($$render) => {
-            if (get(digest).summary) $$render(consequent_9);
-            else $$render(alternate_2, -1);
+          if_block(node_8, ($$render) => {
+            if (get(digest).summary) $$render(consequent_10);
+            else $$render(alternate_3, -1);
           });
         }
-        var node_8 = sibling(node_7, 2);
+        var node_9 = sibling(node_8, 2);
         {
-          var consequent_10 = ($$anchor3) => {
+          var consequent_11 = ($$anchor3) => {
             var div_8 = root_17();
             var ul_3 = sibling(child(div_8), 2);
             each(ul_3, 21, () => get(staleCorrections), (correction) => correction.artifact_id, ($$anchor4, correction) => {
               var li_2 = root_16();
-              var text_6 = sibling(child(li_2));
-              var span_5 = sibling(text_6);
-              var text_7 = child(span_5);
+              var text_8 = sibling(child(li_2));
+              var span_5 = sibling(text_8);
+              var text_9 = child(span_5);
               template_effect(() => {
-                set_text(text_6, ` ${get(correction).title ?? ""} — `);
-                set_text(text_7, get(correction).note);
+                set_text(text_8, ` ${get(correction).title ?? ""} — `);
+                set_text(text_9, get(correction).note);
               });
               append($$anchor4, li_2);
             });
             append($$anchor3, div_8);
           };
-          if_block(node_8, ($$render) => {
-            if (get(staleCorrections).length > 0) $$render(consequent_10);
+          if_block(node_9, ($$render) => {
+            if (get(staleCorrections).length > 0) $$render(consequent_11);
           });
         }
         var section_3 = sibling(section_2, 2);
@@ -4426,160 +4445,160 @@
         var div_10 = child(div_9);
         var div_11 = sibling(child(div_10), 2);
         var ul_4 = sibling(child(div_11), 2);
-        var node_9 = child(ul_4);
+        var node_10 = child(ul_4);
         {
-          var consequent_11 = ($$anchor3) => {
+          var consequent_12 = ($$anchor3) => {
             var li_3 = root_18();
             append($$anchor3, li_3);
           };
-          var alternate_3 = ($$anchor3) => {
+          var alternate_4 = ($$anchor3) => {
             var fragment_3 = comment();
-            var node_10 = first_child(fragment_3);
-            each(node_10, 17, () => get(digest).attention.overdue, index, ($$anchor4, item) => {
+            var node_11 = first_child(fragment_3);
+            each(node_11, 17, () => get(digest).attention.overdue, index, ($$anchor4, item) => {
               var li_4 = root_20();
-              var node_11 = child(li_4);
-              {
-                var consequent_12 = ($$anchor5) => {
-                  var text_8 = text();
-                  template_effect(() => set_text(text_8, `${get(item).key ?? ""} —`));
-                  append($$anchor5, text_8);
-                };
-                if_block(node_11, ($$render) => {
-                  if (get(item).key) $$render(consequent_12);
-                });
-              }
-              var text_9 = sibling(node_11);
-              var node_12 = sibling(text_9);
+              var node_12 = child(li_4);
               {
                 var consequent_13 = ($$anchor5) => {
-                  var span_6 = root_19();
-                  var text_10 = child(span_6);
-                  template_effect(() => set_text(text_10, `(${get(item).days ?? ""}d)`));
-                  append($$anchor5, span_6);
+                  var text_10 = text();
+                  template_effect(() => set_text(text_10, `${get(item).key ?? ""} —`));
+                  append($$anchor5, text_10);
                 };
                 if_block(node_12, ($$render) => {
-                  if (get(item).days) $$render(consequent_13);
+                  if (get(item).key) $$render(consequent_13);
                 });
               }
-              template_effect(() => set_text(text_9, `${get(item).title ?? ""} `));
+              var text_11 = sibling(node_12);
+              var node_13 = sibling(text_11);
+              {
+                var consequent_14 = ($$anchor5) => {
+                  var span_6 = root_19();
+                  var text_12 = child(span_6);
+                  template_effect(() => set_text(text_12, `(${get(item).days ?? ""}d)`));
+                  append($$anchor5, span_6);
+                };
+                if_block(node_13, ($$render) => {
+                  if (get(item).days) $$render(consequent_14);
+                });
+              }
+              template_effect(() => set_text(text_11, `${get(item).title ?? ""} `));
               append($$anchor4, li_4);
             });
             append($$anchor3, fragment_3);
           };
-          if_block(node_9, ($$render) => {
-            if (get(digest).attention.overdue.length === 0) $$render(consequent_11);
-            else $$render(alternate_3, -1);
+          if_block(node_10, ($$render) => {
+            if (get(digest).attention.overdue.length === 0) $$render(consequent_12);
+            else $$render(alternate_4, -1);
           });
         }
         var div_12 = sibling(div_10, 2);
         var div_13 = sibling(child(div_12), 2);
         var ul_5 = sibling(child(div_13), 2);
-        var node_13 = child(ul_5);
+        var node_14 = child(ul_5);
         {
-          var consequent_14 = ($$anchor3) => {
+          var consequent_15 = ($$anchor3) => {
             var li_5 = root_18();
             append($$anchor3, li_5);
           };
-          var alternate_4 = ($$anchor3) => {
+          var alternate_5 = ($$anchor3) => {
             var fragment_5 = comment();
-            var node_14 = first_child(fragment_5);
-            each(node_14, 17, () => get(digest).attention.waiting_on_you, index, ($$anchor4, item) => {
+            var node_15 = first_child(fragment_5);
+            each(node_15, 17, () => get(digest).attention.waiting_on_you, index, ($$anchor4, item) => {
               var li_6 = root_20();
-              var node_15 = child(li_6);
-              {
-                var consequent_15 = ($$anchor5) => {
-                  var text_11 = text();
-                  template_effect(() => set_text(text_11, `${get(item).key ?? ""} —`));
-                  append($$anchor5, text_11);
-                };
-                if_block(node_15, ($$render) => {
-                  if (get(item).key) $$render(consequent_15);
-                });
-              }
-              var text_12 = sibling(node_15);
-              var node_16 = sibling(text_12);
+              var node_16 = child(li_6);
               {
                 var consequent_16 = ($$anchor5) => {
-                  var span_7 = root_19();
-                  var text_13 = child(span_7);
-                  template_effect(() => set_text(text_13, `(${get(item).days ?? ""}d)`));
-                  append($$anchor5, span_7);
+                  var text_13 = text();
+                  template_effect(() => set_text(text_13, `${get(item).key ?? ""} —`));
+                  append($$anchor5, text_13);
                 };
                 if_block(node_16, ($$render) => {
-                  if (get(item).days) $$render(consequent_16);
+                  if (get(item).key) $$render(consequent_16);
                 });
               }
-              template_effect(() => set_text(text_12, `${get(item).title ?? ""} `));
+              var text_14 = sibling(node_16);
+              var node_17 = sibling(text_14);
+              {
+                var consequent_17 = ($$anchor5) => {
+                  var span_7 = root_19();
+                  var text_15 = child(span_7);
+                  template_effect(() => set_text(text_15, `(${get(item).days ?? ""}d)`));
+                  append($$anchor5, span_7);
+                };
+                if_block(node_17, ($$render) => {
+                  if (get(item).days) $$render(consequent_17);
+                });
+              }
+              template_effect(() => set_text(text_14, `${get(item).title ?? ""} `));
               append($$anchor4, li_6);
             });
             append($$anchor3, fragment_5);
           };
-          if_block(node_13, ($$render) => {
-            if (get(digest).attention.waiting_on_you.length === 0) $$render(consequent_14);
-            else $$render(alternate_4, -1);
+          if_block(node_14, ($$render) => {
+            if (get(digest).attention.waiting_on_you.length === 0) $$render(consequent_15);
+            else $$render(alternate_5, -1);
           });
         }
         var div_14 = sibling(div_12, 2);
         var div_15 = sibling(child(div_14), 2);
         var ul_6 = sibling(child(div_15), 2);
-        var node_17 = child(ul_6);
+        var node_18 = child(ul_6);
         {
-          var consequent_17 = ($$anchor3) => {
+          var consequent_18 = ($$anchor3) => {
             var li_7 = root_18();
             append($$anchor3, li_7);
           };
-          var alternate_5 = ($$anchor3) => {
+          var alternate_6 = ($$anchor3) => {
             var fragment_7 = comment();
-            var node_18 = first_child(fragment_7);
-            each(node_18, 17, () => get(digest).attention.waiting_on_others, index, ($$anchor4, item) => {
+            var node_19 = first_child(fragment_7);
+            each(node_19, 17, () => get(digest).attention.waiting_on_others, index, ($$anchor4, item) => {
               var li_8 = root_20();
-              var node_19 = child(li_8);
-              {
-                var consequent_18 = ($$anchor5) => {
-                  var text_14 = text();
-                  template_effect(() => set_text(text_14, `${get(item).key ?? ""} —`));
-                  append($$anchor5, text_14);
-                };
-                if_block(node_19, ($$render) => {
-                  if (get(item).key) $$render(consequent_18);
-                });
-              }
-              var text_15 = sibling(node_19);
-              var node_20 = sibling(text_15);
+              var node_20 = child(li_8);
               {
                 var consequent_19 = ($$anchor5) => {
-                  var span_8 = root_19();
-                  var text_16 = child(span_8);
-                  template_effect(() => set_text(text_16, `(${get(item).days ?? ""}d)`));
-                  append($$anchor5, span_8);
+                  var text_16 = text();
+                  template_effect(() => set_text(text_16, `${get(item).key ?? ""} —`));
+                  append($$anchor5, text_16);
                 };
                 if_block(node_20, ($$render) => {
-                  if (get(item).days) $$render(consequent_19);
+                  if (get(item).key) $$render(consequent_19);
                 });
               }
-              template_effect(() => set_text(text_15, `${get(item).title ?? ""} `));
+              var text_17 = sibling(node_20);
+              var node_21 = sibling(text_17);
+              {
+                var consequent_20 = ($$anchor5) => {
+                  var span_8 = root_19();
+                  var text_18 = child(span_8);
+                  template_effect(() => set_text(text_18, `(${get(item).days ?? ""}d)`));
+                  append($$anchor5, span_8);
+                };
+                if_block(node_21, ($$render) => {
+                  if (get(item).days) $$render(consequent_20);
+                });
+              }
+              template_effect(() => set_text(text_17, `${get(item).title ?? ""} `));
               append($$anchor4, li_8);
             });
             append($$anchor3, fragment_7);
           };
-          if_block(node_17, ($$render) => {
-            if (get(digest).attention.waiting_on_others.length === 0) $$render(consequent_17);
-            else $$render(alternate_5, -1);
+          if_block(node_18, ($$render) => {
+            if (get(digest).attention.waiting_on_others.length === 0) $$render(consequent_18);
+            else $$render(alternate_6, -1);
           });
         }
         var div_16 = sibling(div_14, 2);
         var div_17 = sibling(child(div_16), 2);
         var ul_7 = sibling(child(div_17), 2);
-        var node_21 = child(ul_7);
+        var node_22 = child(ul_7);
         {
-          var consequent_20 = ($$anchor3) => {
+          var consequent_21 = ($$anchor3) => {
             var li_9 = root_21();
             append($$anchor3, li_9);
           };
-          var alternate_7 = ($$anchor3) => {
+          var alternate_8 = ($$anchor3) => {
             var fragment_9 = comment();
-            var node_22 = first_child(fragment_9);
-            each(node_22, 17, () => get(digest).attention.notifications.since_last_run, index, ($$anchor4, note) => {
+            var node_23 = first_child(fragment_9);
+            each(node_23, 17, () => get(digest).attention.notifications.since_last_run, index, ($$anchor4, note) => {
               const line = /* @__PURE__ */ user_derived(() => notifLine(get(note)));
               const m = /* @__PURE__ */ user_derived(() => notifMeta(get(line)));
               const body = /* @__PURE__ */ user_derived(() => notifBody(get(line)));
@@ -4587,55 +4606,55 @@
               var li_10 = root_24();
               var span_9 = child(li_10);
               var span_10 = child(span_9);
-              var text_17 = child(span_10);
-              var node_23 = sibling(span_9, 2);
+              var text_19 = child(span_10);
+              var node_24 = sibling(span_9, 2);
               {
-                var consequent_21 = ($$anchor5) => {
+                var consequent_22 = ($$anchor5) => {
                   var a_1 = root_22();
-                  var text_18 = child(a_1);
+                  var text_20 = child(a_1);
                   template_effect(() => {
                     set_attribute(a_1, "href", get(url));
-                    set_text(text_18, get(body));
+                    set_text(text_20, get(body));
                   });
                   append($$anchor5, a_1);
                 };
-                var alternate_6 = ($$anchor5) => {
+                var alternate_7 = ($$anchor5) => {
                   var span_11 = root_23();
-                  var text_19 = child(span_11);
-                  template_effect(() => set_text(text_19, get(body)));
+                  var text_21 = child(span_11);
+                  template_effect(() => set_text(text_21, get(body)));
                   append($$anchor5, span_11);
                 };
-                if_block(node_23, ($$render) => {
-                  if (get(url)) $$render(consequent_21);
-                  else $$render(alternate_6, -1);
+                if_block(node_24, ($$render) => {
+                  if (get(url)) $$render(consequent_22);
+                  else $$render(alternate_7, -1);
                 });
               }
               template_effect(() => {
                 set_attribute(span_9, "data-tip", get(m).label);
-                set_text(text_17, get(m).emoji);
+                set_text(text_19, get(m).emoji);
               });
               append($$anchor4, li_10);
             });
             append($$anchor3, fragment_9);
           };
-          if_block(node_21, ($$render) => {
-            if (get(digest).attention.notifications.since_last_run.length === 0) $$render(consequent_20);
-            else $$render(alternate_7, -1);
+          if_block(node_22, ($$render) => {
+            if (get(digest).attention.notifications.since_last_run.length === 0) $$render(consequent_21);
+            else $$render(alternate_8, -1);
           });
         }
         var div_18 = sibling(div_16, 2);
         var div_19 = sibling(child(div_18), 2);
         var ul_8 = sibling(child(div_19), 2);
-        var node_24 = child(ul_8);
+        var node_25 = child(ul_8);
         {
-          var consequent_22 = ($$anchor3) => {
+          var consequent_23 = ($$anchor3) => {
             var li_11 = root_25();
             append($$anchor3, li_11);
           };
-          var alternate_9 = ($$anchor3) => {
+          var alternate_10 = ($$anchor3) => {
             var fragment_10 = comment();
-            var node_25 = first_child(fragment_10);
-            each(node_25, 17, () => get(digest).attention.notifications.older_unread, index, ($$anchor4, note) => {
+            var node_26 = first_child(fragment_10);
+            each(node_26, 17, () => get(digest).attention.notifications.older_unread, index, ($$anchor4, note) => {
               const line = /* @__PURE__ */ user_derived(() => notifLine(get(note)));
               const m = /* @__PURE__ */ user_derived(() => notifMeta(get(line)));
               const body = /* @__PURE__ */ user_derived(() => notifBody(get(line)));
@@ -4643,173 +4662,173 @@
               var li_12 = root_24();
               var span_12 = child(li_12);
               var span_13 = child(span_12);
-              var text_20 = child(span_13);
-              var node_26 = sibling(span_12, 2);
+              var text_22 = child(span_13);
+              var node_27 = sibling(span_12, 2);
               {
-                var consequent_23 = ($$anchor5) => {
+                var consequent_24 = ($$anchor5) => {
                   var a_2 = root_22();
-                  var text_21 = child(a_2);
+                  var text_23 = child(a_2);
                   template_effect(() => {
                     set_attribute(a_2, "href", get(url));
-                    set_text(text_21, get(body));
+                    set_text(text_23, get(body));
                   });
                   append($$anchor5, a_2);
                 };
-                var alternate_8 = ($$anchor5) => {
+                var alternate_9 = ($$anchor5) => {
                   var span_14 = root_23();
-                  var text_22 = child(span_14);
-                  template_effect(() => set_text(text_22, get(body)));
+                  var text_24 = child(span_14);
+                  template_effect(() => set_text(text_24, get(body)));
                   append($$anchor5, span_14);
                 };
-                if_block(node_26, ($$render) => {
-                  if (get(url)) $$render(consequent_23);
-                  else $$render(alternate_8, -1);
+                if_block(node_27, ($$render) => {
+                  if (get(url)) $$render(consequent_24);
+                  else $$render(alternate_9, -1);
                 });
               }
               template_effect(() => {
                 set_attribute(span_12, "data-tip", get(m).label);
-                set_text(text_20, get(m).emoji);
+                set_text(text_22, get(m).emoji);
               });
               append($$anchor4, li_12);
             });
             append($$anchor3, fragment_10);
           };
-          if_block(node_24, ($$render) => {
-            if (get(digest).attention.notifications.older_unread.length === 0) $$render(consequent_22);
-            else $$render(alternate_9, -1);
+          if_block(node_25, ($$render) => {
+            if (get(digest).attention.notifications.older_unread.length === 0) $$render(consequent_23);
+            else $$render(alternate_10, -1);
           });
         }
         var section_4 = sibling(div_7, 2);
         var div_20 = sibling(child(section_4), 2);
-        var node_27 = child(div_20);
+        var node_28 = child(div_20);
         {
-          var consequent_24 = ($$anchor3) => {
+          var consequent_25 = ($$anchor3) => {
             var p_4 = root_26();
             append($$anchor3, p_4);
           };
-          var alternate_12 = ($$anchor3) => {
+          var alternate_13 = ($$anchor3) => {
             const committedRows = /* @__PURE__ */ user_derived(() => get(digest).queue.filter((r) => r.capacity_pct !== null && r.capacity_pct > 0));
             const totalPct = /* @__PURE__ */ user_derived(() => get(committedRows).reduce((s, r) => s + (r.capacity_pct ?? 0), 0));
             const totalHours = /* @__PURE__ */ user_derived(() => get(committedRows).reduce((s, r) => s + (r.hours ?? pctToHours(r.capacity_pct) ?? 0), 0));
             var div_21 = root_37();
-            var node_28 = child(div_21);
-            each(node_28, 17, () => get(digest).queue, (row) => row.key, ($$anchor4, row) => {
+            var node_29 = child(div_21);
+            each(node_29, 17, () => get(digest).queue, (row) => row.key, ($$anchor4, row) => {
               const dl = /* @__PURE__ */ user_derived(() => devLinksFor(get(row).key ?? ""));
               const expanded = /* @__PURE__ */ user_derived(() => get(expandedTasks).has(get(row).key ?? ""));
               var div_22 = root_36();
               var span_15 = child(div_22);
-              var text_23 = child(span_15);
+              var text_25 = child(span_15);
               var div_23 = sibling(span_15, 2);
               var p_5 = child(div_23);
-              var node_29 = child(p_5);
+              var node_30 = child(p_5);
               {
-                var consequent_25 = ($$anchor5) => {
+                var consequent_26 = ($$anchor5) => {
                   var span_16 = root_27();
-                  var text_24 = child(span_16);
-                  template_effect(() => set_text(text_24, `${get(row).key ?? ""} —`));
+                  var text_26 = child(span_16);
+                  template_effect(() => set_text(text_26, `${get(row).key ?? ""} —`));
                   append($$anchor5, span_16);
                 };
-                if_block(node_29, ($$render) => {
-                  if (get(row).key) $$render(consequent_25);
+                if_block(node_30, ($$render) => {
+                  if (get(row).key) $$render(consequent_26);
                 });
               }
-              var text_25 = sibling(node_29, 1, true);
+              var text_27 = sibling(node_30, 1, true);
               var div_24 = sibling(p_5, 2);
               var span_17 = child(div_24);
-              var text_26 = child(span_17);
+              var text_28 = child(span_17);
               var span_18 = sibling(span_17, 2);
-              var text_27 = child(span_18);
+              var text_29 = child(span_18);
               var span_19 = sibling(span_18, 2);
-              var text_28 = child(span_19);
+              var text_30 = child(span_19);
               var span_20 = sibling(span_19, 2);
-              var text_29 = child(span_20);
+              var text_31 = child(span_20);
               var button_1 = sibling(span_20, 2);
               var svg = child(button_1);
               let classes;
-              var node_30 = sibling(div_24, 2);
+              var node_31 = sibling(div_24, 2);
               {
-                var consequent_29 = ($$anchor5) => {
+                var consequent_30 = ($$anchor5) => {
                   var div_25 = root_35();
-                  var node_31 = child(div_25);
+                  var node_32 = child(div_25);
                   {
-                    var consequent_28 = ($$anchor6) => {
+                    var consequent_29 = ($$anchor6) => {
                       var fragment_11 = root_33();
-                      var node_32 = first_child(fragment_11);
-                      each(node_32, 17, () => get(dl).pull_requests, (pr) => pr.id, ($$anchor7, pr) => {
+                      var node_33 = first_child(fragment_11);
+                      each(node_33, 17, () => get(dl).pull_requests, (pr) => pr.id, ($$anchor7, pr) => {
                         var div_26 = root_28();
                         var a_3 = sibling(child(div_26), 2);
-                        var text_30 = child(a_3);
+                        var text_32 = child(a_3);
                         template_effect(() => {
                           set_attribute(a_3, "href", get(pr).url);
-                          set_text(text_30, `${get(pr).id ?? ""} · ${get(pr).title ?? ""}`);
+                          set_text(text_32, `${get(pr).id ?? ""} · ${get(pr).title ?? ""}`);
                         });
                         append($$anchor7, div_26);
                       });
-                      var node_33 = sibling(node_32, 2);
-                      each(node_33, 17, () => get(dl).branches, (br) => br.name, ($$anchor7, br) => {
+                      var node_34 = sibling(node_33, 2);
+                      each(node_34, 17, () => get(dl).branches, (br) => br.name, ($$anchor7, br) => {
                         var div_27 = root_32();
-                        var node_34 = sibling(child(div_27), 2);
+                        var node_35 = sibling(child(div_27), 2);
                         {
-                          var consequent_26 = ($$anchor8) => {
+                          var consequent_27 = ($$anchor8) => {
                             var a_4 = root_29();
-                            var text_31 = child(a_4);
+                            var text_33 = child(a_4);
                             template_effect(() => {
                               set_attribute(a_4, "href", get(br).url);
-                              set_text(text_31, get(br).name);
+                              set_text(text_33, get(br).name);
                             });
                             append($$anchor8, a_4);
                           };
-                          var alternate_10 = ($$anchor8) => {
+                          var alternate_11 = ($$anchor8) => {
                             var span_21 = root_30();
-                            var text_32 = child(span_21);
-                            template_effect(() => set_text(text_32, get(br).name));
+                            var text_34 = child(span_21);
+                            template_effect(() => set_text(text_34, get(br).name));
                             append($$anchor8, span_21);
                           };
-                          if_block(node_34, ($$render) => {
-                            if (get(br).url) $$render(consequent_26);
-                            else $$render(alternate_10, -1);
+                          if_block(node_35, ($$render) => {
+                            if (get(br).url) $$render(consequent_27);
+                            else $$render(alternate_11, -1);
                           });
                         }
-                        var node_35 = sibling(node_34, 2);
+                        var node_36 = sibling(node_35, 2);
                         {
-                          var consequent_27 = ($$anchor8) => {
+                          var consequent_28 = ($$anchor8) => {
                             var fragment_12 = root_31();
                             var span_22 = sibling(first_child(fragment_12));
-                            var text_33 = child(span_22);
-                            template_effect(() => set_text(text_33, get(br).last_commit));
+                            var text_35 = child(span_22);
+                            template_effect(() => set_text(text_35, get(br).last_commit));
                             append($$anchor8, fragment_12);
                           };
-                          if_block(node_35, ($$render) => {
-                            if (get(br).last_commit) $$render(consequent_27);
+                          if_block(node_36, ($$render) => {
+                            if (get(br).last_commit) $$render(consequent_28);
                           });
                         }
                         append($$anchor7, div_27);
                       });
                       append($$anchor6, fragment_11);
                     };
-                    var alternate_11 = ($$anchor6) => {
+                    var alternate_12 = ($$anchor6) => {
                       var p_6 = root_34();
                       append($$anchor6, p_6);
                     };
-                    if_block(node_31, ($$render) => {
-                      if (get(dl) && (get(dl).pull_requests.length || get(dl).branches.length)) $$render(consequent_28);
-                      else $$render(alternate_11, -1);
+                    if_block(node_32, ($$render) => {
+                      if (get(dl) && (get(dl).pull_requests.length || get(dl).branches.length)) $$render(consequent_29);
+                      else $$render(alternate_12, -1);
                     });
                   }
                   append($$anchor5, div_25);
                 };
-                if_block(node_30, ($$render) => {
-                  if (get(expanded)) $$render(consequent_29);
+                if_block(node_31, ($$render) => {
+                  if (get(expanded)) $$render(consequent_30);
                 });
               }
               template_effect(
                 ($0, $1) => {
-                  set_text(text_23, get(row).rank);
-                  set_text(text_25, get(row).title);
-                  set_text(text_26, get(row).status);
-                  set_text(text_27, get(row).role);
-                  set_text(text_28, $0);
-                  set_text(text_29, $1);
+                  set_text(text_25, get(row).rank);
+                  set_text(text_27, get(row).title);
+                  set_text(text_28, get(row).status);
+                  set_text(text_29, get(row).role);
+                  set_text(text_30, $0);
+                  set_text(text_31, $1);
                   set_attribute(button_1, "aria-expanded", get(expanded));
                   classes = set_class(svg, 0, "w-3 h-3 transition-transform duration-150", null, classes, { "rotate-90": get(expanded) });
                 },
@@ -4821,25 +4840,25 @@
               delegated("click", button_1, () => toggleTask(get(row).key ?? ""));
               append($$anchor4, div_22);
             });
-            var div_28 = sibling(node_28, 2);
+            var div_28 = sibling(node_29, 2);
             var span_23 = sibling(child(div_28), 2);
-            var text_34 = child(span_23);
+            var text_36 = child(span_23);
             var span_24 = sibling(span_23, 2);
-            var text_35 = child(span_24);
+            var text_37 = child(span_24);
             var p_7 = sibling(div_28, 2);
             p_7.textContent = "8hr workday → hours = capacity% × 8, rounded to ¼h";
             template_effect(
               ($0) => {
-                set_text(text_34, `${get(totalPct) ?? ""}%`);
-                set_text(text_35, $0);
+                set_text(text_36, `${get(totalPct) ?? ""}%`);
+                set_text(text_37, $0);
               },
               [() => fmtHours(get(totalHours))]
             );
             append($$anchor3, div_21);
           };
-          if_block(node_27, ($$render) => {
-            if (get(digest).queue.length === 0) $$render(consequent_24);
-            else $$render(alternate_12, -1);
+          if_block(node_28, ($$render) => {
+            if (get(digest).queue.length === 0) $$render(consequent_25);
+            else $$render(alternate_13, -1);
           });
         }
         var section_5 = sibling(main, 2);
@@ -4853,99 +4872,99 @@
         var button_5 = sibling(button_4, 2);
         let classes_4;
         var div_30 = sibling(div_29, 2);
-        var node_36 = child(div_30);
+        var node_37 = child(div_30);
         {
-          var consequent_33 = ($$anchor3) => {
+          var consequent_34 = ($$anchor3) => {
             var div_31 = root_39();
-            var node_37 = child(div_31);
+            var node_38 = child(div_31);
             {
-              var consequent_32 = ($$anchor4) => {
+              var consequent_33 = ($$anchor4) => {
                 const c = /* @__PURE__ */ user_derived(() => get(digest).capacity);
                 const over = /* @__PURE__ */ user_derived(() => get(c).over);
                 var fragment_13 = root_38();
                 var div_32 = first_child(fragment_13);
                 var div_33 = child(div_32);
                 var span_25 = sibling(child(div_33), 2);
-                var text_36 = child(span_25);
+                var text_38 = child(span_25);
                 var div_34 = sibling(div_33, 2);
                 var span_26 = sibling(child(div_34), 2);
                 let classes_5;
-                var text_37 = child(span_26);
-                var node_38 = sibling(text_37);
-                {
-                  var consequent_30 = ($$anchor5) => {
-                    var text_38 = text("⚠️");
-                    append($$anchor5, text_38);
-                  };
-                  if_block(node_38, ($$render) => {
-                    if (get(over)) $$render(consequent_30);
-                  });
-                }
-                var div_35 = sibling(div_34, 2);
-                var span_27 = sibling(child(div_35), 2);
-                var text_39 = child(span_27);
-                var div_36 = sibling(div_35, 2);
-                var span_28 = sibling(child(div_36), 2);
-                let classes_6;
-                var text_40 = child(span_28);
-                var node_39 = sibling(text_40);
+                var text_39 = child(span_26);
+                var node_39 = sibling(text_39);
                 {
                   var consequent_31 = ($$anchor5) => {
-                    var text_41 = text("⚠️");
-                    append($$anchor5, text_41);
+                    var text_40 = text("⚠️");
+                    append($$anchor5, text_40);
                   };
                   if_block(node_39, ($$render) => {
                     if (get(over)) $$render(consequent_31);
                   });
                 }
+                var div_35 = sibling(div_34, 2);
+                var span_27 = sibling(child(div_35), 2);
+                var text_41 = child(span_27);
+                var div_36 = sibling(div_35, 2);
+                var span_28 = sibling(child(div_36), 2);
+                let classes_6;
+                var text_42 = child(span_28);
+                var node_40 = sibling(text_42);
+                {
+                  var consequent_32 = ($$anchor5) => {
+                    var text_43 = text("⚠️");
+                    append($$anchor5, text_43);
+                  };
+                  if_block(node_40, ($$render) => {
+                    if (get(over)) $$render(consequent_32);
+                  });
+                }
                 var p_8 = sibling(div_32, 2);
                 var strong = sibling(child(p_8));
-                var text_42 = child(strong);
-                var text_43 = sibling(strong);
-                text_43.nodeValue = " / 8h workday";
+                var text_44 = child(strong);
+                var text_45 = sibling(strong);
+                text_45.nodeValue = " / 8h workday";
                 template_effect(
                   ($0) => {
-                    set_text(text_36, `${get(c).base_pct ?? ""}%`);
+                    set_text(text_38, `${get(c).base_pct ?? ""}%`);
                     classes_5 = set_class(span_26, 1, "text-lg font-semibold tabular-nums", null, classes_5, { "text-warning": get(over) });
-                    set_text(text_37, `${get(c).committed_pct ?? ""}%`);
-                    set_text(text_39, `${get(c).free_pct ?? ""}%`);
+                    set_text(text_39, `${get(c).committed_pct ?? ""}%`);
+                    set_text(text_41, `${get(c).free_pct ?? ""}%`);
                     classes_6 = set_class(span_28, 1, "text-lg font-semibold tabular-nums", null, classes_6, { "text-warning": get(over) });
-                    set_text(text_40, `${get(c).utilization_pct ?? ""}%`);
-                    set_text(text_42, `${$0 ?? ""}h`);
+                    set_text(text_42, `${get(c).utilization_pct ?? ""}%`);
+                    set_text(text_44, `${$0 ?? ""}h`);
                   },
                   [() => get(c).total_hours.toFixed(1)]
                 );
                 append($$anchor4, fragment_13);
               };
-              if_block(node_37, ($$render) => {
-                $$render(consequent_32);
+              if_block(node_38, ($$render) => {
+                $$render(consequent_33);
               });
             }
             append($$anchor3, div_31);
           };
-          var consequent_36 = ($$anchor3) => {
+          var consequent_37 = ($$anchor3) => {
             var div_37 = root_39();
-            var node_40 = child(div_37);
+            var node_41 = child(div_37);
             {
-              var consequent_34 = ($$anchor4) => {
+              var consequent_35 = ($$anchor4) => {
                 var p_9 = root_40();
                 append($$anchor4, p_9);
               };
-              var alternate_13 = ($$anchor4) => {
+              var alternate_14 = ($$anchor4) => {
                 var div_38 = root_45();
-                var node_41 = child(div_38);
+                var node_42 = child(div_38);
                 {
-                  var consequent_35 = ($$anchor5) => {
+                  var consequent_36 = ($$anchor5) => {
                     const names = /* @__PURE__ */ user_derived(() => reviewerNames(get(digest).reviews));
                     var div_39 = root_44();
                     var table = child(div_39);
                     var thead = child(table);
                     var tr = child(thead);
-                    var node_42 = sibling(child(tr), 2);
-                    each(node_42, 16, () => get(names), (name) => name, ($$anchor6, name) => {
+                    var node_43 = sibling(child(tr), 2);
+                    each(node_43, 16, () => get(names), (name) => name, ($$anchor6, name) => {
                       var th = root_41();
-                      var text_44 = child(th);
-                      template_effect(() => set_text(text_44, name));
+                      var text_46 = child(th);
+                      template_effect(() => set_text(text_46, name));
                       append($$anchor6, th);
                     });
                     var tbody = sibling(thead);
@@ -4954,17 +4973,17 @@
                       const pending = /* @__PURE__ */ user_derived(() => new Set(get(review).open_reviews.filter((o) => !o.decided).map((o) => o.user_name.split(",")[0].trim())));
                       var tr_1 = root_43();
                       var td = child(tr_1);
-                      var text_45 = child(td);
+                      var text_47 = child(td);
                       var td_1 = sibling(td);
-                      var text_46 = child(td_1);
-                      var node_43 = sibling(td_1);
-                      each(node_43, 16, () => get(names), (name) => name, ($$anchor7, name) => {
+                      var text_48 = child(td_1);
+                      var node_44 = sibling(td_1);
+                      each(node_44, 16, () => get(names), (name) => name, ($$anchor7, name) => {
                         var td_2 = root_42();
-                        var text_47 = child(td_2);
+                        var text_49 = child(td_2);
                         template_effect(
                           ($0, $1) => {
                             set_attribute(td_2, "title", $0);
-                            set_text(text_47, $1);
+                            set_text(text_49, $1);
                           },
                           [
                             () => get(pending).has(name) ? "Assigned — review still pending" : "",
@@ -4974,89 +4993,89 @@
                         append($$anchor7, td_2);
                       });
                       template_effect(() => {
-                        set_text(text_45, get(review).title);
-                        set_text(text_46, get(review).version);
+                        set_text(text_47, get(review).title);
+                        set_text(text_48, get(review).version);
                       });
                       append($$anchor6, tr_1);
                     });
                     append($$anchor5, div_39);
                   };
-                  if_block(node_41, ($$render) => {
-                    $$render(consequent_35);
+                  if_block(node_42, ($$render) => {
+                    $$render(consequent_36);
                   });
                 }
                 append($$anchor4, div_38);
               };
-              if_block(node_40, ($$render) => {
-                if (get(digest).reviews.length === 0) $$render(consequent_34);
-                else $$render(alternate_13, -1);
+              if_block(node_41, ($$render) => {
+                if (get(digest).reviews.length === 0) $$render(consequent_35);
+                else $$render(alternate_14, -1);
               });
             }
             append($$anchor3, div_37);
           };
-          var consequent_40 = ($$anchor3) => {
+          var consequent_41 = ($$anchor3) => {
             var div_40 = root_39();
-            var node_44 = child(div_40);
+            var node_45 = child(div_40);
             {
-              var consequent_37 = ($$anchor4) => {
+              var consequent_38 = ($$anchor4) => {
                 var p_10 = root_46();
                 append($$anchor4, p_10);
               };
-              var alternate_14 = ($$anchor4) => {
+              var alternate_15 = ($$anchor4) => {
                 var ul_9 = root_48();
                 each(ul_9, 21, () => get(digest).reviews_owed, (review) => review.artifact_id, ($$anchor5, review) => {
                   var li_13 = root_47();
-                  var text_48 = child(li_13);
-                  var span_29 = sibling(text_48);
-                  var text_49 = child(span_29);
-                  var node_45 = sibling(span_29, 2);
-                  {
-                    var consequent_38 = ($$anchor6) => {
-                      var span_30 = root_19();
-                      var text_50 = child(span_30);
-                      template_effect(($0) => set_text(text_50, `(due ${$0 ?? ""})`), [() => get(review).deadline.slice(0, 10)]);
-                      append($$anchor6, span_30);
-                    };
-                    if_block(node_45, ($$render) => {
-                      if (get(review).deadline) $$render(consequent_38);
-                    });
-                  }
-                  var node_46 = sibling(node_45, 2);
+                  var text_50 = child(li_13);
+                  var span_29 = sibling(text_50);
+                  var text_51 = child(span_29);
+                  var node_46 = sibling(span_29, 2);
                   {
                     var consequent_39 = ($$anchor6) => {
-                      var span_31 = root_19();
-                      var text_51 = child(span_31);
-                      template_effect(() => set_text(text_51, `— from ${get(review).initiator ?? ""}`));
-                      append($$anchor6, span_31);
+                      var span_30 = root_19();
+                      var text_52 = child(span_30);
+                      template_effect(($0) => set_text(text_52, `(due ${$0 ?? ""})`), [() => get(review).deadline.slice(0, 10)]);
+                      append($$anchor6, span_30);
                     };
                     if_block(node_46, ($$render) => {
-                      if (get(review).initiator) $$render(consequent_39);
+                      if (get(review).deadline) $$render(consequent_39);
+                    });
+                  }
+                  var node_47 = sibling(node_46, 2);
+                  {
+                    var consequent_40 = ($$anchor6) => {
+                      var span_31 = root_19();
+                      var text_53 = child(span_31);
+                      template_effect(() => set_text(text_53, `— from ${get(review).initiator ?? ""}`));
+                      append($$anchor6, span_31);
+                    };
+                    if_block(node_47, ($$render) => {
+                      if (get(review).initiator) $$render(consequent_40);
                     });
                   }
                   template_effect(() => {
-                    set_text(text_48, `${get(review).title ?? ""} `);
-                    set_text(text_49, `v${get(review).version ?? ""}`);
+                    set_text(text_50, `${get(review).title ?? ""} `);
+                    set_text(text_51, `v${get(review).version ?? ""}`);
                   });
                   append($$anchor5, li_13);
                 });
                 append($$anchor4, ul_9);
               };
-              if_block(node_44, ($$render) => {
-                if (get(digest).reviews_owed.length === 0) $$render(consequent_37);
-                else $$render(alternate_14, -1);
+              if_block(node_45, ($$render) => {
+                if (get(digest).reviews_owed.length === 0) $$render(consequent_38);
+                else $$render(alternate_15, -1);
               });
             }
             append($$anchor3, div_40);
           };
-          var consequent_43 = ($$anchor3) => {
+          var consequent_44 = ($$anchor3) => {
             var div_41 = root_39();
-            var node_47 = child(div_41);
+            var node_48 = child(div_41);
             {
-              var consequent_41 = ($$anchor4) => {
+              var consequent_42 = ($$anchor4) => {
                 var p_11 = root_49();
                 append($$anchor4, p_11);
               };
-              var alternate_15 = ($$anchor4) => {
+              var alternate_16 = ($$anchor4) => {
                 var ol = root_52();
                 each(ol, 23, () => get(filteredActions), (action) => actionKey(action), ($$anchor5, action, i) => {
                   const key = /* @__PURE__ */ user_derived(() => actionKey(get(action)));
@@ -5065,19 +5084,19 @@
                   var button_6 = child(li_14);
                   let classes_7;
                   var span_32 = child(button_6);
-                  var text_52 = child(span_32);
-                  var node_48 = sibling(span_32, 2);
+                  var text_54 = child(span_32);
+                  var node_49 = sibling(span_32, 2);
                   {
-                    var consequent_42 = ($$anchor6) => {
+                    var consequent_43 = ($$anchor6) => {
                       var fragment_14 = root_50();
                       append($$anchor6, fragment_14);
                     };
-                    if_block(node_48, ($$render) => {
-                      if (get(active)) $$render(consequent_42);
+                    if_block(node_49, ($$render) => {
+                      if (get(active)) $$render(consequent_43);
                     });
                   }
-                  var span_33 = sibling(node_48, 2);
-                  var text_53 = child(span_33);
+                  var span_33 = sibling(node_49, 2);
+                  var text_55 = child(span_33);
                   template_effect(() => {
                     classes_7 = set_class(button_6, 1, "btn btn-ghost w-full justify-start text-left flex gap-3 items-start h-auto min-h-[2.5rem] py-2 px-3", null, classes_7, {
                       "btn-active": get(active),
@@ -5087,30 +5106,30 @@
                     set_attribute(button_6, "title", get(active) ? "continue in pi" : void 0);
                     button_6.disabled = get(hasWorkingMatch) && !get(active);
                     set_attribute(button_6, "aria-disabled", get(hasWorkingMatch) && !get(active) ? "true" : void 0);
-                    set_text(text_52, get(i) + 1);
-                    set_text(text_53, get(action).label);
+                    set_text(text_54, get(i) + 1);
+                    set_text(text_55, get(action).label);
                   });
                   delegated("click", button_6, () => postAction(get(action)));
                   append($$anchor5, li_14);
                 });
                 append($$anchor4, ol);
               };
-              if_block(node_47, ($$render) => {
-                if (get(filteredActions).length === 0) $$render(consequent_41);
-                else $$render(alternate_15, -1);
+              if_block(node_48, ($$render) => {
+                if (get(filteredActions).length === 0) $$render(consequent_42);
+                else $$render(alternate_16, -1);
               });
             }
             append($$anchor3, div_41);
           };
-          if_block(node_36, ($$render) => {
-            if (get(activeTab) === "capacity") $$render(consequent_33);
-            else if (get(activeTab) === "reviews-due") $$render(consequent_36, 1);
-            else if (get(activeTab) === "reviews-owed") $$render(consequent_40, 2);
-            else if (get(activeTab) === "actions") $$render(consequent_43, 3);
+          if_block(node_37, ($$render) => {
+            if (get(activeTab) === "capacity") $$render(consequent_34);
+            else if (get(activeTab) === "reviews-due") $$render(consequent_37, 1);
+            else if (get(activeTab) === "reviews-owed") $$render(consequent_41, 2);
+            else if (get(activeTab) === "actions") $$render(consequent_44, 3);
           });
         }
         template_effect(() => {
-          set_text(text_3, get(day));
+          set_text(text_5, get(day));
           classes_1 = set_class(button_2, 1, "tab", null, classes_1, { "tab-active": get(activeTab) === "capacity" });
           set_attribute(button_2, "aria-selected", get(activeTab) === "capacity");
           classes_2 = set_class(button_3, 1, "tab", null, classes_2, { "tab-active": get(activeTab) === "reviews-due" });
@@ -5128,9 +5147,9 @@
       };
       if_block(node_1, ($$render) => {
         if (get(loading)) $$render(consequent);
-        else if (get(fetchMode)) $$render(consequent_6, 1);
-        else if (get(error)) $$render(consequent_7, 2);
-        else if (get(digest)) $$render(consequent_44, 3);
+        else if (get(fetchMode)) $$render(consequent_7, 1);
+        else if (get(error)) $$render(consequent_8, 2);
+        else if (get(digest)) $$render(consequent_45, 3);
       });
     }
     append($$anchor, fragment);

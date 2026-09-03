@@ -131,6 +131,17 @@ function agentLogEvent(message: string, eventId = 1): StateEvent {
   };
 }
 
+/** A refine_done event (digest-finalize signals the view to transition). */
+function refineDoneEvent(eventId = 1): StateEvent {
+  return {
+    id: eventId,
+    ts: new Date().toISOString(),
+    dir: "agent→page",
+    type: "refine_done",
+    payload: {},
+  };
+}
+
 /** Build a state object with the given events. */
 function stateFile(events: StateEvent[]) {
   return { pid: null, server_started: null, events };
@@ -529,13 +540,14 @@ describe("fetch display mode — agent log", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Criterion: On a terminal "done" event for the root fetch node, transition
-// to the digest view (existing render) AFTER digest.json is present.
+// Criterion: On a `refine_done` event (digest-finalize signals the digest
+// is final), transition to the digest view. The tree stays during augment
+// (root done but no refine_done yet) — the "Refining…" header carries it.
 // ---------------------------------------------------------------------------
 
 describe("fetch display mode — transition to digest view", () => {
-  it("transitions to the digest view when the root node is done and digest.json exists", async () => {
-    // Start in fetch mode (no digest)
+  it("transitions to the digest view when a refine_done event arrives", async () => {
+    // Start in fetch mode (root running, no digest)
     const fetchState = stateFile([
       progressEvent({ id: "root", label: "Fetching digest", status: "running" }, 1),
     ]);
@@ -569,15 +581,26 @@ describe("fetch display mode — transition to digest view", () => {
     // Should be in fetch mode (tree visible)
     expect(target.querySelector("[data-node-id]")).not.toBeNull();
 
-    // Now digest.json becomes available AND root node is done
+    // Root done + digest available, but NO refine_done yet — should stay in
+    // fetch mode (refining). The view must NOT transition on root-done alone.
     currentDigest = digest;
     currentState = stateFile([
       progressEvent({ id: "root", label: "Fetching digest", status: "done" }, 1),
     ]);
-
-    // Dispatch both: a digest change (digest.json written) + state-change (root done)
     FakeEventSource.dispatchChange();
     FakeEventSource.dispatchStateChange(1, "progress");
+    await new Promise((r) => setTimeout(r, 80));
+    // Still in fetch mode — the tree stays during augment.
+    expect(target.querySelector("[data-node-id]")).not.toBeNull();
+    expect(target.querySelector("button[data-action-key]")).toBeNull();
+    expect(target.textContent).toContain("Refining");
+
+    // Now the agent signals the digest is final (digest-finalize pushes refine_done)
+    currentState = stateFile([
+      progressEvent({ id: "root", label: "Fetching digest", status: "done" }, 1),
+      refineDoneEvent(2),
+    ]);
+    FakeEventSource.dispatchStateChange(2, "refine_done");
     await new Promise((r) => setTimeout(r, 80));
 
     // Should have transitioned to the digest view
@@ -587,17 +610,19 @@ describe("fetch display mode — transition to digest view", () => {
     expect(target.querySelector("[data-node-id]")).toBeNull();
   });
 
-  it("stays in fetch mode if root is done but digest.json is not yet present", async () => {
+  it("stays in fetch mode (refining) when root is done but no refine_done yet", async () => {
     const state = stateFile([
       progressEvent({ id: "root", label: "Fetching digest", status: "done" }, 1),
     ]);
 
-    // /api/digest still 404
-    const target = await mountInFetchMode(state, null);
+    // /api/digest available (setCurrentDigest ran) but no refine_done
+    const digest = baseDigest([]);
+    const target = await mountInFetchMode(state, digest);
 
-    // Should still be in fetch mode (tree visible, no digest view)
+    // Should still be in fetch mode (tree visible, refining header, no digest view)
     expect(target.querySelector("[data-node-id]")).not.toBeNull();
     expect(target.querySelector("button[data-action-key]")).toBeNull();
+    expect(target.textContent).toContain("Refining");
   });
 });
 

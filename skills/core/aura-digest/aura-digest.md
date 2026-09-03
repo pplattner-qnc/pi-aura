@@ -1,6 +1,6 @@
 ---
 name: aura-digest
-description: Morning routine — fetches your Aura briefing, attention items, priority queue, capacity, and reviews via in-process tools (digest-fetch / digest-log / digest-save / digest-update / digest-ack + the digest-dashboard), verifies review states, then presents a concise digest with a diff against the last run. Use when the user wants to start their day, get an Aura digest, or see what changed since last time.
+description: Morning routine — fetches your Aura briefing, attention items, priority queue, capacity, and reviews via in-process tools (digest-fetch / digest-log / digest-finalize / digest-update / digest-ack + the digest-dashboard), verifies review states, then presents a concise digest with a diff against the last run. Use when the user wants to start their day, get an Aura digest, or see what changed since last time.
 disable-model-invocation: true
 ---
 
@@ -13,11 +13,11 @@ explicitly (via `/aura-digest`), so the user already wants the flow to run.
 
 Inline, tool-driven pipeline. The flow runs entirely in-process via typed tools:
 `digest-dashboard-start` (ready state) → `digest-fetch` (streams the live tree) →
-augment (agent calls `digest-log` per sub-step) → `digest-save` → wait for
+augment (agent calls `digest-log` per sub-step) → `digest-finalize` → wait for
 clicks → act on one via the `aura` skill → `ack` + clear →
 `digest-dashboard-stop`. The orchestrator (you) does the judgment work — filling
 the situation summary, surfacing corrections, and ranking suggested actions —
-between `digest-fetch` and `digest-save`.
+between `digest-fetch` and `digest-finalize`.
 
 ```
  ┌─────────────────────┐  ┌─────────────────┐  {digest, report}   ┌──────────────┐
@@ -32,7 +32,7 @@ between `digest-fetch` and `digest-save`.
                                                                 ─────────→│
                                                                            ↓
                                                                  ┌──────────────┐
-                                                                 │  digest-save  │
+                                                                 │  digest-finalize  │
                                                                  │  (saves the   │
                                                                  │   in-memory  │
                                                                  │   digest)    │
@@ -152,7 +152,7 @@ Then update the parsed `digest` object in place:
 
 Write the corrected `digest` back to the in-memory store with the
 `digest-update` tool (pass the corrected `digest` object). The subsequent
-`digest-save` persists that corrected version from the in-memory current
+`digest-finalize` persists that corrected version from the in-memory current
 digest. (Do NOT call `digest-fetch` again — that re-fetches and overwrites
 your corrections.)
 
@@ -165,9 +165,19 @@ below the progress tree, so the user sees live progress. It always records
 the line to the in-memory event stream; the line renders in the dashboard
 log list when the dashboard is running. It never fails the agent call.
 
+### The dashboard during augment (the live tree stays)
+
+After `digest-fetch` completes (the fetch root node is `done`), the dashboard
+**stays** in the live-tree view with a **"Refining…"** header — it does NOT
+flip to the digest yet. Your `digest-log` lines ("Verifying review states…",
+"Re-ranking actions…") appear in the log list below the tree as you augment.
+The view transitions to the digest **only** when you call `digest-finalize`
+(see Step 4) — that signals the digest is final. So the user sees the live
+refining the whole way through fetch + augment, then the finished digest.
+
 ### Diff against last digest (optional, for "what changed")
 
-The `digest-save` tool only stores the corrected digest; it does not print a
+The `digest-finalize` tool only stores the corrected digest; it does not print a
 structured diff. If you want to seed the summary with movement ("since last
 time, AURA-X entered review, AURA-Y cleared…"), compare the corrected digest
 against `~/.pi/aura/last-digest.json` yourself and refine the `summary`
@@ -177,17 +187,21 @@ On the first run (no last digest), there is nothing to compare.
 
 ---
 
-## Step 4: Save, then wait for clicks
+## Step 4: Finalize, then wait for clicks
 
-After start → fetch → augment (Steps 1–3), save the digest and drive the
+After start → fetch → augment (Steps 1–3), finalize the digest and drive the
 interactive dashboard.
 
-1. **Save** the corrected digest as the last-digest store. Call the
-   `digest-save` tool (no `dir` parameter — it saves the current in-memory
-digest). Run `digest-fetch` first to populate the in-memory store.
-2. **The dashboard digest is already populated** — `digest-fetch` populates
-   the in-memory store (including `actions[]` + `followup`) automatically.
-   No extra step.
+1. **Finalize** the corrected digest: call the `digest-finalize` tool. It
+   does two things: (a) persists the current in-memory digest as the
+   last-digest store (`~/.pi/aura/last-digest.json`, the diff baseline — the
+   only disk write in the whole flow), and (b) signals the dashboard to
+   transition from the live "Refining…" tree to the digest view. Run
+   `digest-fetch` first to populate the in-memory store, and `digest-update`
+   with the corrected digest before finalizing.
+2. **The dashboard switches to the digest** on the `digest-finalize` signal
+   — the live tree gives way to the interactive digest (sections + action
+   buttons). No extra step.
 3. **Wait for a click.** Do not poll or prompt. The listener forwards a
    `page→agent` `action_click` event as a custom message
    (`customType: "aura-digest-event"`, `triggerTurn: true`) that wakes a new
@@ -303,7 +317,7 @@ Interaction is via the dashboard's action buttons (Step 4); teardown is
 ## last-digest.json store
 
 Lives at `~/.pi/aura/last-digest.json`. See `src/types.ts` (`LastDigestStore`
-+ `DigestDiff`) for the authoritative definitions. `digest-save` writes this
++ `DigestDiff`) for the authoritative definitions. `digest-finalize` writes this
 store from the current in-memory digest (populated by `digest-fetch`).
 
 | Field | Purpose |

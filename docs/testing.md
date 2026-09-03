@@ -207,11 +207,11 @@ no identity reconciliation.
 `test/digest-dashboard/slash-command.test.ts` tests the `/digest` extension
 command handler with a fake `pi` (captures `setActiveTools` + `sendMessage`).
 `test/digest-dashboard/fetch-save-tools.test.ts` tests the `digest-fetch` +
-`digest-save` tools with a mocked `child_process.spawn` (no real Aura). The
+`digest-finalize` tools with a mocked `child_process.spawn` (no real Aura). The
 `digest-fetch` tool calls `fetchAction` from `@pi-aura/shared/digest/aura-digest`
-in-process (no spawned child, no CLI bundle); `digest-save` calls `saveLastDigest`.
+in-process (no spawned child, no CLI bundle); `digest-finalize` calls `saveLastDigest`.
 The digest tools (`digest-dashboard-start`, `digest-dashboard-stop`,
-`digest-fetch`, `digest-save`) are registered but **inactive by default** — the
+`digest-fetch`, `digest-finalize`) are registered but **inactive by default** — the
 `session_start` handler filters `DIGEST_TOOLS` out of the active set; `/digest`
 activates them additively.
 

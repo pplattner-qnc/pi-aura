@@ -260,7 +260,7 @@ const DIGEST_TOOLS: readonly string[] = [
   "digest-dashboard-start",
   "digest-dashboard-stop",
   "digest-fetch",
-  "digest-save",
+  "digest-finalize",
   "digest-log",
   "digest-update",
   "digest-ack",
@@ -400,10 +400,10 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
-    name: "digest-save",
-    label: "Save Aura digest",
+    name: "digest-finalize",
+    label: "Finalize + present the digest",
     description:
-      "Save the current in-memory digest as the last presented digest (~/.pi/aura/last-digest.json). Run digest-fetch first.",
+      "Signal that the digest is final: persist the current in-memory digest as the last presented digest (~/.pi/aura/last-digest.json) AND signal the dashboard to switch from the live refining tree to the digest view. Call this once the digest is corrected + re-ranked (after digest-fetch + augment). Run digest-fetch first.",
     parameters: saveToolParameters,
     async execute(
       _toolCallId: string,
@@ -414,13 +414,21 @@ export default function (pi: ExtensionAPI): void {
       const digest = getCurrentDigest();
       if (!digest) {
         return {
-          content: [{ type: "text", text: "digest-save: no current digest to save — run digest-fetch first" }],
+          content: [{ type: "text", text: "digest-finalize: no current digest to finalize — run digest-fetch first" }],
           details: {},
         };
       }
       saveLastDigest(digest as Digest);
+      // Signal the view to transition from the live tree to the digest.
+      pushEvent({
+        id: 0,
+        ts: new Date().toISOString(),
+        dir: "agent→page",
+        type: "refine_done",
+        payload: {},
+      });
       return {
-        content: [{ type: "text", text: "digest-save: saved last digest to ~/.pi/aura/last-digest.json" }],
+        content: [{ type: "text", text: "digest-finalize: saved last digest + signaled the dashboard to present it" }],
         details: {},
       };
     },
@@ -463,7 +471,7 @@ export default function (pi: ExtensionAPI): void {
       "Replace the in-memory current digest the dashboard serves (used after correcting the digest — summary, review enrichments, re-ranked actions, corrections — and to set/clear the in-flight followup.currentlyWorkingOn lock before/after acting on a click). The dashboard's /api/digest re-serves this + fans out a 'change' SSE so the browser hot-reloads. No-op safe if the dashboard is not running (the store is still updated).",
     promptSnippet: "digest-update — replace the in-memory digest (corrections or the in-flight lock).",
     promptGuidelines: [
-      "Use digest-update to write the corrected digest back to the in-memory store after augmenting (before digest-save).",
+      "Use digest-update to write the corrected digest back to the in-memory store after augmenting (before digest-finalize).",
       "Use digest-update to set followup.currentlyWorkingOn = \"<section>/<key>\" before acting on a click, and to clear it (null) after the ack.",
     ],
     parameters: updateToolParameters,

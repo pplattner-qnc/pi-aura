@@ -1,4 +1,4 @@
-// Unit tests for digest-fetch + digest-save tools:
+// Unit tests for digest-fetch + digest-finalize tools:
 //
 // digest-fetch (slice 2 — in-process):
 //   - Calls fetchAction() in-process (no spawn); injects a fake AuraClient
@@ -11,11 +11,11 @@
 //   - One-shot "dashboard not running" warning (notify + result text) when
 //     the in-process server is down — but the digest is still populated.
 //
-// digest-save (slice 3 — in-process, no spawn):
+// digest-finalize (slice 3 — in-process, no spawn):
 //   - Writes last-digest.json from store.getCurrentDigest() (no dir param).
 //   - Returns a clear error when no current digest is set.
 //   - No spawn (nothing spawns anymore — digest-fetch is in-process (slice
-//     2), digest-save is in-process (slice 3)).
+//     2), digest-finalize is in-process (slice 3)).
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type {
@@ -621,19 +621,19 @@ describe("digest-fetch SSE fan-out (in-process)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// digest-save tool (slice 3 — in-process, no spawn)
+// digest-finalize tool (slice 3 — in-process, no spawn)
 //   - Writes last-digest.json from store.getCurrentDigest() (no dir param).
 //   - Returns a clear error when no current digest is set.
 //   - No spawn (the spawn mock is gone — nothing spawns anymore).
 // ---------------------------------------------------------------------------
 
-describe("digest-save tool (in-process from store)", () => {
+describe("digest-finalize tool (in-process from store)", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
   let auraDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(path.join(os.tmpdir(), "digest-save-"));
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), "digest-finalize-"));
     originalHome = process.env.HOME;
     process.env.HOME = tmpDir;
     process.env.PI_DIGEST_NO_BROWSER = "1";
@@ -657,7 +657,7 @@ describe("digest-save tool (in-process from store)", () => {
   it("writes last-digest.json from getCurrentDigest and returns a confirmation", async () => {
     const pi = createFakePi();
     installExtension(pi);
-    const tool = findTool(pi, "digest-save");
+    const tool = findTool(pi, "digest-finalize");
 
     // Set the in-memory digest (the seam digest-fetch populates).
     const digestFixture = {
@@ -689,7 +689,7 @@ describe("digest-save tool (in-process from store)", () => {
   it("returns a clear error when no current digest is set", async () => {
     const pi = createFakePi();
     installExtension(pi);
-    const tool = findTool(pi, "digest-save");
+    const tool = findTool(pi, "digest-finalize");
 
     // Do NOT setCurrentDigest — nothing to save.
     const result = (await tool.execute(

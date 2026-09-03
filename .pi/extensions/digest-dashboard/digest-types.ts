@@ -176,6 +176,6 @@ export interface StateEvent {
   id: number;
   ts: string;
   dir: "page→agent" | "agent→page";
-  type: "action_click" | "ack" | "update_view" | "progress" | "agent_log";
+  type: "action_click" | "ack" | "update_view" | "progress" | "agent_log" | "refine_done";
   payload: ActionClickPayload | ProgressPayload | AgentLogPayload | unknown;
 }

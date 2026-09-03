@@ -92,7 +92,7 @@ describe("session_start filter", () => {
       "digest-dashboard-start",
       "digest-dashboard-stop",
       "digest-fetch",
-      "digest-save",
+      "digest-finalize",
       "some-other-tool",
     ]);
     installExtension(pi);
@@ -104,7 +104,7 @@ describe("session_start filter", () => {
     expect(activeTools).not.toContain("digest-dashboard-start");
     expect(activeTools).not.toContain("digest-dashboard-stop");
     expect(activeTools).not.toContain("digest-fetch");
-    expect(activeTools).not.toContain("digest-save");
+    expect(activeTools).not.toContain("digest-finalize");
     expect(activeTools).toContain("some-other-tool");
   });
 });
@@ -145,7 +145,7 @@ describe("/aura-digest command", () => {
     expect(activeTools).toContain("digest-dashboard-start");
     expect(activeTools).toContain("digest-dashboard-stop");
     expect(activeTools).toContain("digest-fetch");
-    expect(activeTools).toContain("digest-save");
+    expect(activeTools).toContain("digest-finalize");
     expect(activeTools).toContain("digest-log");
     expect(activeTools).toContain("digest-update");
     expect(activeTools).toContain("digest-ack");

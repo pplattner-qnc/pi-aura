@@ -73,7 +73,7 @@ describe("aura-digest skill prose", () => {
   it("describes the tool-driven flow end-to-end", () => {
     const lower = body.toLowerCase();
     expect(lower).toContain("digest-fetch");
-    expect(lower).toContain("digest-save");
+    expect(lower).toContain("digest-finalize");
     expect(lower).toContain("digest-dashboard-start");
     expect(lower).toContain("digest-dashboard-stop");
     expect(lower).toMatch(/augment[\s\S]*re-rank|re-rank[\s\S]*augment/);
@@ -97,7 +97,7 @@ describe("aura-digest skill prose", () => {
     // After the CLI deletion (task cli-deletion-and-rewire), the skill doc
     // should not mention the deleted bundle as a live path — neither in the
     // frontmatter description nor in the body. The flow runs entirely
-    // in-process via typed tools (digest-fetch, digest-log, digest-save,
+    // in-process via typed tools (digest-fetch, digest-log, digest-finalize,
     // digest-update, digest-ack, the digest-dashboard).
     expect(fullRaw).not.toContain("aura-digest.mjs");
     expect(fullRaw).not.toContain("dist/aura-digest");
