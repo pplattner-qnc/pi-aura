@@ -1,17 +1,21 @@
-// Unit tests for the digest-log tool (slice 5):
+// Unit tests for the digest-log tool (in-process lifecycle):
 // - digest-log is registered with params { message: string }
-// - With the dashboard up (server-url.json present) it POSTs an agent_log
+// - With the dashboard up (in-process server running) it POSTs an agent_log
 //   event to /api/state and returns ok
-// - With the dashboard down (server-url.json absent) it returns ok, no
+// - With the dashboard down (no server running) it returns ok, no
 //   throw, no fetch attempted
 // - Concurrent calls each POST (the server serializes; the tool just fires)
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { default as installExtension } from "../../.pi/extensions/digest-dashboard/index.ts";
+import {
+  startDashboard,
+  teardownDashboard,
+  default as installExtension,
+} from "../../.pi/extensions/digest-dashboard/index.ts";
 
 interface RegisterToolCall {
   name: string;
@@ -47,6 +51,10 @@ function createCtx(): ExtensionContext {
   return {} as ExtensionContext;
 }
 
+function createCmdCtx(): ExtensionCommandContext {
+  return {} as unknown as ExtensionCommandContext;
+}
+
 function findTool(pi: ExtensionAPI, name: string): RegisterToolCall {
   const capture = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls as unknown as {
     0: RegisterToolCall;
@@ -56,11 +64,18 @@ function findTool(pi: ExtensionAPI, name: string): RegisterToolCall {
   return def[0];
 }
 
+function statePath(): string {
+  return path.join(process.env.HOME!, ".pi", "aura", "state.json");
+}
+
+async function ensureTeardown(): Promise<void> {
+  await teardownDashboard(statePath()).catch(() => {});
+}
+
 describe("digest-log tool", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
   let auraDir: string;
-  let serverUrlPath: string;
   let fetchCalls: FetchCall[];
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -68,9 +83,9 @@ describe("digest-log tool", () => {
     tmpDir = mkdtempSync(path.join(os.tmpdir(), "digest-log-"));
     originalHome = process.env.HOME;
     process.env.HOME = tmpDir;
+    process.env.PI_DIGEST_NO_BROWSER = "1";
     auraDir = path.join(tmpDir, ".pi", "aura");
     mkdirSync(auraDir, { recursive: true });
-    serverUrlPath = path.join(auraDir, "server-url.json");
 
     fetchCalls = [];
     fetchMock = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
@@ -83,13 +98,15 @@ describe("digest-log tool", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllGlobals();
+    await ensureTeardown();
     if (originalHome !== undefined) {
       process.env.HOME = originalHome;
     } else {
       delete process.env.HOME;
     }
+    delete process.env.PI_DIGEST_NO_BROWSER;
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -108,12 +125,14 @@ describe("digest-log tool", () => {
   });
 
   it("POSTs an agent_log event to /api/state and returns ok when dashboard is up", async () => {
-    writeFileSync(serverUrlPath, JSON.stringify({ url: "http://127.0.0.1:9999/" }), "utf8");
-
     const capture: { registerToolCalls: RegisterToolCall[] } = { registerToolCalls: [] };
     const pi = createFakePi(capture);
     installExtension(pi);
     const tool = findTool(pi, "digest-log");
+
+    // Start the in-process dashboard so getDashboardUrl() returns a real URL.
+    const startResult = await startDashboard(pi, createCmdCtx());
+    expect(startResult.ok).toBe(true);
 
     const result = (await tool.execute(
       "call-1",
@@ -126,7 +145,7 @@ describe("digest-log tool", () => {
     // Exactly one POST to /api/state
     expect(fetchCalls).toHaveLength(1);
     const [call] = fetchCalls;
-    expect(call.url).toBe("http://127.0.0.1:9999/api/state");
+    expect(call.url).toBe(`${startResult.url}api/state`);
     expect(call.init.method).toBe("POST");
 
     const body = JSON.parse(call.init.body as string) as {
@@ -143,8 +162,8 @@ describe("digest-log tool", () => {
     expect(result.content[0].text).toContain("ok");
   });
 
-  it("returns ok, no throw, no fetch when server-url.json is absent", async () => {
-    // server-url.json deliberately NOT written (dashboard down)
+  it("returns ok, no throw, no fetch when dashboard is not running", async () => {
+    // Dashboard deliberately NOT started (dashboard down)
 
     const capture: { registerToolCalls: RegisterToolCall[] } = { registerToolCalls: [] };
     const pi = createFakePi(capture);
@@ -169,17 +188,18 @@ describe("digest-log tool", () => {
   });
 
   it("never throws even if the POST fails (best-effort)", async () => {
-    writeFileSync(serverUrlPath, JSON.stringify({ url: "http://127.0.0.1:9999/" }), "utf8");
+    const capture: { registerToolCalls: RegisterToolCall[] } = { registerToolCalls: [] };
+    const pi = createFakePi(capture);
+    installExtension(pi);
+    const tool = findTool(pi, "digest-log");
+
+    // Start the in-process dashboard so getDashboardUrl() returns a real URL.
+    await startDashboard(pi, createCmdCtx());
 
     // Override the mock to reject (simulating a network error / dashboard down mid-run)
     fetchMock.mockImplementation(async () => {
       throw new Error("ECONNREFUSED");
     });
-
-    const capture: { registerToolCalls: RegisterToolCall[] } = { registerToolCalls: [] };
-    const pi = createFakePi(capture);
-    installExtension(pi);
-    const tool = findTool(pi, "digest-log");
 
     // Should not throw — the tool catches POST failures and returns ok
     const result = (await tool.execute(
@@ -195,12 +215,13 @@ describe("digest-log tool", () => {
   });
 
   it("concurrent calls each POST an agent_log event", async () => {
-    writeFileSync(serverUrlPath, JSON.stringify({ url: "http://127.0.0.1:9999/" }), "utf8");
-
     const capture: { registerToolCalls: RegisterToolCall[] } = { registerToolCalls: [] };
     const pi = createFakePi(capture);
     installExtension(pi);
     const tool = findTool(pi, "digest-log");
+
+    // Start the in-process dashboard so getDashboardUrl() returns a real URL.
+    await startDashboard(pi, createCmdCtx());
 
     const messages = ["line 1", "line 2", "line 3"];
     await Promise.all(
