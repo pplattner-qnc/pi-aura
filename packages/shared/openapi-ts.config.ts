@@ -18,12 +18,35 @@
 // In the 0.99 plugin model the HTTP client is itself a plugin, so we list it
 // explicitly alongside the default @hey-api/typescript + @hey-api/sdk plugins
 // (when you set `plugins`, the defaults are no longer added automatically).
+//
+// --- .js import extensions (tsConfigPath) ---------------------------------
+// The generated client is imported by BOTH `scripts/` (moduleResolution:
+// bundler) and the `digest-dashboard` extension (moduleResolution: NodeNext).
+// Under NodeNext, relative import specifiers MUST carry a `.js` extension or
+// tsc fails with TS2307/TS2834. openapi-ts reads `output.tsConfigPath` and,
+// when the resolved tsconfig has `moduleResolution: "nodenext"`, automatically
+// appends `.js` to every generated relative import (the supported mechanism
+// since openapi-ts v0.67). We point it at `tsconfig.codegen.json` so the
+// generated tree is correct out-of-the-box and survives `npm run codegen`
+// runs — no hand-patching of generated files needed. `.js`-extended
+// specifiers also resolve fine under `bundler`, so the shared package's own
+// `tsc --noEmit` (bundler) is unaffected.
+//
+// `tsConfigPath` is resolved relative to the openapi-ts package dir, not the
+// config file, so we pass an absolute path derived from `import.meta.url`.
 
 import { defineConfig } from "@hey-api/openapi-ts";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   input: "./openapi/openapi.yaml",
-  output: "src/generated",
+  output: {
+    path: "src/generated",
+    tsConfigPath: path.resolve(__dirname, "tsconfig.codegen.json"),
+  },
   plugins: [
     // TypeScript interfaces for every component schema + request/response.
     "@hey-api/typescript",

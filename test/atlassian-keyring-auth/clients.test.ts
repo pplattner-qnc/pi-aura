@@ -19,8 +19,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Keyring, SecretKey, StoredSecret } from "@pi-aura/shared/keyring";
 
-import { atlassianClient, readAtlassianCredentials } from "../../scripts/src/clients.js";
-import * as clientsModule from "../../scripts/src/clients.js";
+import { atlassianClient, readAtlassianCredentials } from "@pi-aura/shared/digest/clients";
+import * as clientsModule from "@pi-aura/shared/digest/clients";
 
 // ---------------------------------------------------------------------------
 // Fake Keyring — implements the Keyring interface for testing.
