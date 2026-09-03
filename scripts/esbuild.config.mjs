@@ -42,11 +42,6 @@ const baseConfig = {
 // skill can't accidentally reach another skill's subcommands.
 const entries = [
   {
-    entryPoints: ["src/aura-digest.ts"],
-    // The `aura-digest` skill's morning-routine script.
-    outfile: "../skills/core/aura-digest/dist/aura-digest.mjs",
-  },
-  {
     entryPoints: ["src/aura.ts"],
     // The `aura` skill's artifact + wiki file-based-workflow script.
     outfile: "../skills/core/aura/dist/aura.mjs",

@@ -1,13 +1,13 @@
 # Testing
 
 The repo has two build targets with their own gates: the `scripts/` esbuild
-project (bundles `.mjs` for the skills) and the `@pi-aura/shared` workspace
-package (`.ts` sources consumed by both `scripts/` and the pi extension).
-Verification is typecheck + build + the shared package's unit tests.
+project (bundles `aura.mjs` for the `aura` skill) and the `@pi-aura/shared`
+workspace package (`.ts` sources consumed by both `scripts/` and the pi
+extension). Verification is typecheck + build + the shared package's unit tests.
 
 ## Framework
 
-- `scripts/`: `tsc --noEmit` + esbuild bundle (no test runner).
+- `scripts/`: `tsc --noEmit` + esbuild bundle for `aura.mjs` (no test runner).
 - `packages/shared/`: `tsc --noEmit` + `tsx --test` (Node's built-in test
   runner via `tsx` for `.ts` sources). Tests live in `packages/shared/test/`.
 
@@ -23,10 +23,10 @@ npm run codegen        # regenerate src/generated/ from openapi/openapi.yaml
 npm run typecheck      # tsc --noEmit
 npm test               # tsx --test test/*.test.ts
 
-# scripts — the skill bundles
+# scripts — the aura skill bundle
 npm run codegen        # regenerate src/generated/ from openapi/openapi.yaml (legacy tree; moved to packages/shared)
 npm run typecheck      # tsc --noEmit
-npm run build          # esbuild -> skills/*/dist/*.mjs
+npm run build          # esbuild -> skills/core/aura/dist/aura.mjs
 
 # Taskfile wrappers (run from the repo root; requires `task` on PATH —
 # https://taskfile.dev; not available on NixOS by default — use npm directly
@@ -75,25 +75,27 @@ task openapi-sync     # refresh packages/shared/openapi/openapi.yaml from the Au
   also resolve under `bundler`, so the shared package's own `tsc --noEmit` is
   unaffected.
 
-## `packages/shared/test/digest/{build-actions,write-dashboard-digest,scheduler,aura-digest-progress}.test.ts`
+## `packages/shared/test/digest/{build-actions,scheduler,fetchAction,drop-dead-shared-exports}.test.ts`
 
 Pure-logic unit tests for the digest data half (the `actions[]` routing table,
-the `followup.currentlyWorkingOn` default, the `~/.pi/aura/digest.json`
-write, the scheduler reducer, and the progress-emitter batching). These
-moved out of `scripts/src/` when the digest core moved into `@pi-aura/shared`
-(task `core-move`); they now live under `packages/shared/test/digest/` and run
-under the shared package's `tsx --test` runner (Node's built-in test runner via
-`tsx`). The two that were vitest-based (`scheduler`, `aura-digest-progress`)
-were converted to `node:test` + `node:assert` to match the shared package's
-convention. They import the digest core via the package path
-(`@pi-aura/shared/digest/...`) or intra-package relative imports.
+the `followup.currentlyWorkingOn` default, the scheduler reducer, and the
+`fetchAction` in-process path). These moved out of `scripts/src/` when the
+digest core moved into `@pi-aura/shared` (task `core-move`); they now live under
+`packages/shared/test/digest/` and run under the shared package's `tsx --test`
+runner (Node's built-in test runner via `tsx`). The `scheduler` test was
+converted from vitest to `node:test` + `node:assert` to match the shared
+package's convention. They import the digest core via the package path
+(`@pi-aura/shared/digest/...`) or intra-package relative imports. The
+`drop-dead-shared-exports.test.ts` is a structural guard asserting the CLI-era
+exports (progress-emitter, write-dashboard-digest, render/save/diff/cleanup/last
+actions) are gone.
 
 ```bash
 cd packages/shared
 npx tsx --test test/digest/build-actions.test.ts
-npx tsx --test test/digest/write-dashboard-digest.test.ts
 npx tsx --test test/digest/scheduler.test.ts
-npx tsx --test test/digest/aura-digest-progress.test.ts
+npx tsx --test test/digest/fetchAction.test.ts
+npx tsx --test test/digest/drop-dead-shared-exports.test.ts
 # or all shared tests: npm test
 ```
 
@@ -124,15 +126,16 @@ task):
    via the **package path** (`@pi-aura/shared/rest/closest-match`), not a
    sibling `.js` — the package path resolves under both runners. `import type`
    with `.js` is fine (erased at runtime).
-2. **The digest-core vitest suites moved to `packages/shared`.** The two
-   suites that used to live in `scripts/src/` and run under vitest
-   (`scheduler.test.ts` and `aura-digest-progress.test.ts`) moved to
-   `packages/shared/test/digest/` with the digest core (task `core-move`)
-   and were converted to `node:test` + `node:assert` to match the shared
-   package's `tsx --test` convention. `vitest.config.ts`'s `include` no
-   longer references them — it's just `["test/**/*.test.ts"]` now. Run them
-   with `cd packages/shared && npm test` (or `npx tsx --test
-   test/digest/<suite>.test.ts`), NOT `npx vitest run`.
+2. **The digest-core vitest suites moved to `packages/shared`.** The
+   `scheduler.test.ts` that used to live in `scripts/src/` and run under
+   vitest moved to `packages/shared/test/digest/` with the digest core (task
+   `core-move`) and was converted to `node:test` + `node:assert` to match the
+   shared package's `tsx --test` convention. `vitest.config.ts`'s `include` no
+   longer references it — it's just `["test/**/*.test.ts"]` now. Run it with
+   `cd packages/shared && npm test` (or `npx tsx --test
+   test/digest/<suite>.test.ts`), NOT `npx vitest run`. (The
+   `aura-digest-progress.test.ts` was deleted in task `cli-deletion-and-rewire`
+   — the progress-emitter module it tested is gone.)
 
 ### Mock-fidelity for external-library integration (the `_embedRaw` lesson)
 
@@ -205,15 +208,16 @@ no identity reconciliation.
 command handler with a fake `pi` (captures `setActiveTools` + `sendMessage`).
 `test/digest-dashboard/fetch-save-tools.test.ts` tests the `digest-fetch` +
 `digest-save` tools with a mocked `child_process.spawn` (no real Aura). The
-tools are thin wrappers over `aura-digest.mjs` (D5: the `.mjs` stays the single
-source of truth). The digest tools (`digest-dashboard-start`,
-`digest-dashboard-stop`, `digest-fetch`, `digest-save`) are registered but
-**inactive by default** — the `session_start` handler filters `DIGEST_TOOLS` out
-of the active set; `/digest` activates them additively.
+`digest-fetch` tool calls `fetchAction` from `@pi-aura/shared/digest/aura-digest`
+in-process (no spawned child, no CLI bundle); `digest-save` calls `saveLastDigest`.
+The digest tools (`digest-dashboard-start`, `digest-dashboard-stop`,
+`digest-fetch`, `digest-save`) are registered but **inactive by default** — the
+`session_start` handler filters `DIGEST_TOOLS` out of the active set; `/digest`
+activates them additively.
 
 ### `digest-log` tool + progress events (digest-live-progress-tree)
 
-The `digest-log` pi tool (`index.ts`) and the bundle's progress emitter (`scripts/src/progress-emitter.ts`) both POST `agent→page` events to `/api/state`; the server's `appendEvent` assigns the monotonic `id` (clients send `id: 0` as a placeholder). Tests mock `fetch` and assert the POST body, not a live server. `progress-emitter.ts`'s `createProgressEmitter` accepts an injectable `fetchImpl` (and a `flush` for run-end) — the batching unit test (`scripts/src/aura-digest-progress.test.ts`) uses `vi.useFakeTimers()` + `vi.advanceTimersByTimeAsync()` + a mock `fetchImpl` so the ~50ms batch window is deterministic (real `setTimeout` + real HTTP flakes under load). The `readDashboardUrl()` helper is duplicated locally in `index.ts` because importing it from `scripts/src/progress-emitter.ts` breaks the extension's `tsc --noEmit` (TS6059: file outside `rootDir: "."`).
+The `digest-log` pi tool (`index.ts`) POSTs `agent→page` events to the in-memory store's `pushEvent` (no spawned child, no CLI bundle). The server's `appendEvent` assigns the monotonic `id` (clients send `id: 0` as a placeholder). Tests mock `fetch` and assert the POST body, not a live server. (The old `scripts/src/progress-emitter.ts` batching module was deleted in task `cli-deletion-and-rewire` — the in-process `digest-fetch` uses `store.pushEvent` directly, and the `digest-log` tool posts individual lines.)
 
 ### `createDwellManager` + the 400ms render dwell (digest-live-progress-tree)
 

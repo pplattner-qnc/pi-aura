@@ -1,6 +1,7 @@
 // Prose verification for the aura-digest skill body (slice 4):
 // - no bash shell-outs to aura-digest.mjs in the skill body
 // - the tool-driven flow is present and coherent
+// - no live references to the deleted CLI bundle (aura-digest.mjs, dist/aura-digest)
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -34,6 +35,7 @@ function extractBashBlocks(body: string): string[] {
 describe("aura-digest skill prose", () => {
   const body = readSkillBody();
   const bashBlocks = extractBashBlocks(body);
+  const fullRaw = readFileSync(SKILL_PATH, "utf-8");
 
   it("has no bash shell-outs to aura-digest.mjs fetch/render/cleanup/save/diff/last", () => {
     const forbiddenSubcommands = ["fetch", "render", "cleanup", "save", "diff", "last"];
@@ -89,5 +91,24 @@ describe("aura-digest skill prose", () => {
     expect(body).toMatch(/digest-ack/);
     expect(body).not.toMatch(/node -e .*currentlyWorkingOn/);
     expect(body).not.toMatch(/node -e .*type:\\"ack\\"/);
+  });
+
+  it("does not reference aura-digest.mjs or dist/aura-digest as a live path", () => {
+    // After the CLI deletion (task cli-deletion-and-rewire), the skill doc
+    // should not mention the deleted bundle as a live path — neither in the
+    // frontmatter description nor in the body. The flow runs entirely
+    // in-process via typed tools (digest-fetch, digest-log, digest-save,
+    // digest-update, digest-ack, the digest-dashboard).
+    expect(fullRaw).not.toContain("aura-digest.mjs");
+    expect(fullRaw).not.toContain("dist/aura-digest");
+  });
+
+  it("does not describe the deleted digest bundle, esbuild, or task build for the digest", () => {
+    // The skill doc should not describe the deleted esbuild bundle or the
+    // `task build` step that produced it. (The aura skill's aura.mjs bundle
+    // is separate and stays — but this skill doc shouldn't describe it.)
+    expect(body).not.toContain("bundled by esbuild");
+    expect(body).not.toContain("dist/aura-digest.mjs");
+    expect(body).not.toMatch(/task build.*aura-digest/);
   });
 });

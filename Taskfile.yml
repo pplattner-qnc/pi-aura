@@ -25,12 +25,13 @@ version: "3"
 vars:
   SCRIPTS_DIR: scripts
   SHARED_DIR: packages/shared
-  DIGEST_DIST: skills/core/aura-digest/dist
   AURA_DIST: skills/core/aura/dist
-  # The two bundled entry points build produces; verified to exist after build.
+  # The bundled entry point build produces; verified to exist after build.
+  # (The aura-digest CLI bundle was deleted — digest tools now run
+  # in-process; only the aura skill's aura.mjs bundle remains.)
   ENTRY_OUTS:
     sh: |
-      echo "{{.DIGEST_DIST}}/aura-digest.mjs {{.AURA_DIST}}/aura.mjs"
+      echo "{{.AURA_DIST}}/aura.mjs"
 
 tasks:
   # Default: install build deps, then typecheck + bundle + verify.
@@ -111,7 +112,7 @@ tasks:
     desc: Remove scripts/node_modules and all built dist/ dirs (keeps the committed generated client)
     cmds:
       - rm -rf {{.SCRIPTS_DIR}}/node_modules {{.SCRIPTS_DIR}}/package-lock.json
-      - rm -rf {{.DIGEST_DIST}} {{.AURA_DIST}}
+      - rm -rf {{.AURA_DIST}}
 
   # Pull the canonical OpenAPI spec from the Aura source repo and copy it
   # over packages/shared/openapi/openapi.yaml when it changed. Idempotent.

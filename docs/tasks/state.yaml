@@ -1,2 +1,2 @@
-task: in-process-log-save
+task: cli-deletion-and-rewire
 slice: None
