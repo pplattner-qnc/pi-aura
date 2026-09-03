@@ -55,3 +55,7 @@ but changes no behavior.
   `readDashboardUrl` duplicate + keep CLI + tests green. Possibly split if
   the `@pi-aura/shared` packaging vs. extension-`core/` decision needs a
   prototype.
+
+## Implementation notes
+
+_The land-worker appends a per-slice note here as each slice lands._
