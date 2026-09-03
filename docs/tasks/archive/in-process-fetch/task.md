@@ -4,9 +4,14 @@ type: feature
 slug: in-process-fetch
 title: digest-fetch calls fetchAction in-process with onProgress wired to the in-memory stream
 map: in-process-aura-digest
-status: ready
-blocked_by: [core-move, in-process-server]
-slices: [1-fetchAction-returns-object, 2-digest-fetch-in-process, 3-drop-digest-json-and-rework-save]
+status: done
+blocked_by:
+- core-move
+- in-process-server
+slices:
+- 1-fetchAction-returns-object
+- 2-digest-fetch-in-process
+- 3-drop-digest-json-and-rework-save
 ---
 
 ## User-visible outcome
