@@ -57,3 +57,7 @@ remains (or is itself removed if empty).
 ## Implementation notes
 
 _The land-worker appends a per-slice note here as each slice lands._
+
+### slice 1 — delete-cli-shim-and-bundle
+
+Deleted `scripts/src/aura-digest.ts` (CLI shim) + `skills/core/aura-digest/dist/aura-digest.mjs` (committed bundle, 21526 lines). `scripts/esbuild.config.mjs` drops the `aura-digest` entry, KEEPS the `aura` entry (aura.mjs still builds). `scripts/package.json` description updated. Deleted `scripts/src/keyring.ts` (orphaned since core-move, zero importers, 601 lines) + `scripts/profile-fetch.mjs` (ran the deleted bundle). `Taskfile.yml` ENTRY_OUTS + `docs/dev-env.md` updated to remove aura-digest.mjs references. `@modelcontextprotocol/sdk` dep KEPT (unused in scripts now but sole declaration the shared package's mcp-client.ts relies on via workspace hoisting — slice 2 owns shared). New `cli-deletion.test.ts` (9 structural tests). Scripts typecheck + aura.mjs build green. Shared-core exports NOT touched (slice 2). Skill doc NOT touched (slice 3).
