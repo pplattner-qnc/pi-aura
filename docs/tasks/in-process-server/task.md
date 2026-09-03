@@ -97,3 +97,51 @@ _The land-worker appends a per-slice note here as each slice lands._
   removes them).
 - `dist/server.mjs` rebuilt to reflect `server.ts` source change (slice 3
   deletes the bundle).
+
+### Slice 2 — backing-in-memory (landed)
+
+- New `store.ts` module owns the in-memory backing: `currentDigest: unknown |
+  null`, `events: StateEvent[]`, `nextEventId` (monotonic, server-assigned),
+  `sseClients: Set<ServerResponse>`, `subscribers: Set<(e) => void>`.
+- Store API (the seam task 3/4 calls):
+  - `setCurrentDigest(d: unknown | null): void` — sets `currentDigest` +
+    fans out a `'change'` SSE event to all SSE clients (the browser re-fetches
+    `/api/digest` on `'change'`, matching the old `fs.watch` on `digest.json`).
+  - `getCurrentDigest(): unknown | null` — returns `currentDigest` (null when
+    unset; `/api/digest` returns 404).
+  - `pushEvent(event: StateEvent): void` — assigns `event.id = nextEventId++`
+    (overwriting client-supplied id, like `appendEvent` did), pushes to
+    `events`, writes `'event: state-change\ndata: {"id":<id>,"type":"<type>"}\n\n'`
+    to each SSE client, calls each subscriber.
+  - `subscribe(cb): () => void` — adds to `subscribers`, returns unsubscribe.
+  - `registerSseClient(res): () => void` — adds `res` to `sseClients`, returns
+    a removal fn (called on `req 'close'`).
+  - `resetStore(): void` — clears everything (called in `teardownDashboard` +
+    tests).
+- `server.ts` `startServer`: `StartServerOptions` now only has
+  `openBrowser`/`browserOpener` (dropped `dashboardPath`/`statePath`).
+  `/api/digest` GET → `getCurrentDigest()` (404 if null, 200+JSON otherwise — no
+  file read). `/events` SSE → `registerSseClient(res)` + unregister on
+  `req 'close'` (no `fs.watch`). `/api/state` POST → `pushEvent(parsed)` (no
+  file write). The shell route (GET `/`) unchanged. `done()` just closes the
+  server (no watchers). Self-run entry block kept (slice 3 removes it);
+  `startServer()` call there dropped `dashboardPath`/`statePath`.
+- `listener.ts`: rewritten to subscribe to `store.subscribe`. On each event,
+  if `dir === "page→agent"` and `type === "action_click"` and the payload is
+  an `ActionClickPayload`, `pi.sendMessage(...)`. `ListenerOptions` now only
+  has `{ pi }` (dropped `statePath`/`pollIntervalMs`). `stop()` unsubscribes.
+  `isActionClickPayload` kept. No `fs.watch`, no polling, no cursor.
+- `index.ts`: `startDashboard` no longer destructures `dashboardPath`/
+  `statePath` for `startServer`/`startListener` (they no longer take them).
+  `teardownDashboard` calls `resetStore()` after closing the server + listener
+  (clean slate for a fresh start). Still deletes `state.json` best-effort
+  (may linger from a pre-slice-2 session).
+- `state.ts`: `StateEvent`/`AckPayload`/`UpdateViewPayload` types kept.
+  `readState`/`appendEvent`/`writePid`/`clearPid`/`EMPTY_STATE`/`StateFile`/
+  `writeQueues` remain exported but are now dead code (slice 3 removes them).
+  No imports of these from `server.ts`/`listener.ts`/`index.ts`.
+- `digest-log`: unchanged — still HTTP-POSTs to `/api/state`, which now
+  `pushEvent`s in-memory. `log-tool.test.ts` passes unchanged.
+- Accepted regression: `/api/digest` returns 404 until task 3 calls
+  `setCurrentDigest`. `digest-fetch` still writes `~/.pi/aura/digest.json` on
+  disk, but `/api/digest` reads the in-memory store, not that file.
