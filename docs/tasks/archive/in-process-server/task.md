@@ -4,9 +4,13 @@ type: feature
 slug: in-process-server
 title: Replace the detached dashboard server child with an in-process http.Server the extension owns
 map: in-process-aura-digest
-status: ready
-blocked_by: [core-move]
-slices: [1-lifecycle-in-process, 2-backing-in-memory, 3-dead-code-and-bundle-sweep]
+status: done
+blocked_by:
+- core-move
+slices:
+- 1-lifecycle-in-process
+- 2-backing-in-memory
+- 3-dead-code-and-bundle-sweep
 ---
 
 ## User-visible outcome
