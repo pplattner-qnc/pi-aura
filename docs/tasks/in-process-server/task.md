@@ -68,3 +68,32 @@ in-memory server and serves whatever it holds.)
 ## Implementation notes
 
 _The land-worker appends a per-slice note here as each slice lands._
+
+### Slice 1 — lifecycle-in-process (landed)
+
+- In-process `serverHandle = {server, port, url, done}` held in module scope;
+  `getDashboardUrl()` returns `serverHandle?.url ?? null`.
+- `startDashboard` rewritten: calls `startServer` in-process (imported from
+  `./server.ts`), stores the result in `serverHandle`. No spawn, no unref, no
+  `writePid`, no `waitForServerUrl`, no `resolveServerEntryPath`. Opens the
+  browser to `serverHandle.url`. "Already running" check is
+  `serverHandle !== null`.
+- `teardownDashboard` rewritten: calls `serverHandle.done()` (closes the
+  server + watchers), stops the listener, deletes `state.json`, sets
+  `serverHandle = null`. Signature changed from `(statePath, serverUrlPath)`
+  to `(statePath)` — no `server-url.json` to delete.
+- `server.ts` `startServer`: stopped writing `server-url.json` (dropped the
+  `writeFileSync` + `serverUrlPath` option). Handlers unchanged (still
+  file-backed).
+- `digest-fetch`/`digest-log` switched from `readDashboardUrl()` to
+  `getDashboardUrl()`.
+- Deleted dead lifecycle code: `spawn`-of-server child, `unref`,
+  `waitForServerUrl`, `isProcessAlive`, `terminateProcess`, `deleteFiles`,
+  `resolveServerEntryPath`, the orphan-reap branch, `readState`/`writePid`
+  imports.
+- `runAuraDigest`'s CLI spawn KEPT (task 3 rewires it).
+- Backing still file-backed this slice (slice 2 moves it in-memory).
+- `writePid`/`clearPid` remain exported from `state.ts` but unused (slice 3
+  removes them).
+- `dist/server.mjs` rebuilt to reflect `server.ts` source change (slice 3
+  deletes the bundle).
