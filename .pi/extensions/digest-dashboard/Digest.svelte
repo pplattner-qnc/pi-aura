@@ -184,21 +184,24 @@
         }
         fetchMode = true;
       }
-      // Check if we should transition to the digest view.
-      maybeTransitionToDigest();
+      // Check if the agent signaled the digest is final (refine_done).
+      const refineDone = events.some(
+        (e) => e.dir === "agent→page" && e.type === "refine_done",
+      );
+      if (refineDone) {
+        await transitionToDigest();
+      }
     } catch {
       // Best-effort: state.json fetch failure is non-fatal.
     }
   }
 
-  // Transition from fetch mode to the digest view when the root node is
-  // terminal (done) and digest.json is present. We re-fetch /api/digest to
-  // check availability, then switch the view.
-  async function maybeTransitionToDigest(): Promise<void> {
+  // Transition from fetch mode to the digest view when the agent signals
+  // the digest is final (a `refine_done` event from digest-finalize). The
+  // tree stays during the augment phase (root done but no refine_done yet) —
+  // the "Refining…" header + the augment digest-log lines carry the view.
+  async function transitionToDigest(): Promise<void> {
     if (!fetchMode) return;
-    const tree = buildProgressTree(progressNodes);
-    if (!isRootDone(tree)) return;
-    // Root is done — check if digest.json is available.
     try {
       const res = await fetch("/api/digest");
       if (res.ok) {
@@ -208,7 +211,8 @@
         loading = false;
         fetchMode = false;
       }
-      // If digest.json is not yet present, stay in fetch mode.
+      // If the digest isn't available yet, stay in fetch mode (will retry on
+      // the next state-change).
     } catch {
       // Stay in fetch mode — will retry on next state-change.
     }
@@ -428,7 +432,7 @@
   <div class="h-screen overflow-hidden bg-base-100 text-base-content p-4 sm:p-6">
     <div class="h-full max-w-3xl mx-auto flex flex-col gap-4">
       <header class="shrink-0">
-        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">Fetching digest…</h1>
+        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">{#if isRootDone(buildProgressTree(progressNodes))}Refining…{:else}Fetching digest…{/if}</h1>
       </header>
 
       <section class="flex-1 min-h-0 overflow-auto" data-progress-tree>

@@ -2,7 +2,7 @@
 //
 // Structural/grep-style tests: verify the final polish state after slice 1
 // (digest-log direct push) landed. This slice is NO behavior change — it
-// confirms no residual dead HTTP-POST refs, confirms digest-save is in its
+// confirms no residual dead HTTP-POST refs, confirms digest-finalize is in its
 // final state, and asserts the digest-log tool description + the skill-doc
 // digest-log line no longer say "no-op if the dashboard is not running"
 // (the always-records semantics from slice 1).
@@ -52,23 +52,23 @@ describe("slice 2 — cleanup-and-final-polish", () => {
     });
   });
 
-  describe("save-final seam (digest-save unchanged, final state from task 3)", () => {
+  describe("save-final seam (digest-finalize unchanged, final state from task 3)", () => {
     it("uses getCurrentDigest to read the in-memory digest", () => {
       const source = readExtFile("index.ts");
-      const saveBlock = extractToolBlock(source, "digest-save");
+      const saveBlock = extractToolBlock(source, "digest-finalize");
       expect(saveBlock).toContain("getCurrentDigest");
     });
 
     it("calls saveLastDigest (no dir, no spawn)", () => {
       const source = readExtFile("index.ts");
-      const saveBlock = extractToolBlock(source, "digest-save");
+      const saveBlock = extractToolBlock(source, "digest-finalize");
       expect(saveBlock).toContain("saveLastDigest");
       expect(saveBlock).not.toContain("spawn");
     });
 
     it("errors when digest is null (no current digest)", () => {
       const source = readExtFile("index.ts");
-      const saveBlock = extractToolBlock(source, "digest-save");
+      const saveBlock = extractToolBlock(source, "digest-finalize");
       expect(saveBlock).toContain("no current digest");
     });
   });

@@ -122,7 +122,7 @@ describe("slice: drop-dead-shared-exports — no-dead-exports seam", () => {
   it("aura-digest.ts still exports saveLastDigest", () => {
     assert.ok(
       /\bexport\s+function\s+saveLastDigest\b/.test(source),
-      "saveLastDigest must remain (in-process digest-save uses it)",
+      "saveLastDigest must remain (in-process digest-finalize uses it)",
     );
   });
 
