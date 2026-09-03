@@ -6,7 +6,7 @@ title: Delete the aura-digest CLI bundle + esbuild config; rewire skills/docs/te
 map: in-process-aura-digest
 status: ready
 blocked_by: [core-move, in-process-fetch, in-process-log-save]
-slices: []
+slices: [1-delete-cli-shim-and-bundle, 2-drop-dead-shared-exports, 3-rewrite-skill-doc-and-tests]
 ---
 
 ## User-visible outcome
@@ -53,3 +53,7 @@ remains (or is itself removed if empty).
   the skill doc + audit other invokers; (c) update/rewrite tests; (d)
   friction log + dead-code sweep (incl. the `c80ef96d`/`e56e96ec` lifecycle
   fixes that are now dead code).
+
+## Implementation notes
+
+_The land-worker appends a per-slice note here as each slice lands._
