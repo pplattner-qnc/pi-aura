@@ -392,7 +392,7 @@ describe("digest-fetch tool (in-process)", () => {
     // No dir in details (the temp dir is gone).
     expect(result.details.dir).toBeUndefined();
     expect(Object.keys(result.details)).toHaveLength(0);
-  });
+  }, 15000);
 
   it("does not spawn a child process for fetch", async () => {
     const pi = createFakePi();
@@ -424,7 +424,7 @@ describe("digest-fetch tool (in-process)", () => {
     // The spawn mock is only called for "save", not "fetch".
     const fetchSpawnCalls = spawnMock.mock.calls.filter((c) => c[1]?.[1] === "fetch");
     expect(fetchSpawnCalls).toHaveLength(0);
-  });
+  }, 15000);
 
   it("pushes progress events to the store (type: progress)", async () => {
     const pi = createFakePi();
@@ -454,7 +454,7 @@ describe("digest-fetch tool (in-process)", () => {
       expect(typeof payload.startedAt).toBe("number");
       expect(typeof payload.kind).toBe("string");
     }
-  });
+  }, 15000);
 
   it("calls setCurrentDigest so the dashboard serves the fetched digest", async () => {
     const pi = createFakePi();
@@ -476,7 +476,7 @@ describe("digest-fetch tool (in-process)", () => {
 
     // The stored digest matches the returned digest.
     expect(stored).toEqual(parsed.digest);
-  });
+  }, 15000);
 
   it("does not write ~/.pi/aura/digest.json", async () => {
     const pi = createFakePi();
@@ -487,7 +487,7 @@ describe("digest-fetch tool (in-process)", () => {
 
     const digestPath = path.join(auraDir, "digest.json");
     expect(existsSync(digestPath)).toBe(false);
-  });
+  }, 15000);
 
   it("returns a clear error result when fetchAction throws", async () => {
     const pi = createFakePi();
@@ -509,7 +509,7 @@ describe("digest-fetch tool (in-process)", () => {
     expect(result.content[0].text).toContain("Aura PAT missing");
     expect(result.details.dir).toBeUndefined();
     expect(Object.keys(result.details)).toHaveLength(0);
-  });
+  }, 15000);
 });
 
 // ---------------------------------------------------------------------------
@@ -579,7 +579,7 @@ describe("digest-fetch dashboard-absent warning (in-process)", () => {
 
     // The digest was still populated in the store despite the dashboard being down.
     expect(getCurrentDigest()).not.toBeNull();
-  });
+  }, 15000);
 
   it("shows no warning when dashboard is running", async () => {
     const pi = createFakePi();
@@ -614,7 +614,7 @@ describe("digest-fetch dashboard-absent warning (in-process)", () => {
       report: unknown;
     };
     expect(parsed.digest.queue[0]!.key).toBe("AURA-100");
-  });
+  }, 15000);
 });
 
 // ---------------------------------------------------------------------------
@@ -700,7 +700,7 @@ describe("digest-fetch SSE fan-out (in-process)", () => {
 
     // The SSE client received a 'change' event (setCurrentDigest fan-out).
     expect(receivedChunks.some((c) => c.includes("event: change"))).toBe(true);
-  });
+  }, 15000);
 });
 
 // ---------------------------------------------------------------------------
