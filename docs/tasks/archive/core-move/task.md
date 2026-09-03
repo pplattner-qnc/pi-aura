@@ -4,9 +4,12 @@ type: feature
 slug: core-move
 title: Move the aura-digest core out of scripts/src into the extension/shared layer
 map: in-process-aura-digest
-status: ready
+status: done
 blocked_by: []
-slices: [1-leaf-core-to-shared, 2-aura-digest-and-deps-to-shared, 3-remove-readDashboardUrl-duplicate]
+slices:
+- 1-leaf-core-to-shared
+- 2-aura-digest-and-deps-to-shared
+- 3-remove-readDashboardUrl-duplicate
 ---
 
 ## User-visible outcome
