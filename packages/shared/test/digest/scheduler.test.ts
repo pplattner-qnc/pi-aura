@@ -5,8 +5,9 @@
 // state), and a programming error (unknown kind, throwing reducer) fails the
 // run loudly instead of silently dropping work.
 
-import { describe, it, expect } from "vitest";
-import { runTasks, type Kind, type KindMap, type TaskRef, type ProgressEvent, type NodeHandle } from "./scheduler.js";
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { runTasks, type Kind, type KindMap, type TaskRef, type ProgressEvent, type NodeHandle, type Hashable, type Ctx } from "../../src/digest/scheduler.js";
 
 interface CountState {
   // bumped inside a reducer; the test checks it never exceeds 1.
@@ -16,18 +17,15 @@ interface CountState {
   touched: number;
 }
 
-const makeKinds = (extra?: Record<string, Kind<unknown, unknown, CountState>>): KindMap<CountState> => ({
+const makeKinds = (extra?: Record<string, Kind<Hashable, unknown, CountState>>): KindMap<CountState> => ({
   // A no-op root that spawns the test's actual tasks.
   start: {
     run: async () => null,
-    spawn: () => extra?.["start"]?.spawn ? extra["start"].spawn(null, null as never, { state: { inReducer: 0, maxInReducer: 0, touched: 0 } }) : [],
+    spawn: () => extra?.["start"]?.spawn ? extra["start"].spawn(null as never, null as never, { state: { inReducer: 0, maxInReducer: 0, touched: 0 } } as never) : [],
     reduce: () => {},
   } as unknown as Kind<Hashable, unknown, CountState>,
   ...extra,
 } as KindMap<CountState>);
-
-// Minimal helper to avoid repeating the import-less type.
-type Hashable = import("./scheduler.js").Hashable;
 
 describe("runTasks synchronization", () => {
   it("never runs two reducers at the same time (mutex)", async () => {
@@ -45,10 +43,10 @@ describe("runTasks synchronization", () => {
         reduce: () => {},
       } as unknown as Kind<Hashable, unknown, CountState>,
       slow: {
-        run: async (_i: number, _ctx) => "done",
+        run: async (_i: number, _ctx: Ctx<CountState>) => "done",
         // A reducer that yields. Pre-mutex it would interleave; now the
         // drain serializes it and the scheduler rejects the async return.
-        reduce: async (s) => {
+        reduce: async (s: CountState) => {
           s.inReducer++;
           s.maxInReducer = Math.max(s.maxInReducer, s.inReducer);
           await Promise.resolve();
@@ -58,12 +56,12 @@ describe("runTasks synchronization", () => {
     };
 
     const init: CountState = { inReducer: 0, maxInReducer: 0, touched: 0 };
-    const result = await expect(
+    await assert.rejects(
       runTasks<CountState>({ kind: "start", input: null }, kinds, init, { concurrency: 8 }),
-    ).rejects.toThrow(/reduce must be synchronous/);
-    void result;
+      /reduce must be synchronous/,
+    );
     // Before it was rejected, no overlap was observed: the drain is serial.
-    expect(init.maxInReducer).toBeLessThanOrEqual(1);
+    assert.ok(init.maxInReducer <= 1);
   });
 
   it("folds synchronously and serially into shared state (correctness)", async () => {
@@ -84,7 +82,7 @@ describe("runTasks synchronization", () => {
       } as unknown as Kind<Hashable, unknown, { count: number }>,
       inc: {
         run: async () => 1,
-        reduce: (s) => {
+        reduce: (s: { count: number }) => {
           s.count++;
         },
       } as unknown as Kind<Hashable, unknown, { count: number }>,
@@ -95,9 +93,9 @@ describe("runTasks synchronization", () => {
       { count: 0 },
       { concurrency: 16 },
     );
-    expect(result.state.count).toBe(100);
-    expect(result.capped).toBe(false);
-    expect(result.taskCount).toBe(101); // 1 start + 100 inc
+    assert.equal(result.state.count, 100);
+    assert.equal(result.capped, false);
+    assert.equal(result.taskCount, 101); // 1 start + 100 inc
   });
 
   it("rejects on an unknown kind (loud failure, not silent drop)", async () => {
@@ -108,9 +106,10 @@ describe("runTasks synchronization", () => {
         reduce: () => {},
       } as unknown as Kind<Hashable, unknown, { count: number }>,
     };
-    await expect(
+    await assert.rejects(
       runTasks<{ count: number }>({ kind: "start", input: null }, kinds, { count: 0 }),
-    ).rejects.toThrow(/unknown kind "no-such-kind"/);
+      /unknown kind "no-such-kind"/,
+    );
   });
 
   it("rejects on a throwing reducer (not swallowed)", async () => {
@@ -127,9 +126,10 @@ describe("runTasks synchronization", () => {
         },
       } as unknown as Kind<Hashable, unknown, { count: number }>,
     };
-    await expect(
+    await assert.rejects(
       runTasks<{ count: number }>({ kind: "start", input: null }, kinds, { count: 0 }),
-    ).rejects.toThrow(/reducer exploded/);
+      /reducer exploded/,
+    );
   });
 
   it("degrades gracefully when run() fails (no fold, run continues)", async () => {
@@ -146,7 +146,7 @@ describe("runTasks synchronization", () => {
           if (i === "fail") throw new Error("down");
           return i;
         },
-        reduce: (s, out) => {
+        reduce: (s: { ok: number }, out: string) => {
           if (out === "win") s.ok++;
         },
       } as unknown as Kind<Hashable, unknown, { ok: number }>,
@@ -156,7 +156,7 @@ describe("runTasks synchronization", () => {
       kinds,
       { ok: 0 },
     );
-    expect(result.state.ok).toBe(1);
+    assert.equal(result.state.ok, 1);
   });
 
   it("stops runaway queue expansion: caps total tasks, flips `capped`, drops overflow", async () => {
@@ -171,8 +171,8 @@ describe("runTasks synchronization", () => {
       } as unknown as Kind<Hashable, unknown, { ran: number }>,
       chain: {
         run: async (i: number) => i,
-        spawn: (i) => [{ kind: "chain", input: i + 1 }], // always one more -> unbounded
-        reduce: (s) => { s.ran++; },
+        spawn: (i: number) => [{ kind: "chain", input: i + 1 }], // always one more -> unbounded
+        reduce: (s: { ran: number }) => { s.ran++; },
       } as unknown as Kind<Hashable, unknown, { ran: number }>,
     };
     const result = await runTasks<{ ran: number }>(
@@ -181,12 +181,12 @@ describe("runTasks synchronization", () => {
       { ran: 0 },
       { initialMaxTasks: 5 },
     );
-    expect(result.capped).toBe(true);
+    assert.equal(result.capped, true);
     // start + 4 chain tasks (0..3) = 5 enqueued; chain-4 is the 6th -> dropped.
-    expect(result.taskCount).toBe(5);
+    assert.equal(result.taskCount, 5);
     // start.reduce is a no-op; the 4 chain tasks each bumped `ran`.
-    expect(result.state.ran).toBe(4);
-    expect(result.state.ran).toBeLessThan(result.taskCount);
+    assert.equal(result.state.ran, 4);
+    assert.ok(result.state.ran < result.taskCount);
   });
 
   it("lets the first reducer set the task cap (setMaxTasks), before its spawn", async () => {
@@ -208,7 +208,7 @@ describe("runTasks synchronization", () => {
       } as unknown as Kind<Hashable, unknown, { ran: number }>,
       row: {
         run: async () => null,
-        reduce: (s) => { s.ran++; },
+        reduce: (s: { ran: number }) => { s.ran++; },
       } as unknown as Kind<Hashable, unknown, { ran: number }>,
       "late-setter": {
         run: async () => null,
@@ -221,13 +221,13 @@ describe("runTasks synchronization", () => {
       { ran: 0 },
       { initialMaxTasks: 30 },
     );
-    expect(result.capped).toBe(false);
-    expect(result.maxTasks).toBe(40); // set by start, not the default 30
+    assert.equal(result.capped, false);
+    assert.equal(result.maxTasks, 40); // set by start, not the default 30
     // 3 row tasks bump `ran`; late-setter's reduce only tries to set the cap
     // (ignored) and does not bump `ran`.
-    expect(result.state.ran).toBe(3);
+    assert.equal(result.state.ran, 3);
     // late-setter's setMaxTasks was ignored and recorded.
-    expect(result.runWarnings.some((w) => /ignored from kind "late-setter"/.test(w))).toBe(true);
+    assert.ok(result.runWarnings.some((w) => /ignored from kind "late-setter"/.test(w)));
   });
 });
 
@@ -249,7 +249,7 @@ describe("runTasks progress nodes", () => {
     let rootNode: NodeHandle | undefined;
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           rootNode = ctx.node; // root has no parent-created attachment
           createdNode = ctx.progress.create(undefined, "root task");
           ctx.progress.finish(createdNode);
@@ -263,17 +263,17 @@ describe("runTasks progress nodes", () => {
       { kind: "start", input: null }, kinds, { dummy: 0 },
       { onProgress: hook },
     );
-    expect(rootNode).toBeUndefined();
-    expect(createdNode).toBeDefined();
-    expect(events.some((e) => e.label === "root task" && e.status === "running")).toBe(true);
-    expect(events.some((e) => e.label === "root task" && e.status === "done")).toBe(true);
+    assert.equal(rootNode, undefined);
+    assert.ok(createdNode !== undefined);
+    assert.ok(events.some((e) => e.label === "root task" && e.status === "running"));
+    assert.ok(events.some((e) => e.label === "root task" && e.status === "done"));
   });
 
   it("finish(node) marks node done right now; node stays (not removed)", async () => {
     let createdNode: NodeHandle | undefined;
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           createdNode = ctx.progress.create(undefined, "my task");
           ctx.progress.finish(createdNode);
           return null;
@@ -287,15 +287,15 @@ describe("runTasks progress nodes", () => {
       { onProgress: hook },
     );
     const nodeEvents = events.filter((e) => e.label === "my task");
-    expect(nodeEvents.length).toBe(2);
-    expect(nodeEvents[0].status).toBe("running");
-    expect(nodeEvents[1].status).toBe("done");
+    assert.equal(nodeEvents.length, 2);
+    assert.equal(nodeEvents[0].status, "running");
+    assert.equal(nodeEvents[1].status, "done");
   });
 
   it("finish(node, { deferCloseForChildren: true }) with no children becomes done immediately", async () => {
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           const node = ctx.progress.create(undefined, "deferred-empty");
           ctx.progress.finish(node, { deferCloseForChildren: true });
           return null;
@@ -308,7 +308,7 @@ describe("runTasks progress nodes", () => {
       { kind: "start", input: null }, kinds, { dummy: 0 },
       { onProgress: hook },
     );
-    expect(lastStatus(events, "deferred-empty")?.status).toBe("done");
+    assert.equal(lastStatus(events, "deferred-empty")?.status, "done");
   });
 
   it("deferred parent stays running until all child-nodes close, then resolves to done", async () => {
@@ -321,7 +321,7 @@ describe("runTasks progress nodes", () => {
     let child1Node: NodeHandle | undefined;
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           parentNode = ctx.progress.create(undefined, "parent");
           child0Node = ctx.progress.create(parentNode, "child 0");
           child1Node = ctx.progress.create(parentNode, "child 1");
@@ -335,7 +335,7 @@ describe("runTasks progress nodes", () => {
         reduce: () => {},
       } as unknown as Kind<Hashable, unknown, { dummy: number }>,
       child: {
-        run: async (_input: number, ctx) => {
+        run: async (_input: number, ctx: Ctx<{ dummy: number }>) => {
           ctx.progress.finish(ctx.node!);
           return null;
         },
@@ -348,9 +348,9 @@ describe("runTasks progress nodes", () => {
       { onProgress: hook },
     );
     // Parent stays running until both children finish, then resolves to done.
-    expect(lastStatus(events, "parent")?.status).toBe("done");
-    expect(lastStatus(events, "child 0")?.status).toBe("done");
-    expect(lastStatus(events, "child 1")?.status).toBe("done");
+    assert.equal(lastStatus(events, "parent")?.status, "done");
+    assert.equal(lastStatus(events, "child 0")?.status, "done");
+    assert.equal(lastStatus(events, "child 1")?.status, "done");
   });
 
   it("deferred parent becomes error when any child-node errors", async () => {
@@ -359,7 +359,7 @@ describe("runTasks progress nodes", () => {
     let child1Node: NodeHandle | undefined;
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           parentNode = ctx.progress.create(undefined, "parent");
           child0Node = ctx.progress.create(parentNode, "child 0");
           child1Node = ctx.progress.create(parentNode, "child 1");
@@ -373,7 +373,7 @@ describe("runTasks progress nodes", () => {
         reduce: () => {},
       } as unknown as Kind<Hashable, unknown, { dummy: number }>,
       child: {
-        run: async (i: number, ctx) => {
+        run: async (i: number, ctx: Ctx<{ dummy: number }>) => {
           if (i === 0) ctx.progress.setStatus(ctx.node!, "error");
           else ctx.progress.finish(ctx.node!);
           return null;
@@ -386,9 +386,9 @@ describe("runTasks progress nodes", () => {
       { kind: "start", input: null }, kinds, { dummy: 0 },
       { onProgress: hook },
     );
-    expect(lastStatus(events, "parent")?.status).toBe("error");
-    expect(lastStatus(events, "child 0")?.status).toBe("error");
-    expect(lastStatus(events, "child 1")?.status).toBe("done");
+    assert.equal(lastStatus(events, "parent")?.status, "error");
+    assert.equal(lastStatus(events, "child 0")?.status, "error");
+    assert.equal(lastStatus(events, "child 1")?.status, "done");
   });
 
   it("deferred parent: child-node attached AFTER the finish still counts (dynamic)", async () => {
@@ -400,7 +400,7 @@ describe("runTasks progress nodes", () => {
     let lateChildFinished = false;
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           parentNode = ctx.progress.create(undefined, "parent");
           earlyChild = ctx.progress.create(parentNode, "early child");
           ctx.progress.finish(parentNode, { deferCloseForChildren: true });
@@ -422,8 +422,8 @@ describe("runTasks progress nodes", () => {
       { kind: "start", input: null }, kinds, { dummy: 0 },
       { onProgress: hook },
     );
-    expect(lateChildFinished).toBe(true);
-    expect(lastStatus(events, "parent")?.status).toBe("done");
+    assert.equal(lateChildFinished, true);
+    assert.equal(lastStatus(events, "parent")?.status, "done");
   });
 
   it("deferred parent with unfinished child-nodes: sweep closes children as error, parent resolves to error", async () => {
@@ -435,7 +435,7 @@ describe("runTasks progress nodes", () => {
     let child1Node: NodeHandle | undefined;
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           parentNode = ctx.progress.create(undefined, "parent");
           child0Node = ctx.progress.create(parentNode, "child 0");
           child1Node = ctx.progress.create(parentNode, "child 1");
@@ -459,15 +459,15 @@ describe("runTasks progress nodes", () => {
       { onProgress: hook },
     );
     // Children swept to error → parent resolves to error.
-    expect(lastStatus(events, "parent")?.status).toBe("error");
-    expect(lastStatus(events, "child 0")?.status).toBe("error");
-    expect(lastStatus(events, "child 1")?.status).toBe("error");
+    assert.equal(lastStatus(events, "parent")?.status, "error");
+    assert.equal(lastStatus(events, "child 0")?.status, "error");
+    assert.equal(lastStatus(events, "child 1")?.status, "error");
   });
 
   it("setStatus mutates a node's status directly", async () => {
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           const node = ctx.progress.create(undefined, "my task");
           ctx.progress.setStatus(node, "error");
           return null;
@@ -481,15 +481,15 @@ describe("runTasks progress nodes", () => {
       { onProgress: hook },
     );
     const nodeEvents = events.filter((e) => e.label === "my task");
-    expect(nodeEvents[0].status).toBe("running");
-    expect(nodeEvents[1].status).toBe("error");
-    expect(nodeEvents.length).toBe(2);
+    assert.equal(nodeEvents[0].status, "running");
+    assert.equal(nodeEvents[1].status, "error");
+    assert.equal(nodeEvents.length, 2);
   });
 
   it("a node never finished → end-of-run sweep marks it error", async () => {
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           ctx.progress.create(undefined, "orphan");
           return null;
         },
@@ -502,14 +502,14 @@ describe("runTasks progress nodes", () => {
       { onProgress: hook },
     );
     const nodeEvents = events.filter((e) => e.label === "orphan");
-    expect(nodeEvents[0].status).toBe("running");
-    expect(nodeEvents[nodeEvents.length - 1].status).toBe("error");
+    assert.equal(nodeEvents[0].status, "running");
+    assert.equal(nodeEvents[nodeEvents.length - 1].status, "error");
   });
 
   it("a task that throws does NOT trigger per-task node auto-close (only end-of-run sweep)", async () => {
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           ctx.progress.create(undefined, "will-throw");
           throw new Error("task exploded");
         },
@@ -523,9 +523,9 @@ describe("runTasks progress nodes", () => {
     );
     const nodeEvents = events.filter((e) => e.label === "will-throw");
     // running (from create), then error (from end-of-run sweep only).
-    expect(nodeEvents[0].status).toBe("running");
-    expect(nodeEvents[1].status).toBe("error");
-    expect(nodeEvents.length).toBe(2);
+    assert.equal(nodeEvents[0].status, "running");
+    assert.equal(nodeEvents[1].status, "error");
+    assert.equal(nodeEvents.length, 2);
   });
 
   it("TaskRef.node threads to the child as ctx.node", async () => {
@@ -533,7 +533,7 @@ describe("runTasks progress nodes", () => {
     let childCtxNode: NodeHandle | undefined;
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           parentNode = ctx.progress.create(undefined, "parent");
           return null;
         },
@@ -541,26 +541,26 @@ describe("runTasks progress nodes", () => {
         reduce: () => {},
       } as unknown as Kind<Hashable, unknown, { dummy: number }>,
       child: {
-        run: async (_input: number, ctx) => {
+        run: async (_input: number, ctx: Ctx<{ dummy: number }>) => {
           childCtxNode = ctx.node;
           return null;
         },
         reduce: () => {},
       } as unknown as Kind<Hashable, unknown, { dummy: number }>,
     };
-    const { events, hook } = recorder();
+    const { hook } = recorder();
     await runTasks(
       { kind: "start", input: null }, kinds, { dummy: 0 },
       { onProgress: hook },
     );
-    expect(childCtxNode).toBeDefined();
-    expect(childCtxNode).toBe(parentNode);
+    assert.ok(childCtxNode !== undefined);
+    assert.equal(childCtxNode, parentNode);
   });
 
   it("nodes are append-only: never removed mid-run", async () => {
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           const node = ctx.progress.create(undefined, "persistent");
           ctx.progress.finish(node);
           return null;
@@ -574,14 +574,14 @@ describe("runTasks progress nodes", () => {
       { onProgress: hook },
     );
     const nodeEvents = events.filter((e) => e.label === "persistent");
-    expect(nodeEvents.length).toBe(2);
-    expect(nodeEvents.every((e) => e.id === nodeEvents[0].id)).toBe(true);
+    assert.equal(nodeEvents.length, 2);
+    assert.ok(nodeEvents.every((e) => e.id === nodeEvents[0].id));
   });
 
   it("onProgress fires for every status transition", async () => {
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           const node = ctx.progress.create(undefined, "all transitions");
           ctx.progress.setStatus(node, "error");
           ctx.progress.setStatus(node, "done");
@@ -596,14 +596,14 @@ describe("runTasks progress nodes", () => {
       { onProgress: hook },
     );
     const nodeEvents = events.filter((e) => e.label === "all transitions");
-    expect(nodeEvents.map((e) => e.status)).toEqual(["running", "error", "done"]);
+    assert.deepEqual(nodeEvents.map((e) => e.status), ["running", "error", "done"]);
   });
 
   it("parent-child relationship in ProgressEvent via parentId", async () => {
     let parentNode: NodeHandle | undefined;
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           parentNode = ctx.progress.create(undefined, "root parent");
           const child = ctx.progress.create(parentNode, "child node");
           ctx.progress.finish(child);
@@ -619,8 +619,8 @@ describe("runTasks progress nodes", () => {
       { onProgress: hook },
     );
     const childRunning = events.find((e) => e.label === "child node" && e.status === "running");
-    expect(childRunning).toBeDefined();
-    expect(childRunning?.parentId).toBe(parentNode!.id.toString());
+    assert.ok(childRunning !== undefined);
+    assert.equal(childRunning?.parentId, parentNode!.id.toString());
   });
 
   // --- FIX 1: leaf node with deferCloseForChildren is a no-op; plain finish keeps it running ---
@@ -637,7 +637,7 @@ describe("runTasks progress nodes", () => {
     // they would flip to "done" before the child task runs.
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           const leaf = ctx.progress.create(undefined, "leaf-defer");
           ctx.progress.finish(leaf, { deferCloseForChildren: true });
           return null;
@@ -652,8 +652,8 @@ describe("runTasks progress nodes", () => {
     );
     // The leaf resolves to "done" immediately — there are no children to wait for.
     const leafEvents = events.filter((e) => e.label === "leaf-defer");
-    expect(leafEvents[0].status).toBe("running");
-    expect(leafEvents[leafEvents.length - 1].status).toBe("done");
+    assert.equal(leafEvents[0].status, "running");
+    assert.equal(leafEvents[leafEvents.length - 1].status, "done");
   });
 
   it("leaf node left running and finished later via finish(node) stays running until the finish call", async () => {
@@ -664,7 +664,7 @@ describe("runTasks progress nodes", () => {
     let leafNode: NodeHandle | undefined;
     const kinds: KindMap<{ dummy: number }> = {
       start: {
-        run: async (_input, ctx) => {
+        run: async (_input: Hashable, ctx: Ctx<{ dummy: number }>) => {
           leafNode = ctx.progress.create(undefined, "leaf-task");
           // Do NOT finish with deferCloseForChildren — leave it running.
           return null;
@@ -673,7 +673,7 @@ describe("runTasks progress nodes", () => {
         reduce: () => {},
       } as unknown as Kind<Hashable, unknown, { dummy: number }>,
       child: {
-        run: async (_input: number, ctx) => {
+        run: async (_input: number, ctx: Ctx<{ dummy: number }>) => {
           // Simulate work — the node is still "running" at this point.
           await Promise.resolve();
           // The finally block finishes the node plainly (no defer).
@@ -690,9 +690,9 @@ describe("runTasks progress nodes", () => {
     );
     // The leaf stays "running" until the child task finishes it.
     const leafEvents = events.filter((e) => e.label === "leaf-task");
-    expect(leafEvents[0].status).toBe("running");
-    expect(leafEvents[leafEvents.length - 1].status).toBe("done");
+    assert.equal(leafEvents[0].status, "running");
+    assert.equal(leafEvents[leafEvents.length - 1].status, "done");
     // Exactly 2 events: running (from create) + done (from child's finish).
-    expect(leafEvents.length).toBe(2);
+    assert.equal(leafEvents.length, 2);
   });
 });

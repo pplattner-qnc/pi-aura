@@ -41,12 +41,12 @@ import type {
   ArtifactListItem,
 } from "@pi-aura/shared/aura-client";
 import { buildAtlassianClient, fetchTaskDevLinks } from "./devlinks.js";
-import { runTasks, type Kind, type KindMap, type TaskRef, type Hashable, type NodeHandle, type ProgressEvent } from "./scheduler.js";
-import { loadSettings } from "./settings.js";
+import { runTasks, type Kind, type KindMap, type TaskRef, type Hashable, type NodeHandle, type ProgressEvent } from "@pi-aura/shared/digest/scheduler";
+import { loadSettings } from "@pi-aura/shared/digest/settings";
 import { createKeyring } from "@pi-aura/shared/keyring";
-import { buildActions } from "./build-actions.js";
-import { writeDashboardDigest } from "./write-dashboard-digest.js";
-import { readDashboardUrl, createProgressEmitter } from "./progress-emitter.js";
+import { buildActions } from "@pi-aura/shared/digest/build-actions";
+import { writeDashboardDigest } from "@pi-aura/shared/digest/write-dashboard-digest";
+import { readDashboardUrl, createProgressEmitter } from "@pi-aura/shared/digest/progress-emitter";
 import type {
   ArtifactToVerify,
   ArtifactVerification,
@@ -64,7 +64,7 @@ import type {
   RawAuraData,
   TaskDevLinks,
   DigestReviewOwed,
-} from "./types.js";
+} from "@pi-aura/shared/digest/types";
 
 // ---------------------------------------------------------------------------
 // Shared helpers

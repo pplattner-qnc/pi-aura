@@ -27,9 +27,9 @@ import type {
   DevLinkBranch,
   DevLinkPullRequest,
   TaskDevLinks,
-} from "./types.js";
+} from "@pi-aura/shared/digest/types";
 import type { Task } from "@pi-aura/shared/aura-client";
-import type { AuraDigestSettings } from "./settings.js";
+import type { AuraDigestSettings } from "@pi-aura/shared/digest/settings";
 import type { Keyring } from "@pi-aura/shared/keyring";
 
 // --- Atlassian Teamwork Graph shapes (subset) -----------------------------

@@ -4,7 +4,7 @@ slug: 1-leaf-core-to-shared
 title: Move the pure digest-core leaf modules into @pi-aura/shared and re-point the CLI bundle
 task: ../task.md
 mode: afk
-status: todo
+status: doing
 size: m
 blocked_by: []
 ---
