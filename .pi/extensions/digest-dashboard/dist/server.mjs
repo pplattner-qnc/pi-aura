@@ -1,58 +1,46 @@
 // server.ts
 import { createServer } from "node:http";
-import { readFile, stat } from "node:fs/promises";
-import { readFileSync as readFileSync2, existsSync as existsSync2, rmSync } from "node:fs";
-import { watch } from "node:fs";
-import path2 from "node:path";
+import { readFileSync, existsSync, rmSync } from "node:fs";
+import path from "node:path";
 import { exec } from "node:child_process";
 import { platform } from "node:process";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 
-// state.ts
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import path from "node:path";
-var EMPTY_STATE = {
-  pid: null,
-  server_started: null,
-  events: []
-};
-var writeQueues = /* @__PURE__ */ new Map();
-function ensureDir(filePath) {
-  mkdirSync(path.dirname(filePath), { recursive: true });
+// store.ts
+var currentDigest = null;
+var events = [];
+var nextEventId = 1;
+var sseClients = /* @__PURE__ */ new Set();
+var subscribers = /* @__PURE__ */ new Set();
+function getCurrentDigest() {
+  return currentDigest;
 }
-function enqueue(filePath, task) {
-  const pending = writeQueues.get(filePath) ?? Promise.resolve();
-  const next = pending.then(task, task);
-  writeQueues.set(filePath, next);
-  next.finally(() => {
-    if (writeQueues.get(filePath) === next) {
-      writeQueues.delete(filePath);
+function pushEvent(event) {
+  event.id = nextEventId++;
+  events.push(event);
+  const sseData = `event: state-change
+data: {"id":${event.id},"type":"${event.type}"}
+
+`;
+  for (const client of sseClients) {
+    try {
+      client.write(sseData);
+    } catch {
     }
-  });
-  return next;
-}
-function readState(filePath) {
-  if (!existsSync(filePath)) {
-    return structuredClone(EMPTY_STATE);
   }
-  const raw = readFileSync(filePath, "utf-8");
-  const parsed = JSON.parse(raw);
-  return {
-    pid: parsed.pid ?? null,
-    server_started: parsed.server_started ?? null,
-    events: parsed.events ?? []
-  };
+  for (const cb of subscribers) {
+    try {
+      cb(event);
+    } catch {
+    }
+  }
 }
-function appendEvent(filePath, event) {
-  return enqueue(filePath, () => {
-    ensureDir(filePath);
-    const state = existsSync(filePath) ? readState(filePath) : structuredClone(EMPTY_STATE);
-    const maxId = state.events.length > 0 ? Math.max(...state.events.map((e) => e.id)) : 0;
-    event.id = maxId + 1;
-    state.events.push(event);
-    writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
-  });
+function registerSseClient(res) {
+  sseClients.add(res);
+  return () => {
+    sseClients.delete(res);
+  };
 }
 
 // server.ts
@@ -65,23 +53,23 @@ function readRequestBody(req) {
   });
 }
 function resolveBundles() {
-  const baseDir = path2.dirname(fileURLToPath(import.meta.url));
-  const candidates = [baseDir, path2.join(baseDir, "dist")];
+  const baseDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [baseDir, path.join(baseDir, "dist")];
   let jsPath = null;
   let cssPath = null;
   for (const dir of candidates) {
-    const candidateJs = path2.join(dir, "app.js");
-    if (existsSync2(candidateJs)) {
+    const candidateJs = path.join(dir, "app.js");
+    if (existsSync(candidateJs)) {
       jsPath = candidateJs;
-      cssPath = path2.join(dir, "app.css");
+      cssPath = path.join(dir, "app.css");
       break;
     }
   }
   if (!jsPath) {
-    return { js: "", css: "", missing: path2.join(baseDir, "app.js") };
+    return { js: "", css: "", missing: path.join(baseDir, "app.js") };
   }
-  const js = readFileSync2(jsPath, "utf-8");
-  const css = cssPath && existsSync2(cssPath) ? readFileSync2(cssPath, "utf-8") : "";
+  const js = readFileSync(jsPath, "utf-8");
+  const css = cssPath && existsSync(cssPath) ? readFileSync(cssPath, "utf-8") : "";
   return { js, css, missing: null };
 }
 function htmlShell(js, css) {
@@ -128,15 +116,13 @@ function openBrowser(url) {
   });
 }
 function defaultAuraPaths() {
-  const auraDir = path2.join(os.homedir(), ".pi", "aura");
+  const auraDir = path.join(os.homedir(), ".pi", "aura");
   return {
-    dashboardPath: path2.join(auraDir, "digest.json"),
-    statePath: path2.join(auraDir, "state.json"),
-    serverUrlPath: path2.join(auraDir, "server-url.json")
+    statePath: path.join(auraDir, "state.json"),
+    serverUrlPath: path.join(auraDir, "server-url.json")
   };
 }
-async function startServer(opts) {
-  const watchers = [];
+async function startServer(opts = {}) {
   const server = createServer(async (req, res) => {
     try {
       if (req.url === "/" && req.method === "GET") {
@@ -153,20 +139,15 @@ async function startServer(opts) {
         return;
       }
       if (req.url === "/api/digest" && req.method === "GET") {
-        try {
-          const s = await stat(opts.dashboardPath);
-          if (!s.isFile()) {
-            throw new Error("not a file");
-          }
-          const json = await readFile(opts.dashboardPath, "utf-8");
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(json);
-          return;
-        } catch {
+        const digest = getCurrentDigest();
+        if (digest === null) {
           res.writeHead(404, { "Content-Type": "text/plain" });
           res.end("Not found");
           return;
         }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(digest));
+        return;
       }
       if (req.url === "/events" && req.method === "GET") {
         res.writeHead(200, {
@@ -174,46 +155,9 @@ async function startServer(opts) {
           "Cache-Control": "no-cache",
           "Connection": "keep-alive"
         });
-        const watcher = watch(opts.dashboardPath, (eventType) => {
-          if (eventType === "change") {
-            res.write("event: change\ndata: {}\n\n");
-          }
-        });
-        watchers.push(watcher);
-        let stateWatcher;
-        const openStateWatcher = () => {
-          if (stateWatcher) return;
-          try {
-            stateWatcher = watch(opts.statePath, (eventType) => {
-              if (eventType !== "change") return;
-              let latest;
-              try {
-                const state = readState(opts.statePath);
-                latest = state.events[state.events.length - 1];
-              } catch {
-                return;
-              }
-              if (latest) {
-                res.write(`event: state-change
-data: {"id":${latest.id},"type":"${latest.type}"}
-
-`);
-              }
-            });
-            watchers.push(stateWatcher);
-          } catch {
-          }
-        };
-        openStateWatcher();
+        const unregister = registerSseClient(res);
         req.on("close", () => {
-          watcher.close();
-          if (stateWatcher) {
-            stateWatcher.close();
-            const idx2 = watchers.indexOf(stateWatcher);
-            if (idx2 !== -1) watchers.splice(idx2, 1);
-          }
-          const idx = watchers.indexOf(watcher);
-          if (idx !== -1) watchers.splice(idx, 1);
+          unregister();
         });
         return;
       }
@@ -227,7 +171,7 @@ data: {"id":${latest.id},"type":"${latest.type}"}
           res.end(JSON.stringify({ error: "Invalid JSON" }));
           return;
         }
-        await appendEvent(opts.statePath, parsed);
+        pushEvent(parsed);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true }));
         return;
@@ -250,10 +194,6 @@ data: {"id":${latest.id},"type":"${latest.type}"}
       const port = address.port;
       const url = `http://127.0.0.1:${port}/`;
       const done = async () => {
-        for (const w of watchers.slice()) {
-          w.close();
-        }
-        watchers.length = 0;
         return new Promise((res) => {
           server.close((err) => {
             if (err) {
@@ -277,7 +217,7 @@ data: {"id":${latest.id},"type":"${latest.type}"}
 }
 var modulePath = fileURLToPath(import.meta.url);
 var invokedPath = process.argv[1];
-if (invokedPath && path2.resolve(invokedPath) === path2.resolve(modulePath)) {
+if (invokedPath && path.resolve(invokedPath) === path.resolve(modulePath)) {
   const defaults = defaultAuraPaths();
   const serverUrlPath = process.env.DASHBOARD_SERVER_URL_PATH ?? defaults.serverUrlPath;
   const statePath = process.env.DASHBOARD_STATE_PATH ?? defaults.statePath;
@@ -287,7 +227,7 @@ if (invokedPath && path2.resolve(invokedPath) === path2.resolve(modulePath)) {
     shuttingDown = true;
     for (const f of [serverUrlPath, statePath]) {
       try {
-        if (existsSync2(f)) rmSync(f, { force: true });
+        if (existsSync(f)) rmSync(f, { force: true });
       } catch {
       }
     }
@@ -300,10 +240,7 @@ if (invokedPath && path2.resolve(invokedPath) === path2.resolve(modulePath)) {
   }
   process.on("exit", cleanup);
   process.on("beforeExit", cleanup);
-  startServer({
-    dashboardPath: process.env.DASHBOARD_DIGEST_PATH ?? defaults.dashboardPath,
-    statePath
-  }).catch((err) => {
+  startServer().catch((err) => {
     console.error("Failed to start digest-dashboard server:", err);
     cleanup();
     process.exit(1);
