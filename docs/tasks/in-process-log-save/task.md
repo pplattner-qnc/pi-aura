@@ -6,7 +6,7 @@ title: digest-log pushes events in-process; digest-save writes only last-digest.
 map: in-process-aura-digest
 status: ready
 blocked_by: [in-process-server, in-process-fetch]
-slices: []
+slices: [1-digest-log-direct-push, 2-cleanup-and-final-polish]
 ---
 
 ## User-visible outcome
@@ -52,3 +52,7 @@ no temp dir, no `dir` param on `digest-save`.
 - Likely: (a) `digest-log` → direct in-memory push; (b) `digest-save` →
   `last-digest.json`-only from memory, drop `dir`; (c) drop self-HTTP
   helpers + the local `readDashboardUrl` duplicate.
+
+## Implementation notes
+
+_The land-worker appends a per-slice note here as each slice lands._
