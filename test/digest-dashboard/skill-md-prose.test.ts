@@ -81,10 +81,13 @@ describe("aura-digest skill prose", () => {
     expect(body).toMatch(/^## Routing table$/m);
   });
 
-  it("keeps the agent-side node -e ack/clear one-liners", () => {
-    const ackBlock = bashBlocks.find((b) => b.includes("type:\"ack\"") && b.includes("currentlyWorkingOn=null"));
-    expect(ackBlock).toBeDefined();
-    const lockBlock = bashBlocks.find((b) => b.includes("currentlyWorkingOn=\"<KEY>\""));
-    expect(lockBlock).toBeDefined();
+  it("documents the digest-update + digest-ack tools for the lock + ack/clear", () => {
+    // The old `node -e` one-liners (editing ~/.pi/aura/digest.json + state.json)
+    // are gone — the in-process dashboard reads the in-memory store. The lock
+    // + ack are now first-class tools.
+    expect(body).toMatch(/digest-update/);
+    expect(body).toMatch(/digest-ack/);
+    expect(body).not.toMatch(/node -e .*currentlyWorkingOn/);
+    expect(body).not.toMatch(/node -e .*type:\\"ack\\"/);
   });
 });

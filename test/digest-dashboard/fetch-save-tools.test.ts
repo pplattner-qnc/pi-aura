@@ -1,29 +1,62 @@
-// Unit tests for digest-fetch + digest-save tools (slice 2):
-// - digest-fetch returns { digest, report } + details.dir and confirms dashboard digest.json
-// - digest-save writes last-digest.json
-// - fetch failures return a clear error AgentToolResult without throwing
+// Unit tests for digest-fetch + digest-save tools:
 //
-// Updated for in-process lifecycle: "dashboard up" is simulated by calling
-// startDashboard (in-process server), not by writing server-url.json.
+// digest-fetch (slice 2 — in-process):
+//   - Calls fetchAction() in-process (no spawn); injects a fake AuraClient
+//     via the _setAuraClientForTesting seam.
+//   - Returns { digest, report } with NO details.dir (no temp dir).
+//   - Pushes progress events to the store (type: "progress").
+//   - Calls store.setCurrentDigest so the dashboard serves the digest.
+//   - Does NOT write ~/.pi/aura/digest.json.
+//   - Returns a clear error when fetchAction throws.
+//   - One-shot "dashboard not running" warning (notify + result text) when
+//     the in-process server is down — but the digest is still populated.
+//
+// digest-save (slice 3 — in-process, no spawn):
+//   - Writes last-digest.json from store.getCurrentDigest() (no dir param).
+//   - Returns a clear error when no current digest is set.
+//   - No spawn (nothing spawns anymore — digest-fetch is in-process (slice
+//     2), digest-save is in-process (slice 3)).
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
+import type {
+  AuraClient,
+  BoardBriefing,
+  BoardSummary,
+  Capacity,
+  PriorityQueue,
+  ArtifactList,
+  TaskList,
+  NotificationList,
+  ArtifactApprovals,
+  ArtifactReview,
+  Task,
+} from "@pi-aura/shared/aura-client";
 import {
   mkdtempSync,
   mkdirSync,
-  writeFileSync,
   readFileSync,
   existsSync,
   rmSync,
 } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { EventEmitter } from "node:events";
+import http from "node:http";
 import {
   startDashboard,
   teardownDashboard,
   default as installExtension,
+  _setAuraClientForTesting,
 } from "../../.pi/extensions/digest-dashboard/index.ts";
+import { resetStore, getEvents, getCurrentDigest, setCurrentDigest } from "../../.pi/extensions/digest-dashboard/store.ts";
+
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
 
 interface RegisterToolCall {
   name: string;
@@ -36,74 +69,153 @@ interface RegisterToolCall {
   ) => Promise<unknown>;
 }
 
-let nextSpawnOutcome: {
-  exitCode: number | null;
-  stdoutLines: string[];
-  stderrLines: string[];
-} = { exitCode: 0, stdoutLines: [], stderrLines: [] };
+// ---------------------------------------------------------------------------
+// Fake AuraClient — returns minimal-but-shaped fixture data (same approach
+// as packages/shared/test/digest/fetchAction.test.ts).
+// ---------------------------------------------------------------------------
 
-vi.mock("node:child_process", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:child_process")>();
-  const fs = await import("node:fs");
-  const path = await import("node:path");
-  const os = await import("node:os");
-  return {
-    ...actual,
-    spawn: vi.fn((_cmd: string, args: string[], _opts: unknown) => {
-      const child = new EventEmitter() as import("node:child_process").ChildProcess;
-      const stdout = new EventEmitter();
-      const stderr = new EventEmitter();
-      Object.defineProperty(child, "stdout", { value: stdout, writable: false });
-      Object.defineProperty(child, "stderr", { value: stderr, writable: false });
-      Object.defineProperty(child, "exitCode", { value: null, writable: true });
-
-      process.nextTick(() => {
-        for (const line of nextSpawnOutcome.stdoutLines) {
-          stdout.emit("data", Buffer.from(`${line}\n`, "utf-8"));
-        }
-        for (const line of nextSpawnOutcome.stderrLines) {
-          stderr.emit("data", Buffer.from(`${line}\n`, "utf-8"));
-        }
-
-        // Mimic the real aura-digest.mjs save subcommand: read <dir>/digest.json
-        // and write ~/.pi/aura/last-digest.json. spawn args are
-        // [node, scriptPath, "save", dir], so the subcommand is args[1].
-        if (args[1] === "save" && nextSpawnOutcome.exitCode === 0) {
-          const dir = args[2];
-          if (dir) {
-            try {
-              const digest = JSON.parse(fs.readFileSync(path.join(dir, "digest.json"), "utf8"));
-              const auraDir = path.join(os.homedir(), ".pi", "aura");
-              fs.mkdirSync(auraDir, { recursive: true });
-              fs.writeFileSync(
-                path.join(auraDir, "last-digest.json"),
-                JSON.stringify(
-                  {
-                    schema_version: 1,
-                    presented_at: new Date().toISOString(),
-                    fetched_at: digest.meta?.generated_at ?? new Date().toISOString(),
-                    digest,
-                  },
-                  null, 2,
-                ) + "\n",
-                "utf8",
-              );
-            } catch {
-              // ignore mimic failures; tests set up the fixture digest.json
-            }
-          }
-        }
-
-        if (nextSpawnOutcome.exitCode !== null) {
-          (child as { exitCode: number | null }).exitCode = nextSpawnOutcome.exitCode;
-          child.emit("close", nextSpawnOutcome.exitCode);
-        }
-      });
-
-      return child;
-    }),
+function makeFakeAuraClient(): AuraClient {
+  const briefing: BoardBriefing = {
+    text: "Test briefing",
+    generated_at: "2025-01-01T00:00:00Z",
   };
-});
+  const summary: BoardSummary = {
+    overdue: { count: 0, items: [] },
+    waiting_on_me: { count: 0, items: [] },
+    waiting_on_others: { count: 0, items: [] },
+  };
+  const priorityQueue: PriorityQueue = {
+    items: [
+      {
+        id: "task-1",
+        human_key: "AURA-100",
+        title: "Test task one",
+        status: "IN_DEVELOPMENT",
+        status_type: "ACTIVE",
+        block: "",
+        asap: false,
+        blocked_by: [],
+        context_path: [],
+        capacity_percent: 50,
+      },
+    ],
+    total: 1,
+    unordered_count: 0,
+  };
+  const capacity: Capacity = {
+    base_percent: 100,
+    committed_percent: 40,
+    free_percent: 60,
+    utilization_percent: 40,
+    over: false,
+    tasks: [
+      {
+        task_id: "task-1",
+        human_key: "AURA-100",
+        task_title: "Test task one",
+        task_status: "IN_DEVELOPMENT",
+        roles: ["OWNER"],
+        capacity_percent: 40,
+        hierarchy_path: [],
+      },
+    ],
+  };
+  const pendingReviews: ArtifactList = {
+    items: [],
+    pagination: { page: 1, limit: 10, total: 0 },
+  };
+  const alignmentTasks: TaskList = {
+    items: [],
+    pagination: { page: 1, limit: 5, total: 0 },
+  };
+  const notifList: NotificationList = {
+    items: [],
+    pagination: { page: 1, limit: 50, total: 0 },
+  };
+
+  return {
+    getArtifact: async () => {
+      throw new Error("not used");
+    },
+    mcpCreateArtifact: async () => {
+      throw new Error("not used");
+    },
+    mcpUpdateArtifact: async () => {
+      throw new Error("not used");
+    },
+    listArtifacts: async () => pendingReviews,
+    getKnowledgeNode: async () => {
+      throw new Error("not used");
+    },
+    getKnowledgeNodeByPath: async () => {
+      throw new Error("not used");
+    },
+    saveKnowledgeNodeBody: async () => {
+      throw new Error("not used");
+    },
+    mcpWikiSearch: async () => {
+      throw new Error("not used");
+    },
+    getKnowledgeTree: async () => {
+      throw new Error("not used");
+    },
+    createKnowledgeNode: async () => {
+      throw new Error("not used");
+    },
+    getBlueprintFiles: async () => {
+      throw new Error("not used");
+    },
+    getKnowledgeNodeVersion: async () => {
+      throw new Error("not used");
+    },
+    mcpCreateUploadDocument: async () => {
+      throw new Error("not used");
+    },
+    mcpGetUploadDocument: async () => {
+      throw new Error("not used");
+    },
+    getBoardBriefing: async () => briefing,
+    getBoardSummary: async () => summary,
+    listNotifications: async () => notifList,
+    getMyPriorityQueue: async () => priorityQueue,
+    getMyCapacity: async () => capacity,
+    listTasks: async () => alignmentTasks,
+    createFeedback: async () => {
+      throw new Error("not used");
+    },
+    getArtifactApprovals: async (): Promise<ArtifactApprovals> => ({
+      version: 1,
+      latest_version: 1,
+      decided_count: 0,
+      total_required: 0,
+      open_reviews: [],
+      decisions: [],
+    }),
+    getTaskByHumanKey: async (): Promise<Task> => ({
+      id: "task-1",
+      human_key: "AURA-100",
+      title: "Test task one",
+      status: "IN_DEVELOPMENT",
+      status_type: "ACTIVE",
+    }),
+    getArtifactReview: async (): Promise<ArtifactReview> => ({
+      version: 1,
+      review_state: "open",
+      reviewers: [],
+      review_artifacts: [],
+      initiator: null,
+      is_initiator: false,
+    }),
+    requestArtifactReview: async () => {},
+    startArtifactReview: async () => {},
+    submitArtifactDecision: async () => {},
+    reopenArtifactReview: async () => {},
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function createFakePi(): ExtensionAPI {
   return {
@@ -156,7 +268,11 @@ async function ensureTeardown(): Promise<void> {
   await teardownDashboard(statePath()).catch(() => {});
 }
 
-describe("digest-fetch tool", () => {
+// ---------------------------------------------------------------------------
+// digest-fetch (in-process)
+// ---------------------------------------------------------------------------
+
+describe("digest-fetch tool (in-process)", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
   let auraDir: string;
@@ -168,9 +284,12 @@ describe("digest-fetch tool", () => {
     process.env.PI_DIGEST_NO_BROWSER = "1";
     auraDir = path.join(tmpDir, ".pi", "aura");
     mkdirSync(auraDir, { recursive: true });
+    resetStore();
+    _setAuraClientForTesting(makeFakeAuraClient());
   });
 
   afterEach(async () => {
+    _setAuraClientForTesting(undefined);
     await ensureTeardown();
     if (originalHome !== undefined) {
       process.env.HOME = originalHome;
@@ -181,57 +300,140 @@ describe("digest-fetch tool", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("returns { digest, report } and confirms dashboard digest.json", async () => {
+  it("calls fetchAction in-process and returns { digest, report } with no details.dir", async () => {
     const pi = createFakePi();
     installExtension(pi);
     const tool = findTool(pi, "digest-fetch");
 
-    writeFileSync(path.join(tmpDir, "digest.json"), JSON.stringify({ title: "digest fixture" }), "utf8");
-    writeFileSync(path.join(tmpDir, "report.json"), JSON.stringify({ title: "report fixture" }), "utf8");
-    writeFileSync(path.join(auraDir, "digest.json"), JSON.stringify({ title: "dashboard fixture" }), "utf8");
-    // Dashboard is up — start the in-process server so getDashboardUrl() returns a URL.
+    // Start the dashboard so no warning prefix is prepended (clean JSON).
     await startDashboard(pi, createCmdCtx());
 
-    nextSpawnOutcome = {
-      exitCode: 0,
-      stdoutLines: [`output directory: ${tmpDir}/`],
-      stderrLines: [],
-    };
-
     const result = (await tool.execute("call-1", {}, undefined, undefined, createCtx())) as {
       content: Array<{ type: string; text: string }>;
-      details: { dir: string };
+      details: Record<string, unknown>;
     };
 
-    const parsed = JSON.parse(result.content[0].text) as { digest: unknown; report: unknown };
-    expect(parsed.digest).toEqual({ title: "digest fixture" });
-    expect(parsed.report).toEqual({ title: "report fixture" });
-    expect(result.details.dir).toBe(tmpDir);
-    expect(existsSync(path.join(auraDir, "digest.json"))).toBe(true);
-  });
+    // The result text is JSON with digest + report keys.
+    const parsed = JSON.parse(result.content[0].text) as {
+      digest: { queue: Array<{ key: string }> };
+      report: { fetched_at: string };
+    };
+    expect(parsed.digest.queue[0]!.key).toBe("AURA-100");
+    expect(typeof parsed.report.fetched_at).toBe("string");
 
-  it("returns a clear error result when fetch fails", async () => {
+    // No dir in details (the temp dir is gone).
+    expect(result.details.dir).toBeUndefined();
+    expect(Object.keys(result.details)).toHaveLength(0);
+  }, 15000);
+
+  it("fetches in-process (no spawn — the spawn mock is gone)", async () => {
     const pi = createFakePi();
     installExtension(pi);
     const tool = findTool(pi, "digest-fetch");
 
-    nextSpawnOutcome = {
-      exitCode: 1,
-      stdoutLines: [],
-      stderrLines: ["Aura PAT missing: AURA_API_TOKEN not set"],
-    };
+    // Start the dashboard so no warning prefix is prepended (clean JSON).
+    await startDashboard(pi, createCmdCtx());
 
     const result = (await tool.execute("call-1", {}, undefined, undefined, createCtx())) as {
       content: Array<{ type: string; text: string }>;
-      details: { dir?: string };
+    };
+
+    // The fetch succeeded in-process — the digest is in the result.
+    const parsed = JSON.parse(result.content[0].text) as { digest: unknown };
+    expect(parsed.digest).toBeDefined();
+  }, 15000);
+
+  it("pushes progress events to the store (type: progress)", async () => {
+    const pi = createFakePi();
+    installExtension(pi);
+    const tool = findTool(pi, "digest-fetch");
+
+    await tool.execute("call-1", {}, undefined, undefined, createCtx());
+
+    const events = getEvents();
+    const progressEvents = events.filter((e) => e.type === "progress");
+    expect(progressEvents.length).toBeGreaterThan(0);
+
+    // Each progress event has the right direction + payload shape.
+    for (const e of progressEvents) {
+      expect(e.dir).toBe("agent→page");
+      expect(e.type).toBe("progress");
+      const payload = e.payload as {
+        id: string;
+        label: string;
+        status: string;
+        startedAt: number;
+        kind: string;
+      };
+      expect(typeof payload.id).toBe("string");
+      expect(typeof payload.label).toBe("string");
+      expect(["running", "done", "error"]).toContain(payload.status);
+      expect(typeof payload.startedAt).toBe("number");
+      expect(typeof payload.kind).toBe("string");
+    }
+  }, 15000);
+
+  it("calls setCurrentDigest so the dashboard serves the fetched digest", async () => {
+    const pi = createFakePi();
+    installExtension(pi);
+    const tool = findTool(pi, "digest-fetch");
+
+    // Start the dashboard so no warning prefix is prepended (clean JSON).
+    await startDashboard(pi, createCmdCtx());
+
+    const result = (await tool.execute("call-1", {}, undefined, undefined, createCtx())) as {
+      content: Array<{ type: string; text: string }>;
+    };
+    const parsed = JSON.parse(result.content[0].text) as { digest: { queue: Array<{ key: string }> } };
+
+    // The in-memory store now holds the digest.
+    const stored = getCurrentDigest() as { queue: Array<{ key: string }> } | null;
+    expect(stored).not.toBeNull();
+    expect(stored!.queue[0]!.key).toBe("AURA-100");
+
+    // The stored digest matches the returned digest.
+    expect(stored).toEqual(parsed.digest);
+  }, 15000);
+
+  it("does not write ~/.pi/aura/digest.json", async () => {
+    const pi = createFakePi();
+    installExtension(pi);
+    const tool = findTool(pi, "digest-fetch");
+
+    await tool.execute("call-1", {}, undefined, undefined, createCtx());
+
+    const digestPath = path.join(auraDir, "digest.json");
+    expect(existsSync(digestPath)).toBe(false);
+  }, 15000);
+
+  it("returns a clear error result when fetchAction throws", async () => {
+    const pi = createFakePi();
+    installExtension(pi);
+    const tool = findTool(pi, "digest-fetch");
+
+    // Override the fake client to throw.
+    const throwingClient = makeFakeAuraClient();
+    throwingClient.getBoardBriefing = async () => {
+      throw new Error("Aura PAT missing: AURA_API_TOKEN not set");
+    };
+    _setAuraClientForTesting(throwingClient);
+
+    const result = (await tool.execute("call-1", {}, undefined, undefined, createCtx())) as {
+      content: Array<{ type: string; text: string }>;
+      details: Record<string, unknown>;
     };
 
     expect(result.content[0].text).toContain("Aura PAT missing");
     expect(result.details.dir).toBeUndefined();
-  });
+    expect(Object.keys(result.details)).toHaveLength(0);
+  }, 15000);
 });
 
-describe("digest-fetch dashboard-absent warning", () => {
+// ---------------------------------------------------------------------------
+// digest-fetch dashboard-absent warning (in-process)
+// ---------------------------------------------------------------------------
+
+describe("digest-fetch dashboard-absent warning (in-process)", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
   let auraDir: string;
@@ -243,9 +445,12 @@ describe("digest-fetch dashboard-absent warning", () => {
     process.env.PI_DIGEST_NO_BROWSER = "1";
     auraDir = path.join(tmpDir, ".pi", "aura");
     mkdirSync(auraDir, { recursive: true });
+    resetStore();
+    _setAuraClientForTesting(makeFakeAuraClient());
   });
 
   afterEach(async () => {
+    _setAuraClientForTesting(undefined);
     await ensureTeardown();
     if (originalHome !== undefined) {
       process.env.HOME = originalHome;
@@ -261,16 +466,7 @@ describe("digest-fetch dashboard-absent warning", () => {
     installExtension(pi);
     const tool = findTool(pi, "digest-fetch");
 
-    writeFileSync(path.join(tmpDir, "digest.json"), JSON.stringify({ title: "digest fixture" }), "utf8");
-    writeFileSync(path.join(tmpDir, "report.json"), JSON.stringify({ title: "report fixture" }), "utf8");
-    writeFileSync(path.join(auraDir, "digest.json"), JSON.stringify({ title: "dashboard fixture" }), "utf8");
     // Dashboard deliberately NOT started (dashboard down)
-
-    nextSpawnOutcome = {
-      exitCode: 0,
-      stdoutLines: [`output directory: ${tmpDir}/`],
-      stderrLines: [],
-    };
 
     const notifyCalls: NotifyCall[] = [];
     const result = (await tool.execute(
@@ -281,40 +477,34 @@ describe("digest-fetch dashboard-absent warning", () => {
       createCtxWithNotify(notifyCalls),
     )) as {
       content: Array<{ type: string; text: string }>;
-      details: { dir: string };
+      details: Record<string, unknown>;
     };
 
-    // Fetch succeeded — dir is returned
-    expect(result.details.dir).toBe(tmpDir);
+    // Fetch succeeded — no dir (in-process, no temp dir).
+    expect(result.details.dir).toBeUndefined();
 
     // The digest JSON is still present in the result text (after the warning line)
     expect(result.content[0].text).toContain('"digest"');
 
-    // A SINGLE warning notify was fired with "warning" severity (one-shot, not per-event)
+    // A SINGLE warning notify was fired with "warning" severity (one-shot)
     const warningNotifies = notifyCalls.filter((n) => n.severity === "warning");
     expect(warningNotifies).toHaveLength(1);
     expect(warningNotifies[0].message).toContain("dashboard was not running");
 
     // The result text contains the warning line
     expect(result.content[0].text).toContain("dashboard was not running");
-  });
+
+    // The digest was still populated in the store despite the dashboard being down.
+    expect(getCurrentDigest()).not.toBeNull();
+  }, 15000);
 
   it("shows no warning when dashboard is running", async () => {
     const pi = createFakePi();
     installExtension(pi);
     const tool = findTool(pi, "digest-fetch");
 
-    writeFileSync(path.join(tmpDir, "digest.json"), JSON.stringify({ title: "digest fixture" }), "utf8");
-    writeFileSync(path.join(tmpDir, "report.json"), JSON.stringify({ title: "report fixture" }), "utf8");
-    writeFileSync(path.join(auraDir, "digest.json"), JSON.stringify({ title: "dashboard fixture" }), "utf8");
-    // Dashboard is up — start the in-process server so getDashboardUrl() returns a URL.
+    // Dashboard is up — start the in-process server.
     await startDashboard(pi, createCmdCtx());
-
-    nextSpawnOutcome = {
-      exitCode: 0,
-      stdoutLines: [`output directory: ${tmpDir}/`],
-      stderrLines: [],
-    };
 
     const notifyCalls: NotifyCall[] = [];
     const result = (await tool.execute(
@@ -325,7 +515,7 @@ describe("digest-fetch dashboard-absent warning", () => {
       createCtxWithNotify(notifyCalls),
     )) as {
       content: Array<{ type: string; text: string }>;
-      details: { dir: string };
+      details: Record<string, unknown>;
     };
 
     // No warning notify fired
@@ -336,13 +526,108 @@ describe("digest-fetch dashboard-absent warning", () => {
     expect(result.content[0].text).not.toContain("dashboard was not running");
 
     // JSON is clean and parseable
-    const parsed = JSON.parse(result.content[0].text) as { digest: unknown; report: unknown };
-    expect(parsed.digest).toEqual({ title: "digest fixture" });
-    expect(parsed.report).toEqual({ title: "report fixture" });
-  });
+    const parsed = JSON.parse(result.content[0].text) as {
+      digest: { queue: Array<{ key: string }> };
+      report: unknown;
+    };
+    expect(parsed.digest.queue[0]!.key).toBe("AURA-100");
+  }, 15000);
 });
 
-describe("digest-save tool", () => {
+// ---------------------------------------------------------------------------
+// digest-fetch SSE test — progress events + change fan out to a connected
+// /events client.
+// ---------------------------------------------------------------------------
+
+describe("digest-fetch SSE fan-out (in-process)", () => {
+  let tmpDir: string;
+  let originalHome: string | undefined;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), "digest-fetch-sse-"));
+    originalHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    process.env.PI_DIGEST_NO_BROWSER = "1";
+    resetStore();
+    _setAuraClientForTesting(makeFakeAuraClient());
+  });
+
+  afterEach(async () => {
+    _setAuraClientForTesting(undefined);
+    await ensureTeardown();
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    delete process.env.PI_DIGEST_NO_BROWSER;
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("SSE client receives progress state-change events + a change event when setCurrentDigest fires", async () => {
+    const pi = createFakePi();
+    installExtension(pi);
+    const tool = findTool(pi, "digest-fetch");
+
+    // Start the in-process server.
+    const startResult = await startDashboard(pi, createCmdCtx());
+    expect(startResult.ok).toBe(true);
+    const baseUrl = startResult.url!;
+
+    // Connect to /events SSE.
+    const receivedChunks: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      let sawProgress = false;
+      let sawChange = false;
+
+      const req = http.request(`${baseUrl}events`, { method: "GET" }, (res) => {
+        expect(res.statusCode).toBe(200);
+        expect(res.headers["content-type"]).toContain("text/event-stream");
+        res.on("data", (chunk: Buffer) => {
+          const text = chunk.toString("utf-8");
+          receivedChunks.push(text);
+          if (text.includes("event: state-change") && text.includes("progress")) {
+            sawProgress = true;
+          }
+          if (text.includes("event: change")) {
+            sawChange = true;
+          }
+          if (sawProgress && sawChange) {
+            req.destroy();
+            resolve();
+          }
+        });
+      });
+      req.on("error", reject);
+      req.on("close", () => resolve());
+      req.end();
+
+      // Allow the SSE connection to establish, then run digest-fetch.
+      setTimeout(async () => {
+        await tool.execute("call-1", {}, undefined, undefined, createCtx());
+      }, 50);
+    });
+
+    // The SSE client received at least one progress state-change event.
+    expect(
+      receivedChunks.some(
+        (c) => c.includes("event: state-change") && c.includes('"type":"progress"'),
+      ),
+    ).toBe(true);
+
+    // The SSE client received a 'change' event (setCurrentDigest fan-out).
+    expect(receivedChunks.some((c) => c.includes("event: change"))).toBe(true);
+  }, 15000);
+});
+
+// ---------------------------------------------------------------------------
+// digest-save tool (slice 3 — in-process, no spawn)
+//   - Writes last-digest.json from store.getCurrentDigest() (no dir param).
+//   - Returns a clear error when no current digest is set.
+//   - No spawn (the spawn mock is gone — nothing spawns anymore).
+// ---------------------------------------------------------------------------
+
+describe("digest-save tool (in-process from store)", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
   let auraDir: string;
@@ -354,9 +639,11 @@ describe("digest-save tool", () => {
     process.env.PI_DIGEST_NO_BROWSER = "1";
     auraDir = path.join(tmpDir, ".pi", "aura");
     mkdirSync(auraDir, { recursive: true });
+    resetStore();
   });
 
   afterEach(async () => {
+    resetStore();
     await ensureTeardown();
     if (originalHome !== undefined) {
       process.env.HOME = originalHome;
@@ -367,17 +654,22 @@ describe("digest-save tool", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("writes last-digest.json and returns a confirmation", async () => {
+  it("writes last-digest.json from getCurrentDigest and returns a confirmation", async () => {
     const pi = createFakePi();
     installExtension(pi);
     const tool = findTool(pi, "digest-save");
 
-    writeFileSync(path.join(tmpDir, "digest.json"), JSON.stringify({ title: "digest fixture" }), "utf8");
-    nextSpawnOutcome = { exitCode: 0, stdoutLines: [], stderrLines: [] };
+    // Set the in-memory digest (the seam digest-fetch populates).
+    const digestFixture = {
+      date: "2025-01-01",
+      queue: [{ key: "AURA-100", title: "Test task", rank: 1, status: "In Development", role: "OWNER", capacity_pct: 50, hours: 4 }],
+      meta: { generated_at: "2025-01-01T00:00:00Z", raw_path: "", report_path: "" },
+    };
+    setCurrentDigest(digestFixture);
 
     const result = (await tool.execute(
       "call-1",
-      { dir: tmpDir },
+      {},
       undefined,
       undefined,
       createCtx(),
@@ -388,7 +680,32 @@ describe("digest-save tool", () => {
     const lastPath = path.join(auraDir, "last-digest.json");
     expect(existsSync(lastPath)).toBe(true);
     const saved = JSON.parse(readFileSync(lastPath, "utf-8"));
-    expect(saved.digest).toEqual({ title: "digest fixture" });
+    expect(saved.schema_version).toBe(1);
+    expect(saved.digest).toEqual(digestFixture);
+    expect(saved.fetched_at).toBe("2025-01-01T00:00:00Z");
     expect(result.content[0].text).toContain("saved");
+  });
+
+  it("returns a clear error when no current digest is set", async () => {
+    const pi = createFakePi();
+    installExtension(pi);
+    const tool = findTool(pi, "digest-save");
+
+    // Do NOT setCurrentDigest — nothing to save.
+    const result = (await tool.execute(
+      "call-1",
+      {},
+      undefined,
+      undefined,
+      createCtx(),
+    )) as {
+      content: Array<{ type: string; text: string }>;
+    };
+
+    expect(result.content[0].text).toContain("no current digest");
+
+    // No last-digest.json was written.
+    const lastPath = path.join(auraDir, "last-digest.json");
+    expect(existsSync(lastPath)).toBe(false);
   });
 });

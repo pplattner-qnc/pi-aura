@@ -24,6 +24,10 @@
 //                                            saved digest.
 //   node dist/aura-digest.mjs last                  Print the last saved digest (JSON).
 
+import { mkdirSync, writeFileSync } from "node:fs";
+import { resolve, join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomBytes } from "node:crypto";
 import {
   fetchAction,
   renderAction,
@@ -33,14 +37,61 @@ import {
   lastAction,
   USAGE,
   FailError,
+  DASHBOARD_DIGEST_PATH,
 } from "@pi-aura/shared/digest/aura-digest";
+import { createProgressEmitter, readDashboardUrl } from "@pi-aura/shared/digest/progress-emitter";
+import { writeDashboardDigest } from "@pi-aura/shared/digest/write-dashboard-digest";
 
 async function main(): Promise<void> {
   const action = process.argv[2];
   switch (action) {
-    case "fetch":
-      await fetchAction();
+    case "fetch": {
+      // The CLI owns the file-writing that fetchAction used to do.
+      // fetchAction is now a pure function returning {digest, report, raw}.
+      const outDir = join(tmpdir(), `aura-morning-${randomBytes(6).toString("hex")}`);
+      mkdirSync(outDir, { recursive: true });
+
+      // Live progress tree: the CLI shim constructs the progress emitter
+      // (fetchAction no longer calls readDashboardUrl/createProgressEmitter).
+      const dashboardUrl = readDashboardUrl();
+      const progressHook = createProgressEmitter(dashboardUrl);
+
+      const r = await fetchAction({ onProgress: progressHook });
+      const { digest, report, raw } = r;
+
+      const rawPath = resolve(outDir, "raw.json");
+      const digestPath = resolve(outDir, "digest.json");
+      const reportPath = resolve(outDir, "report.json");
+
+      // Fill in the file paths the pure function left blank.
+      digest.meta.raw_path = rawPath;
+      digest.meta.report_path = reportPath;
+      report.raw_path = rawPath;
+
+      writeFileSync(rawPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
+      writeFileSync(digestPath, JSON.stringify(digest, null, 2) + "\n", "utf8");
+      writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+
+      // Write the full corrected digest to the stable dashboard path.
+      // Failure is non-fatal: the temp-dir digest is the source of truth for
+      // render/save/diff, and the dashboard file is a best-effort SPA data source.
+      try {
+        writeDashboardDigest(digest, DASHBOARD_DIGEST_PATH);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        digest.warnings.push(`Could not write dashboard digest to ${DASHBOARD_DIGEST_PATH}: ${message}`);
+      }
+
+      // Flush any remaining progress events (inline phase nodes) at the very end.
+      await progressHook.flush();
+      console.log(`output directory: ${outDir}/`);
+      console.error(`fetched ${report.fetched_at}`);
+      console.error(`  raw:     ${rawPath}`);
+      console.error(`  digest:  ${digestPath}`);
+      console.error(`  report:  ${reportPath}`);
+      console.error(`  queue rows: ${digest.queue.length}, artifacts verified: ${report.verifications.length} (${report.verifications.filter((v) => v.stale).length} stale), dev links: ${digest.dev_links.length} tasks`);
       return;
+    }
     case "render":
       renderAction();
       return;

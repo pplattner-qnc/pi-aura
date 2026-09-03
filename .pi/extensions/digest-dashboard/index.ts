@@ -5,7 +5,6 @@ import type {
   AgentToolResult,
 } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
-import { spawn } from "node:child_process";
 import type { Server } from "node:http";
 import { existsSync, rmSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -14,7 +13,13 @@ import { fileURLToPath } from "node:url";
 import { startListener, type ListenerHandle } from "./listener.ts";
 import { startServer, openBrowser } from "./server.ts";
 import { joinUrl } from "@pi-aura/shared/digest/progress-emitter";
-import { resetStore } from "./store.ts";
+import { fetchAction, saveLastDigest } from "@pi-aura/shared/digest/aura-digest";
+import type { AuraClient } from "@pi-aura/shared/aura-client";
+import type { ProgressEvent } from "@pi-aura/shared/digest/scheduler";
+import type { Digest } from "@pi-aura/shared/digest/types";
+import { resetStore, pushEvent, setCurrentDigest, getCurrentDigest } from "./store.ts";
+import type { StateEvent } from "./state.ts";
+import type { ProgressPayload } from "./digest-types.ts";
 
 export interface TeardownResult {
   ok: boolean;
@@ -45,11 +50,7 @@ const fetchToolParameters = Type.Object({});
 
 type FetchToolParams = Static<typeof fetchToolParameters>;
 
-const saveToolParameters = Type.Object({
-  dir: Type.String({
-    description: "The output directory returned by digest-fetch (details.dir).",
-  }),
-});
+const saveToolParameters = Type.Object({});
 
 type SaveToolParams = Static<typeof saveToolParameters>;
 
@@ -60,6 +61,22 @@ const logToolParameters = Type.Object({
 });
 
 type LogToolParams = Static<typeof logToolParameters>;
+
+const updateToolParameters = Type.Object({
+  digest: Type.Any({
+    description: "The full corrected digest object (as returned by digest-fetch's digest, with summary/reviews/actions/corrections/followup applied). Replaces the in-memory current digest the dashboard serves.",
+  }),
+});
+
+type UpdateToolParams = Static<typeof updateToolParameters>;
+
+const ackToolParameters = Type.Object({
+  event_id: Type.Number({
+    description: "The id of the action_click event being acknowledged (from the forwarded click's details).",
+  }),
+});
+
+type AckToolParams = Static<typeof ackToolParameters>;
 
 const stopToolParameters = Type.Object({});
 
@@ -88,6 +105,43 @@ export function getDashboardUrl(): string | null {
   return serverHandle?.url ?? null;
 }
 
+// Test-injection seam for fetchAction's AuraClient. When set, digest-fetch
+// calls fetchAction({ auraClient: injectedAuraClient }) instead of letting
+// fetchAction construct the default client. Tests use this to inject a fake
+// AuraClient (per docs/testing.md: inject a fake AuraClient, don't module-
+// mock the internal collaborator). Undefined in production — fetchAction
+// calls createDefaultAuraClient() internally.
+let injectedAuraClient: AuraClient | undefined;
+
+/** @internal Test-only seam to inject a fake AuraClient into digest-fetch. */
+export function _setAuraClientForTesting(client: AuraClient | undefined): void {
+  injectedAuraClient = client;
+}
+
+/** Translate a scheduler ProgressEvent into a progress StateEvent and push
+ *  it to the in-memory store. 1 event = 1 push (no batching — the in-memory
+ *  push has no network cost). The store assigns the monotonic id
+ *  (overwriting the id:0 placeholder). */
+function adaptProgressToStore(e: ProgressEvent): void {
+  const payload: ProgressPayload = {
+    id: e.id,
+    label: e.label,
+    parentId: e.parentId,
+    status: e.status,
+    startedAt: e.startedAt,
+    endedAt: e.endedAt,
+    kind: e.kind,
+  };
+  const stateEvent: StateEvent = {
+    id: 0,
+    ts: new Date().toISOString(),
+    dir: "agent→page",
+    type: "progress",
+    payload,
+  };
+  pushEvent(stateEvent);
+}
+
 function defaultAuraPaths(): {
   auraDir: string;
   dashboardPath: string;
@@ -101,44 +155,6 @@ function defaultAuraPaths(): {
   };
 }
 
-function resolveAuraDigestScriptPath(): string {
-  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(moduleDir, "../../../skills/core/aura-digest/dist/aura-digest.mjs");
-}
-
-interface SpawnResult {
-  exitCode: number | null;
-  stdout: string;
-  stderr: string;
-}
-
-async function runAuraDigest(args: string[]): Promise<SpawnResult> {
-  const scriptPath = resolveAuraDigestScriptPath();
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [scriptPath, ...args], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf-8");
-    });
-
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf-8");
-    });
-
-    child.on("close", (exitCode) => {
-      resolve({ exitCode, stdout, stderr });
-    });
-
-    child.on("error", (err: Error) => {
-      resolve({ exitCode: 1, stdout, stderr: `${stderr}${err.message}` });
-    });
-  });
-}
 
 export async function teardownDashboard(
   statePath: string,
@@ -247,6 +263,8 @@ const DIGEST_TOOLS: readonly string[] = [
   "digest-fetch",
   "digest-save",
   "digest-log",
+  "digest-update",
+  "digest-ack",
 ];
 
 export async function digestCommandHandler(
@@ -326,7 +344,7 @@ export default function (pi: ExtensionAPI): void {
     name: "digest-fetch",
     label: "Fetch Aura digest",
     description:
-      "Fetch today's Aura digest data. Returns the digest and report JSON plus the output directory. Also writes ~/.pi/aura/digest.json for the dashboard.",
+      "Fetch today's Aura digest data in-process. Returns the digest and report JSON. Populates the in-memory dashboard store (progress events stream live + the digest is served from /api/digest).",
     parameters: fetchToolParameters,
     async execute(
       _toolCallId: string,
@@ -334,59 +352,43 @@ export default function (pi: ExtensionAPI): void {
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
       ctx: ExtensionContext,
-    ): Promise<AgentToolResult<{ dir?: string }>> {
+    ): Promise<AgentToolResult<Record<string, never>>> {
       // Check whether the dashboard was running before the fetch started. The
       // flag is read once here and evaluated once at the end of the success
       // path — a one-shot warning, never per-event.
       const dashboardWasDown = getDashboardUrl() === null;
 
-      const result = await runAuraDigest(["fetch"]);
-      if (result.exitCode !== 0) {
-        const errorText = result.stderr.trim() || `digest-fetch exited with code ${result.exitCode}`;
-        return {
-          content: [{ type: "text", text: `digest-fetch failed: ${errorText}` }],
-          details: {},
-        };
-      }
-
-      const match = result.stdout.match(/output directory:\s*(.+?)\/?\s*$/m);
-      if (!match) {
-        return {
-          content: [{ type: "text", text: "digest-fetch failed: could not parse output directory from script stdout" }],
-          details: {},
-        };
-      }
-
-      const dir = path.normalize(match[1]);
-      const digestPath = path.join(dir, "digest.json");
-      const reportPath = path.join(dir, "report.json");
-
       try {
-        const digest = JSON.parse(readFileSync(digestPath, "utf-8")) as unknown;
-        const report = JSON.parse(readFileSync(reportPath, "utf-8")) as unknown;
-        const dashboardPath = defaultAuraPaths().dashboardPath;
-        if (!existsSync(dashboardPath)) {
-          return {
-            content: [{ type: "text", text: `digest-fetch failed: dashboard digest not written to ${dashboardPath}` }],
-            details: {},
-          };
-        }
+        const result = await fetchAction({
+          onProgress: adaptProgressToStore,
+          ...(injectedAuraClient ? { auraClient: injectedAuraClient } : {}),
+        });
 
-        let text = JSON.stringify({ digest, report });
-        // One-shot end-of-run warning when the dashboard was absent: a pi-TUI
-        // notify + a warning line prepended to the result text. The fetch
-        // still succeeds — the digest is written and returned.
+        // Populate the in-memory current digest — ends the task-2 empty-
+        // dashboard regression (/api/digest serves it; the 'change' SSE fans
+        // out and the browser re-fetches).
+        setCurrentDigest(result.digest);
+
+        let text = JSON.stringify({ digest: result.digest, report: result.report });
+
+        // One-shot end-of-run warning when the dashboard was absent. The
+        // fetch still succeeds — the digest is populated in the store
+        // regardless (setCurrentDigest ran). The warning is only about the
+        // live tree not rendering (events won't fan out to a browser if the
+        // server is down).
         if (dashboardWasDown) {
-          ctx.ui.notify(
-            "digest-fetch: dashboard was not running, no live tree shown",
-            "warning",
-          );
+          if (ctx.ui) {
+            ctx.ui.notify(
+              "digest-fetch: dashboard was not running, no live tree shown",
+              "warning",
+            );
+          }
           text = `⚠️ digest-fetch: dashboard was not running, no live tree shown.\n${text}`;
         }
 
         return {
           content: [{ type: "text", text }],
-          details: { dir },
+          details: {},
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -402,24 +404,24 @@ export default function (pi: ExtensionAPI): void {
     name: "digest-save",
     label: "Save Aura digest",
     description:
-      "Save the digest from the given directory as the last presented digest (~/.pi/aura/last-digest.json). Pass the directory returned by digest-fetch.",
+      "Save the current in-memory digest as the last presented digest (~/.pi/aura/last-digest.json). Run digest-fetch first.",
     parameters: saveToolParameters,
     async execute(
       _toolCallId: string,
-      params: SaveToolParams,
+      _params: SaveToolParams,
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
     ): Promise<AgentToolResult<Record<string, never>>> {
-      const result = await runAuraDigest(["save", params.dir]);
-      if (result.exitCode !== 0) {
-        const errorText = result.stderr.trim() || `digest-save exited with code ${result.exitCode}`;
+      const digest = getCurrentDigest();
+      if (!digest) {
         return {
-          content: [{ type: "text", text: `digest-save failed: ${errorText}` }],
+          content: [{ type: "text", text: "digest-save: no current digest to save — run digest-fetch first" }],
           details: {},
         };
       }
+      saveLastDigest(digest as Digest);
       return {
-        content: [{ type: "text", text: `digest-save: saved last digest from ${params.dir}` }],
+        content: [{ type: "text", text: "digest-save: saved last digest to ~/.pi/aura/last-digest.json" }],
         details: {},
       };
     },
@@ -480,6 +482,70 @@ export default function (pi: ExtensionAPI): void {
           details: {},
         };
       }
+    },
+  });
+
+  pi.registerTool({
+    name: "digest-update",
+    label: "Update the in-memory digest",
+    description:
+      "Replace the in-memory current digest the dashboard serves (used after correcting the digest — summary, review enrichments, re-ranked actions, corrections — and to set/clear the in-flight followup.currentlyWorkingOn lock before/after acting on a click). The dashboard's /api/digest re-serves this + fans out a 'change' SSE so the browser hot-reloads. No-op safe if the dashboard is not running (the store is still updated).",
+    promptSnippet: "digest-update — replace the in-memory digest (corrections or the in-flight lock).",
+    promptGuidelines: [
+      "Use digest-update to write the corrected digest back to the in-memory store after augmenting (before digest-save).",
+      "Use digest-update to set followup.currentlyWorkingOn = \"<section>/<key>\" before acting on a click, and to clear it (null) after the ack.",
+    ],
+    parameters: updateToolParameters,
+    async execute(
+      _toolCallId: string,
+      params: UpdateToolParams,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+    ): Promise<AgentToolResult<Record<string, never>>> {
+      setCurrentDigest(params.digest);
+      return {
+        content: [{ type: "text", text: "digest-update: in-memory digest updated" }],
+        details: {},
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "digest-ack",
+    label: "Acknowledge a click + clear the in-flight lock",
+    description:
+      "Acknowledge an action_click the agent acted on (appends an agent→page 'ack' event the dashboard uses to mark the click handled) and clear the in-flight followup.currentlyWorkingOn lock (re-enables sibling buttons). Pass the action_click event's id. A no-op for the ack if the dashboard is not running (the lock still clears).",
+    promptSnippet: "digest-ack — acknowledge a click + clear the working-on lock.",
+    promptGuidelines: [
+      "Use digest-ack after acting on an action_click to mark it done + re-enable sibling buttons.",
+    ],
+    parameters: ackToolParameters,
+    async execute(
+      _toolCallId: string,
+      params: AckToolParams,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+    ): Promise<AgentToolResult<Record<string, never>>> {
+      pushEvent({
+        id: 0,
+        ts: new Date().toISOString(),
+        dir: "agent→page",
+        type: "ack",
+        payload: { event_id: params.event_id, status: "done" },
+      });
+      // Clear the in-flight lock so sibling buttons re-enable.
+      const current = getCurrentDigest();
+      if (current && typeof current === "object" && "followup" in current) {
+        const d = structuredClone(current) as { followup?: { currentlyWorkingOn?: string | null } };
+        if (d.followup) {
+          d.followup.currentlyWorkingOn = null;
+          setCurrentDigest(d);
+        }
+      }
+      return {
+        content: [{ type: "text", text: `digest-ack: acknowledged event ${params.event_id} + cleared working-on lock` }],
+        details: {},
+      };
     },
   });
 

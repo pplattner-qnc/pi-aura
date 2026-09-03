@@ -7622,11 +7622,16 @@ var require_content_type = __commonJS({
   }
 });
 
-// ../packages/shared/src/digest/aura-digest.ts
-import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync5, rmSync, existsSync as existsSync5 } from "node:fs";
-import { resolve, join as join6 } from "node:path";
-import { tmpdir, homedir as homedir6 } from "node:os";
+// src/aura-digest.ts
+import { mkdirSync as mkdirSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import { resolve, join as join7 } from "node:path";
+import { tmpdir } from "node:os";
 import { randomBytes as randomBytes2 } from "node:crypto";
+
+// ../packages/shared/src/digest/aura-digest.ts
+import { mkdirSync, writeFileSync, readFileSync as readFileSync4, rmSync, existsSync as existsSync4 } from "node:fs";
+import { join as join5 } from "node:path";
+import { homedir as homedir5 } from "node:os";
 
 // ../packages/shared/src/generated/core/serverSentEvents.gen.ts
 function createSseClient({
@@ -20381,103 +20386,6 @@ function buildQueueAction(row) {
   };
 }
 
-// ../packages/shared/src/digest/write-dashboard-digest.ts
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname as dirname2 } from "node:path";
-function writeDashboardDigest(digest, dashboardPath) {
-  mkdirSync(dirname2(dashboardPath), { recursive: true });
-  writeFileSync(dashboardPath, JSON.stringify(digest, null, 2) + "\n", "utf8");
-}
-
-// ../packages/shared/src/digest/progress-emitter.ts
-import { existsSync as existsSync4, readFileSync as readFileSync4 } from "node:fs";
-import { join as join5 } from "node:path";
-import { homedir as homedir5 } from "node:os";
-function defaultServerUrlPath() {
-  return join5(homedir5(), ".pi", "aura", "server-url.json");
-}
-function readDashboardUrl(serverUrlPath = defaultServerUrlPath()) {
-  if (!existsSync4(serverUrlPath)) return null;
-  try {
-    const raw = readFileSync4(serverUrlPath, "utf-8");
-    const parsed = JSON.parse(raw);
-    if (typeof parsed.url === "string" && parsed.url.length > 0) return parsed.url;
-    return null;
-  } catch {
-    return null;
-  }
-}
-function wrapEvent(payload) {
-  return {
-    id: 0,
-    ts: (/* @__PURE__ */ new Date()).toISOString(),
-    dir: "agent\u2192page",
-    type: "progress",
-    payload
-  };
-}
-function createProgressEmitter(dashboardUrl, opts = {}) {
-  if (dashboardUrl === null) {
-    const noop2 = async () => {
-    };
-    noop2.flush = async () => {
-    };
-    return noop2;
-  }
-  const batchMs = opts.batchMs ?? 50;
-  const fetchImpl = opts.fetchImpl ?? fetch;
-  const apiUrl = joinUrl(dashboardUrl, "/api/state");
-  const pending = /* @__PURE__ */ new Map();
-  let timer = null;
-  const postEvents = async (events) => {
-    for (const payload of events) {
-      const stateEvent = wrapEvent(payload);
-      try {
-        await fetchImpl(apiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(stateEvent)
-        });
-      } catch {
-      }
-    }
-  };
-  const drain = async () => {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    const events = [...pending.values()];
-    pending.clear();
-    await postEvents(events);
-  };
-  const hook = (event) => {
-    pending.set(event.id, event);
-    if (timer === null) {
-      timer = setTimeout(() => {
-        timer = null;
-        void drain();
-      }, batchMs);
-    }
-  };
-  let flushing = false;
-  hook.flush = async () => {
-    if (flushing) return;
-    flushing = true;
-    try {
-      await drain();
-    } finally {
-      flushing = false;
-    }
-  };
-  return hook;
-}
-function joinUrl(base, path) {
-  const b = base.endsWith("/") ? base.slice(0, -1) : base;
-  const p = path.startsWith("/") ? path : `/${path}`;
-  return `${b}${p}`;
-}
-
 // ../packages/shared/src/digest/aura-digest.ts
 var WORKDAY_HOURS = 8;
 var NOTIF_PAGE_SIZE = 50;
@@ -20538,8 +20446,8 @@ var USAGE = `Usage:
   node aura.mjs save <dir>            save <dir>/digest.json as the last presented digest
   node aura.mjs diff <dir>            print what changed since the last saved digest (JSON)
   node aura.mjs last                  print the last saved digest (JSON)`;
-var LAST_DIGEST_PATH = join6(homedir6(), ".pi", "aura", "last-digest.json");
-var DASHBOARD_DIGEST_PATH = join6(homedir6(), ".pi", "aura", "digest.json");
+var LAST_DIGEST_PATH = join5(homedir5(), ".pi", "aura", "last-digest.json");
+var DASHBOARD_DIGEST_PATH = join5(homedir5(), ".pi", "aura", "digest.json");
 var LAST_DIGEST_SCHEMA_VERSION = 1;
 var ACTIVE_STATUS_TYPES = /* @__PURE__ */ new Set([
   "ACTIVE"
@@ -20604,15 +20512,13 @@ async function fetchNotifications(aura, lastFetchedAt, warnings) {
   }
   return { since, older };
 }
-async function fetchAction() {
-  const outDir = join6(tmpdir(), `aura-morning-${randomBytes2(6).toString("hex")}`);
-  mkdirSync2(outDir, { recursive: true });
-  const aura = await createDefaultAuraClient();
+async function fetchAction(opts = {}) {
+  const aura = opts.auraClient ?? await createDefaultAuraClient();
+  const onProgress = opts.onProgress ?? (() => {
+  });
   const warnings = [];
-  const dashboardUrl = readDashboardUrl();
-  const progressHook = createProgressEmitter(dashboardUrl);
   const emitPhase = (id, label, status, startedAt, endedAt) => {
-    progressHook({ id, label, status, startedAt, endedAt, kind: "fetchAction" });
+    onProgress({ id, label, status, startedAt, endedAt, kind: "fetchAction" });
   };
   const notifStart = Date.now();
   emitPhase("phase-notifications", "Fetching notifications from Aura", "running", notifStart);
@@ -20929,7 +20835,7 @@ async function fetchAction() {
         {
           concurrency: 6,
           initialMaxTasks: 30,
-          onProgress: (e) => progressHook(e)
+          onProgress: (e) => onProgress(e)
         }
       );
       capped = result.capped;
@@ -20937,7 +20843,6 @@ async function fetchAction() {
       finalCap = result.maxTasks;
     } finally {
       if (atlassian) await atlassian.close();
-      await progressHook.flush();
     }
     if (capped) {
       warnings.push(
@@ -20958,9 +20863,6 @@ async function fetchAction() {
   for (const row of queueRows) {
     row.git_summary = gitColumnSummary(devLinksByTask.get(row.key));
   }
-  const rawPath = resolve(outDir, "raw.json");
-  const digestPath = resolve(outDir, "digest.json");
-  const reportPath = resolve(outDir, "report.json");
   const digest = {
     date: date4,
     summary: null,
@@ -20977,8 +20879,8 @@ async function fetchAction() {
     followup: { currentlyWorkingOn: null },
     meta: {
       generated_at: fetchedAt,
-      raw_path: rawPath,
-      report_path: reportPath
+      raw_path: "",
+      report_path: ""
     }
   };
   const actions = buildActions(digest);
@@ -20987,7 +20889,7 @@ async function fetchAction() {
   const report = {
     fetched_at: fetchedAt,
     warnings,
-    raw_path: rawPath,
+    raw_path: "",
     artifacts_to_verify: artifactsToVerify,
     verifications,
     pending_review_summary: (pendingReviews.items ?? []).map((a) => ({
@@ -20997,22 +20899,7 @@ async function fetchAction() {
     })),
     notification_review_events: notificationReviewEvents
   };
-  writeFileSync2(rawPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
-  writeFileSync2(digestPath, JSON.stringify(digest, null, 2) + "\n", "utf8");
-  writeFileSync2(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
-  try {
-    writeDashboardDigest(digest, DASHBOARD_DIGEST_PATH);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    warnings.push(`Could not write dashboard digest to ${DASHBOARD_DIGEST_PATH}: ${message}`);
-  }
-  await progressHook.flush();
-  console.log(`output directory: ${outDir}/`);
-  console.error(`fetched ${fetchedAt}`);
-  console.error(`  raw:     ${rawPath}`);
-  console.error(`  digest:  ${digestPath}`);
-  console.error(`  report:  ${reportPath}`);
-  console.error(`  queue rows: ${queueRows.length}, artifacts verified: ${verifications.length} (${verifications.filter((v) => v.stale).length} stale), dev links: ${devLinks.length} tasks`);
+  return { digest, report, raw };
 }
 async function verifyArtifacts(client2, candidates) {
   const isActionable = (d) => d === "REJECTED" || d === "NEEDS_REVISION";
@@ -21345,17 +21232,17 @@ function renderAction() {
   const dir = process.argv[3];
   const outPath = process.argv[4];
   if (!dir) fail("render: missing <dir> argument", USAGE);
-  const digestPath = join6(dir, "digest.json");
-  if (!existsSync5(digestPath)) fail(`render: ${digestPath} not found`);
+  const digestPath = join5(dir, "digest.json");
+  if (!existsSync4(digestPath)) fail(`render: ${digestPath} not found`);
   let d;
   try {
-    d = JSON.parse(readFileSync5(digestPath, "utf8"));
+    d = JSON.parse(readFileSync4(digestPath, "utf8"));
   } catch (e) {
     fail(`render: failed to parse ${digestPath}: ${e instanceof Error ? e.message : String(e)}`, void 0, 1);
   }
   const md = render(d);
   if (outPath) {
-    writeFileSync2(outPath, md, "utf8");
+    writeFileSync(outPath, md, "utf8");
     console.error(`rendered ${outPath}`);
   } else {
     process.stdout.write(md);
@@ -21364,25 +21251,21 @@ function renderAction() {
 function cleanupAction() {
   const dir = process.argv[3];
   if (!dir) fail("cleanup: missing <dir> argument", USAGE);
-  if (!existsSync5(dir)) fail(`cleanup: ${dir} not found`);
+  if (!existsSync4(dir)) fail(`cleanup: ${dir} not found`);
   rmSync(dir, { recursive: true, force: true });
   console.error(`cleaned up ${dir}`);
 }
 function loadLastDigest() {
-  if (!existsSync5(LAST_DIGEST_PATH)) return null;
+  if (!existsSync4(LAST_DIGEST_PATH)) return null;
   try {
-    return JSON.parse(readFileSync5(LAST_DIGEST_PATH, "utf8"));
+    return JSON.parse(readFileSync4(LAST_DIGEST_PATH, "utf8"));
   } catch (e) {
     console.error(`warning: could not parse ${LAST_DIGEST_PATH}: ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
 }
-function saveAction() {
-  const dir = process.argv[3];
-  if (!dir) fail("save: missing <dir> argument", USAGE);
-  const digestPath = join6(dir, "digest.json");
-  if (!existsSync5(digestPath)) fail(`save: ${digestPath} not found`);
-  const digest = JSON.parse(readFileSync5(digestPath, "utf8"));
+function saveLastDigest(digest, lastDigestPath) {
+  const dest = lastDigestPath ?? join5(homedir5(), ".pi", "aura", "last-digest.json");
   const presentedAt = (/* @__PURE__ */ new Date()).toISOString();
   const store = {
     schema_version: LAST_DIGEST_SCHEMA_VERSION,
@@ -21390,9 +21273,17 @@ function saveAction() {
     fetched_at: digest.meta?.generated_at ?? presentedAt,
     digest
   };
-  mkdirSync2(join6(homedir6(), ".pi", "aura"), { recursive: true });
-  writeFileSync2(LAST_DIGEST_PATH, JSON.stringify(store, null, 2) + "\n", "utf8");
-  console.error(`saved last digest to ${LAST_DIGEST_PATH} (presented ${presentedAt})`);
+  mkdirSync(join5(homedir5(), ".pi", "aura"), { recursive: true });
+  writeFileSync(dest, JSON.stringify(store, null, 2) + "\n", "utf8");
+  console.error(`saved last digest to ${dest} (presented ${presentedAt})`);
+}
+function saveAction() {
+  const dir = process.argv[3];
+  if (!dir) fail("save: missing <dir> argument", USAGE);
+  const digestPath = join5(dir, "digest.json");
+  if (!existsSync4(digestPath)) fail(`save: ${digestPath} not found`);
+  const digest = JSON.parse(readFileSync4(digestPath, "utf8"));
+  saveLastDigest(digest);
 }
 function daysBetween(aIso, bIso) {
   const a = (/* @__PURE__ */ new Date(aIso.slice(0, 10) + "T00:00:00")).getTime();
@@ -21450,15 +21341,15 @@ function computeDiff(prev, cur) {
 function diffAction() {
   const dir = process.argv[3];
   if (!dir) fail("diff: missing <dir> argument", USAGE);
-  const curPath = join6(dir, "digest.json");
-  if (!existsSync5(curPath)) fail(`diff: ${curPath} not found`);
+  const curPath = join5(dir, "digest.json");
+  if (!existsSync4(curPath)) fail(`diff: ${curPath} not found`);
   const last = loadLastDigest();
   if (!last) {
     console.error(`no previous digest found at ${LAST_DIGEST_PATH}`);
     process.stdout.write(JSON.stringify({ first_run: true }, null, 2) + "\n");
     return;
   }
-  const cur = JSON.parse(readFileSync5(curPath, "utf8"));
+  const cur = JSON.parse(readFileSync4(curPath, "utf8"));
   const diff = computeDiff(last.digest, cur);
   process.stdout.write(JSON.stringify(diff, null, 2) + "\n");
 }
@@ -21470,13 +21361,138 @@ function lastAction() {
   process.stdout.write(JSON.stringify(last, null, 2) + "\n");
 }
 
+// ../packages/shared/src/digest/progress-emitter.ts
+import { existsSync as existsSync5, readFileSync as readFileSync5 } from "node:fs";
+import { join as join6 } from "node:path";
+import { homedir as homedir6 } from "node:os";
+function defaultServerUrlPath() {
+  return join6(homedir6(), ".pi", "aura", "server-url.json");
+}
+function readDashboardUrl(serverUrlPath = defaultServerUrlPath()) {
+  if (!existsSync5(serverUrlPath)) return null;
+  try {
+    const raw = readFileSync5(serverUrlPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.url === "string" && parsed.url.length > 0) return parsed.url;
+    return null;
+  } catch {
+    return null;
+  }
+}
+function wrapEvent(payload) {
+  return {
+    id: 0,
+    ts: (/* @__PURE__ */ new Date()).toISOString(),
+    dir: "agent\u2192page",
+    type: "progress",
+    payload
+  };
+}
+function createProgressEmitter(dashboardUrl, opts = {}) {
+  if (dashboardUrl === null) {
+    const noop2 = async () => {
+    };
+    noop2.flush = async () => {
+    };
+    return noop2;
+  }
+  const batchMs = opts.batchMs ?? 50;
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const apiUrl = joinUrl(dashboardUrl, "/api/state");
+  const pending = /* @__PURE__ */ new Map();
+  let timer = null;
+  const postEvents = async (events) => {
+    for (const payload of events) {
+      const stateEvent = wrapEvent(payload);
+      try {
+        await fetchImpl(apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(stateEvent)
+        });
+      } catch {
+      }
+    }
+  };
+  const drain = async () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    const events = [...pending.values()];
+    pending.clear();
+    await postEvents(events);
+  };
+  const hook = (event) => {
+    pending.set(event.id, event);
+    if (timer === null) {
+      timer = setTimeout(() => {
+        timer = null;
+        void drain();
+      }, batchMs);
+    }
+  };
+  let flushing = false;
+  hook.flush = async () => {
+    if (flushing) return;
+    flushing = true;
+    try {
+      await drain();
+    } finally {
+      flushing = false;
+    }
+  };
+  return hook;
+}
+function joinUrl(base, path) {
+  const b = base.endsWith("/") ? base.slice(0, -1) : base;
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${b}${p}`;
+}
+
+// ../packages/shared/src/digest/write-dashboard-digest.ts
+import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { dirname as dirname2 } from "node:path";
+function writeDashboardDigest(digest, dashboardPath) {
+  mkdirSync2(dirname2(dashboardPath), { recursive: true });
+  writeFileSync2(dashboardPath, JSON.stringify(digest, null, 2) + "\n", "utf8");
+}
+
 // src/aura-digest.ts
 async function main() {
   const action = process.argv[2];
   switch (action) {
-    case "fetch":
-      await fetchAction();
+    case "fetch": {
+      const outDir = join7(tmpdir(), `aura-morning-${randomBytes2(6).toString("hex")}`);
+      mkdirSync3(outDir, { recursive: true });
+      const dashboardUrl = readDashboardUrl();
+      const progressHook = createProgressEmitter(dashboardUrl);
+      const r = await fetchAction({ onProgress: progressHook });
+      const { digest, report, raw } = r;
+      const rawPath = resolve(outDir, "raw.json");
+      const digestPath = resolve(outDir, "digest.json");
+      const reportPath = resolve(outDir, "report.json");
+      digest.meta.raw_path = rawPath;
+      digest.meta.report_path = reportPath;
+      report.raw_path = rawPath;
+      writeFileSync3(rawPath, JSON.stringify(raw, null, 2) + "\n", "utf8");
+      writeFileSync3(digestPath, JSON.stringify(digest, null, 2) + "\n", "utf8");
+      writeFileSync3(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+      try {
+        writeDashboardDigest(digest, DASHBOARD_DIGEST_PATH);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        digest.warnings.push(`Could not write dashboard digest to ${DASHBOARD_DIGEST_PATH}: ${message}`);
+      }
+      await progressHook.flush();
+      console.log(`output directory: ${outDir}/`);
+      console.error(`fetched ${report.fetched_at}`);
+      console.error(`  raw:     ${rawPath}`);
+      console.error(`  digest:  ${digestPath}`);
+      console.error(`  report:  ${reportPath}`);
+      console.error(`  queue rows: ${digest.queue.length}, artifacts verified: ${report.verifications.length} (${report.verifications.filter((v) => v.stale).length} stale), dev links: ${digest.dev_links.length} tasks`);
       return;
+    }
     case "render":
       renderAction();
       return;
