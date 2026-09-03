@@ -5,7 +5,6 @@ import type {
   AgentToolResult,
 } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
-import { spawn } from "node:child_process";
 import type { Server } from "node:http";
 import { existsSync, rmSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -14,10 +13,11 @@ import { fileURLToPath } from "node:url";
 import { startListener, type ListenerHandle } from "./listener.ts";
 import { startServer, openBrowser } from "./server.ts";
 import { joinUrl } from "@pi-aura/shared/digest/progress-emitter";
-import { fetchAction } from "@pi-aura/shared/digest/aura-digest";
+import { fetchAction, saveLastDigest } from "@pi-aura/shared/digest/aura-digest";
 import type { AuraClient } from "@pi-aura/shared/aura-client";
 import type { ProgressEvent } from "@pi-aura/shared/digest/scheduler";
-import { resetStore, pushEvent, setCurrentDigest } from "./store.ts";
+import type { Digest } from "@pi-aura/shared/digest/types";
+import { resetStore, pushEvent, setCurrentDigest, getCurrentDigest } from "./store.ts";
 import type { StateEvent } from "./state.ts";
 import type { ProgressPayload } from "./digest-types.ts";
 
@@ -50,11 +50,7 @@ const fetchToolParameters = Type.Object({});
 
 type FetchToolParams = Static<typeof fetchToolParameters>;
 
-const saveToolParameters = Type.Object({
-  dir: Type.String({
-    description: "The output directory returned by digest-fetch (details.dir).",
-  }),
-});
+const saveToolParameters = Type.Object({});
 
 type SaveToolParams = Static<typeof saveToolParameters>;
 
@@ -143,44 +139,6 @@ function defaultAuraPaths(): {
   };
 }
 
-function resolveAuraDigestScriptPath(): string {
-  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(moduleDir, "../../../skills/core/aura-digest/dist/aura-digest.mjs");
-}
-
-interface SpawnResult {
-  exitCode: number | null;
-  stdout: string;
-  stderr: string;
-}
-
-async function runAuraDigest(args: string[]): Promise<SpawnResult> {
-  const scriptPath = resolveAuraDigestScriptPath();
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [scriptPath, ...args], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf-8");
-    });
-
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf-8");
-    });
-
-    child.on("close", (exitCode) => {
-      resolve({ exitCode, stdout, stderr });
-    });
-
-    child.on("error", (err: Error) => {
-      resolve({ exitCode: 1, stdout, stderr: `${stderr}${err.message}` });
-    });
-  });
-}
 
 export async function teardownDashboard(
   statePath: string,
@@ -428,24 +386,24 @@ export default function (pi: ExtensionAPI): void {
     name: "digest-save",
     label: "Save Aura digest",
     description:
-      "Save the digest from the given directory as the last presented digest (~/.pi/aura/last-digest.json). Pass the directory returned by digest-fetch.",
+      "Save the current in-memory digest as the last presented digest (~/.pi/aura/last-digest.json). Run digest-fetch first.",
     parameters: saveToolParameters,
     async execute(
       _toolCallId: string,
-      params: SaveToolParams,
+      _params: SaveToolParams,
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
     ): Promise<AgentToolResult<Record<string, never>>> {
-      const result = await runAuraDigest(["save", params.dir]);
-      if (result.exitCode !== 0) {
-        const errorText = result.stderr.trim() || `digest-save exited with code ${result.exitCode}`;
+      const digest = getCurrentDigest();
+      if (!digest) {
         return {
-          content: [{ type: "text", text: `digest-save failed: ${errorText}` }],
+          content: [{ type: "text", text: "digest-save: no current digest to save — run digest-fetch first" }],
           details: {},
         };
       }
+      saveLastDigest(digest as Digest);
       return {
-        content: [{ type: "text", text: `digest-save: saved last digest from ${params.dir}` }],
+        content: [{ type: "text", text: "digest-save: saved last digest to ~/.pi/aura/last-digest.json" }],
         details: {},
       };
     },

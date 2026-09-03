@@ -11,8 +11,11 @@
 //   - One-shot "dashboard not running" warning (notify + result text) when
 //     the in-process server is down — but the digest is still populated.
 //
-// digest-save (still spawning the CLI this slice — slice 3 rewires it):
-//   - Writes last-digest.json via the spawn mock.
+// digest-save (slice 3 — in-process, no spawn):
+//   - Writes last-digest.json from store.getCurrentDigest() (no dir param).
+//   - Returns a clear error when no current digest is set.
+//   - No spawn (nothing spawns anymore — digest-fetch is in-process (slice
+//     2), digest-save is in-process (slice 3)).
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type {
@@ -36,7 +39,6 @@ import type {
 import {
   mkdtempSync,
   mkdirSync,
-  writeFileSync,
   readFileSync,
   existsSync,
   rmSync,
@@ -44,17 +46,16 @@ import {
 import path from "node:path";
 import os from "node:os";
 import http from "node:http";
-import { EventEmitter } from "node:events";
 import {
   startDashboard,
   teardownDashboard,
   default as installExtension,
   _setAuraClientForTesting,
 } from "../../.pi/extensions/digest-dashboard/index.ts";
-import { resetStore, getEvents, getCurrentDigest } from "../../.pi/extensions/digest-dashboard/store.ts";
+import { resetStore, getEvents, getCurrentDigest, setCurrentDigest } from "../../.pi/extensions/digest-dashboard/store.ts";
 
 // ---------------------------------------------------------------------------
-// Spawn mock — kept for digest-save tests (still spawns the CLI this slice).
+// Test helpers
 // ---------------------------------------------------------------------------
 
 interface RegisterToolCall {
@@ -67,75 +68,6 @@ interface RegisterToolCall {
     ctx: ExtensionContext,
   ) => Promise<unknown>;
 }
-
-let nextSpawnOutcome: {
-  exitCode: number | null;
-  stdoutLines: string[];
-  stderrLines: string[];
-} = { exitCode: 0, stdoutLines: [], stderrLines: [] };
-
-vi.mock("node:child_process", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:child_process")>();
-  const fs = await import("node:fs");
-  const path = await import("node:path");
-  const os = await import("node:os");
-  return {
-    ...actual,
-    spawn: vi.fn((_cmd: string, args: string[], _opts: unknown) => {
-      const child = new EventEmitter() as import("node:child_process").ChildProcess;
-      const stdout = new EventEmitter();
-      const stderr = new EventEmitter();
-      Object.defineProperty(child, "stdout", { value: stdout, writable: false });
-      Object.defineProperty(child, "stderr", { value: stderr, writable: false });
-      Object.defineProperty(child, "exitCode", { value: null, writable: true });
-
-      process.nextTick(() => {
-        for (const line of nextSpawnOutcome.stdoutLines) {
-          stdout.emit("data", Buffer.from(`${line}\n`, "utf-8"));
-        }
-        for (const line of nextSpawnOutcome.stderrLines) {
-          stderr.emit("data", Buffer.from(`${line}\n`, "utf-8"));
-        }
-
-        // Mimic the real aura-digest.mjs save subcommand: read <dir>/digest.json
-        // and write ~/.pi/aura/last-digest.json. spawn args are
-        // [node, scriptPath, "save", dir], so the subcommand is args[1].
-        if (args[1] === "save" && nextSpawnOutcome.exitCode === 0) {
-          const dir = args[2];
-          if (dir) {
-            try {
-              const digest = JSON.parse(fs.readFileSync(path.join(dir, "digest.json"), "utf8"));
-              const auraDir = path.join(os.homedir(), ".pi", "aura");
-              fs.mkdirSync(auraDir, { recursive: true });
-              fs.writeFileSync(
-                path.join(auraDir, "last-digest.json"),
-                JSON.stringify(
-                  {
-                    schema_version: 1,
-                    presented_at: new Date().toISOString(),
-                    fetched_at: digest.meta?.generated_at ?? new Date().toISOString(),
-                    digest,
-                  },
-                  null, 2,
-                ) + "\n",
-                "utf8",
-              );
-            } catch {
-              // ignore mimic failures; tests set up the fixture digest.json
-            }
-          }
-        }
-
-        if (nextSpawnOutcome.exitCode !== null) {
-          (child as { exitCode: number | null }).exitCode = nextSpawnOutcome.exitCode;
-          child.emit("close", nextSpawnOutcome.exitCode);
-        }
-      });
-
-      return child;
-    }),
-  };
-});
 
 // ---------------------------------------------------------------------------
 // Fake AuraClient — returns minimal-but-shaped fixture data (same approach
@@ -394,7 +326,7 @@ describe("digest-fetch tool (in-process)", () => {
     expect(Object.keys(result.details)).toHaveLength(0);
   }, 15000);
 
-  it("does not spawn a child process for fetch", async () => {
+  it("fetches in-process (no spawn — the spawn mock is gone)", async () => {
     const pi = createFakePi();
     installExtension(pi);
     const tool = findTool(pi, "digest-fetch");
@@ -402,28 +334,13 @@ describe("digest-fetch tool (in-process)", () => {
     // Start the dashboard so no warning prefix is prepended (clean JSON).
     await startDashboard(pi, createCmdCtx());
 
-    // Set a spawn outcome that would fail if spawn were called.
-    nextSpawnOutcome = {
-      exitCode: 99,
-      stdoutLines: [],
-      stderrLines: ["spawn should not be called for fetch"],
-    };
-
     const result = (await tool.execute("call-1", {}, undefined, undefined, createCtx())) as {
       content: Array<{ type: string; text: string }>;
     };
 
-    // The fetch succeeded despite the hostile spawn outcome — it didn't spawn.
+    // The fetch succeeded in-process — the digest is in the result.
     const parsed = JSON.parse(result.content[0].text) as { digest: unknown };
     expect(parsed.digest).toBeDefined();
-
-    // Verify spawn was NOT called for fetch.
-    const spawnMock = vi.mocked(
-      (await import("node:child_process")).spawn,
-    );
-    // The spawn mock is only called for "save", not "fetch".
-    const fetchSpawnCalls = spawnMock.mock.calls.filter((c) => c[1]?.[1] === "fetch");
-    expect(fetchSpawnCalls).toHaveLength(0);
   }, 15000);
 
   it("pushes progress events to the store (type: progress)", async () => {
@@ -704,10 +621,13 @@ describe("digest-fetch SSE fan-out (in-process)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// digest-save tool (still spawns the CLI this slice — slice 3 rewires it)
+// digest-save tool (slice 3 — in-process, no spawn)
+//   - Writes last-digest.json from store.getCurrentDigest() (no dir param).
+//   - Returns a clear error when no current digest is set.
+//   - No spawn (the spawn mock is gone — nothing spawns anymore).
 // ---------------------------------------------------------------------------
 
-describe("digest-save tool", () => {
+describe("digest-save tool (in-process from store)", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
   let auraDir: string;
@@ -719,9 +639,11 @@ describe("digest-save tool", () => {
     process.env.PI_DIGEST_NO_BROWSER = "1";
     auraDir = path.join(tmpDir, ".pi", "aura");
     mkdirSync(auraDir, { recursive: true });
+    resetStore();
   });
 
   afterEach(async () => {
+    resetStore();
     await ensureTeardown();
     if (originalHome !== undefined) {
       process.env.HOME = originalHome;
@@ -732,17 +654,22 @@ describe("digest-save tool", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("writes last-digest.json and returns a confirmation", async () => {
+  it("writes last-digest.json from getCurrentDigest and returns a confirmation", async () => {
     const pi = createFakePi();
     installExtension(pi);
     const tool = findTool(pi, "digest-save");
 
-    writeFileSync(path.join(tmpDir, "digest.json"), JSON.stringify({ title: "digest fixture" }), "utf8");
-    nextSpawnOutcome = { exitCode: 0, stdoutLines: [], stderrLines: [] };
+    // Set the in-memory digest (the seam digest-fetch populates).
+    const digestFixture = {
+      date: "2025-01-01",
+      queue: [{ key: "AURA-100", title: "Test task", rank: 1, status: "In Development", role: "OWNER", capacity_pct: 50, hours: 4 }],
+      meta: { generated_at: "2025-01-01T00:00:00Z", raw_path: "", report_path: "" },
+    };
+    setCurrentDigest(digestFixture);
 
     const result = (await tool.execute(
       "call-1",
-      { dir: tmpDir },
+      {},
       undefined,
       undefined,
       createCtx(),
@@ -753,7 +680,32 @@ describe("digest-save tool", () => {
     const lastPath = path.join(auraDir, "last-digest.json");
     expect(existsSync(lastPath)).toBe(true);
     const saved = JSON.parse(readFileSync(lastPath, "utf-8"));
-    expect(saved.digest).toEqual({ title: "digest fixture" });
+    expect(saved.schema_version).toBe(1);
+    expect(saved.digest).toEqual(digestFixture);
+    expect(saved.fetched_at).toBe("2025-01-01T00:00:00Z");
     expect(result.content[0].text).toContain("saved");
+  });
+
+  it("returns a clear error when no current digest is set", async () => {
+    const pi = createFakePi();
+    installExtension(pi);
+    const tool = findTool(pi, "digest-save");
+
+    // Do NOT setCurrentDigest — nothing to save.
+    const result = (await tool.execute(
+      "call-1",
+      {},
+      undefined,
+      undefined,
+      createCtx(),
+    )) as {
+      content: Array<{ type: string; text: string }>;
+    };
+
+    expect(result.content[0].text).toContain("no current digest");
+
+    // No last-digest.json was written.
+    const lastPath = path.join(auraDir, "last-digest.json");
+    expect(existsSync(lastPath)).toBe(false);
   });
 });
