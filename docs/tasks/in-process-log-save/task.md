@@ -56,3 +56,7 @@ no temp dir, no `dir` param on `digest-save`.
 ## Implementation notes
 
 _The land-worker appends a per-slice note here as each slice lands._
+
+### slice 1: digest-log-direct-push
+
+digest-log now calls `store.pushEvent` directly (no HTTP self-POST); always-safe (returns ok regardless of server state; the event is recorded even with no dashboard); the "dashboard not running → skipped" branch is gone; `joinUrl` import dropped from `index.ts` (only digest-log used it); `getDashboardUrl` kept (`digest-fetch` uses it); `log-tool.test.ts` rewritten (pushEvent recorded, no fetch, SSE receives the event, ok with no server). `digest-save` untouched (slice 2 verifies).
