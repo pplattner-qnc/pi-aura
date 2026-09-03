@@ -12,7 +12,6 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { startListener, type ListenerHandle } from "./listener.ts";
 import { startServer, openBrowser } from "./server.ts";
-import { joinUrl } from "@pi-aura/shared/digest/progress-emitter";
 import { fetchAction, saveLastDigest } from "@pi-aura/shared/digest/aura-digest";
 import type { AuraClient } from "@pi-aura/shared/aura-client";
 import type { ProgressEvent } from "@pi-aura/shared/digest/scheduler";
@@ -431,7 +430,7 @@ export default function (pi: ExtensionAPI): void {
     name: "digest-log",
     label: "Log a status line to the digest dashboard",
     description:
-      "Push a single status line to the running digest dashboard's log list (below the progress tree). A no-op if the dashboard is not running — it never fails the agent's call.",
+      "Push a single status line to the running digest dashboard's log list (below the progress tree). Always records the status line to the in-memory event stream; it renders in the dashboard log list when the dashboard is running. Never fails the agent call (the line is recorded regardless of whether the dashboard is open).",
     promptSnippet: "digest-log — append a status line to the live digest dashboard.",
     promptGuidelines: [
       "Use digest-log to push status lines during the augment phase so the user sees live progress in the dashboard.",
@@ -443,45 +442,17 @@ export default function (pi: ExtensionAPI): void {
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
     ): Promise<AgentToolResult<Record<string, never>>> {
-      const dashboardUrl = getDashboardUrl();
-      if (dashboardUrl === null) {
-        return {
-          content: [
-            { type: "text", text: "digest-log: dashboard not running, log skipped" },
-          ],
-          details: {},
-        };
-      }
-
-      const apiUrl = joinUrl(dashboardUrl, "/api/state");
-      const body = JSON.stringify({
+      pushEvent({
         id: 0,
         ts: new Date().toISOString(),
         dir: "agent→page",
         type: "agent_log",
         payload: { message: params.message },
       });
-
-      try {
-        await fetch(apiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body,
-        });
-        return {
-          content: [{ type: "text", text: `digest-log: ok (${params.message})` }],
-          details: {},
-        };
-      } catch {
-        // Best-effort: a POST failure (dashboard went down mid-run) is
-        // non-fatal — the log is a nice-to-have, not a gate.
-        return {
-          content: [
-            { type: "text", text: `digest-log: ok (post failed, non-fatal) — ${params.message}` },
-          ],
-          details: {},
-        };
-      }
+      return {
+        content: [{ type: "text", text: `digest-log: ok (${params.message})` }],
+        details: {},
+      };
     },
   });
 

@@ -171,8 +171,9 @@ your corrections.)
 During this augment phase, call the `digest-log` tool with `{ message: "…" }`
 for each major sub-step (e.g. "Verifying review states…", "Re-ranking
 actions…"). The message appears as a status line in the dashboard's log list
-below the progress tree, so the user sees live progress. It is a no-op if the
-dashboard is not running — it never fails the agent's call.
+below the progress tree, so the user sees live progress. It always records
+the line to the in-memory event stream; the line renders in the dashboard
+log list when the dashboard is running. It never fails the agent call.
 
 ### Diff against last digest (optional, for "what changed")
 

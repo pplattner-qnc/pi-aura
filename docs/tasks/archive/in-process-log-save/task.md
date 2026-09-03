@@ -4,9 +4,13 @@ type: feature
 slug: in-process-log-save
 title: digest-log pushes events in-process; digest-save writes only last-digest.json
 map: in-process-aura-digest
-status: ready
-blocked_by: [in-process-server, in-process-fetch]
-slices: []
+status: done
+blocked_by:
+- in-process-server
+- in-process-fetch
+slices:
+- 1-digest-log-direct-push
+- 2-cleanup-and-final-polish
 ---
 
 ## User-visible outcome
@@ -52,3 +56,13 @@ no temp dir, no `dir` param on `digest-save`.
 - Likely: (a) `digest-log` → direct in-memory push; (b) `digest-save` →
   `last-digest.json`-only from memory, drop `dir`; (c) drop self-HTTP
   helpers + the local `readDashboardUrl` duplicate.
+
+## Implementation notes
+
+_The land-worker appends a per-slice note here as each slice lands._
+
+### slice 1: digest-log-direct-push
+
+digest-log now calls `store.pushEvent` directly (no HTTP self-POST); always-safe (returns ok regardless of server state; the event is recorded even with no dashboard); the "dashboard not running → skipped" branch is gone; `joinUrl` import dropped from `index.ts` (only digest-log used it); `getDashboardUrl` kept (`digest-fetch` uses it); `log-tool.test.ts` rewritten (pushEvent recorded, no fetch, SSE receives the event, ok with no server). ### slice 2: cleanup-and-final-polish
+
+Polished the `digest-log` tool description + skill-doc `digest-log` line: "always records the line; renders in the dashboard when it's running" replaces the stale "no-op if the dashboard is not running" semantics. `digest-save` confirmed final and unchanged (writes `last-digest.json` from `getCurrentDigest()` → `saveLastDigest`; no `dir`, no spawn; errors when the current digest is null). Confirmed no residual dead refs: `joinUrl` gone from `index.ts` (slice 1 dropped it), no agent-side HTTP `fetch` to `/api/state`, no `readDashboardUrl`. The `/api/state` POST route in `server.ts` stays untouched (browser `action_click` uses it). This was the last slice of `in-process-log-save`; task ready for finalize.
