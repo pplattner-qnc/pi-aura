@@ -3907,13 +3907,6 @@
       }
     };
   }
-  function isRootDone(roots) {
-    if (roots.length === 0) return false;
-    for (const root2 of roots) {
-      if (effectiveStatus(root2) === "running") return false;
-    }
-    return roots.some((r) => effectiveStatus(r) === "done");
-  }
   const DWELL_MS = 400;
   function createDwellManager(dwellMs = DWELL_MS, onExpire) {
     const lastStatus = /* @__PURE__ */ new Map();
@@ -4317,13 +4310,12 @@
             var text_1 = text("Refining…");
             append($$anchor3, text_1);
           };
-          var d_3 = /* @__PURE__ */ user_derived(() => isRootDone(buildProgressTree(get(progressNodes))));
           var alternate_1 = ($$anchor3) => {
             var text_2 = text("Fetching digest…");
             append($$anchor3, text_2);
           };
           if_block(node_4, ($$render) => {
-            if (get(d_3)) $$render(consequent_4);
+            if (get(digest)) $$render(consequent_4);
             else $$render(alternate_1, -1);
           });
         }
