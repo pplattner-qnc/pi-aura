@@ -1,154 +1,138 @@
-// Unit tests for digest-dashboard teardown (slice 5).
-// Uses a temp HOME and a spawned child as the fake server PID.
+// Unit tests for digest-dashboard teardown (in-process lifecycle).
+// Verifies teardownDashboard closes the in-process server deterministically.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import {
-  mkdtempSync,
-  mkdirSync,
-  writeFileSync,
-  existsSync,
-  rmSync,
-} from "node:fs";
+import { mkdtempSync, mkdirSync, existsSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { spawn, type ChildProcess } from "node:child_process";
+import http from "node:http";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
+  startDashboard,
   teardownDashboard,
+  getDashboardUrl,
   default as installExtension,
 } from "../../.pi/extensions/digest-dashboard/index.ts";
 
-function createFakePi() {
-  const events: Record<string, Array<(...args: unknown[]) => unknown>> = {};
+function createFakePi(): ExtensionAPI {
   return {
-    registerCommand: vi.fn(),
+    sendMessage: vi.fn(),
     registerTool: vi.fn(),
-    on: vi.fn((event: string, handler: (...args: unknown[]) => unknown) => {
-      events[event] = events[event] ?? [];
-      events[event].push(handler);
-    }),
-    _events: events,
-  };
+    registerCommand: vi.fn(),
+    on: vi.fn(),
+  } as unknown as ExtensionAPI;
 }
 
-describe("teardown-dashboard helper", () => {
+function createCtx(): ExtensionCommandContext {
+  return {} as unknown as ExtensionCommandContext;
+}
+
+async function httpGet(url: string): Promise<{ ok: boolean }> {
+  return new Promise((resolve) => {
+    const req = http.get(url, (res) => {
+      res.resume();
+      res.on("end", () => resolve({ ok: res.statusCode !== undefined && res.statusCode < 400 }));
+    });
+    req.on("error", () => resolve({ ok: false }));
+  });
+}
+
+describe("teardown-dashboard helper (in-process)", () => {
   let tmpDir: string;
   let statePath: string;
-  let serverUrlPath: string;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(path.join(os.tmpdir(), "digest-dashboard-teardown-"));
-    statePath = path.join(tmpDir, "state.json");
-    serverUrlPath = path.join(tmpDir, "server-url.json");
+    process.env.HOME = tmpDir;
+    process.env.PI_DIGEST_NO_BROWSER = "1";
+    statePath = path.join(tmpDir, ".pi", "aura", "state.json");
+    mkdirSync(path.dirname(statePath), { recursive: true });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await teardownDashboard(statePath).catch(() => {});
+    delete process.env.HOME;
+    delete process.env.PI_DIGEST_NO_BROWSER;
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("kills a live PID, deletes state.json + server-url.json, and reports stopped", async () => {
-    const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"]);
-    await new Promise<void>((resolve) => {
-      child.on("spawn", () => resolve());
-    });
+  it("closes the in-process server and deletes state.json", async () => {
+    const pi = createFakePi();
+    const ctx = createCtx();
 
-    writeFileSync(
-      statePath,
-      JSON.stringify({ pid: child.pid, server_started: Date.now(), events: [] }),
-    );
-    writeFileSync(serverUrlPath, JSON.stringify({ url: "http://127.0.0.1:1234/" }));
+    const startResult = await startDashboard(pi, ctx);
+    expect(startResult.ok).toBe(true);
+    const url = startResult.url!;
+    expect(await httpGet(url)).toEqual({ ok: true });
 
-    const result = await teardownDashboard(statePath, serverUrlPath);
+    const result = await teardownDashboard(statePath);
 
     expect(result.ok).toBe(true);
     expect(result.message).toBe("Digest dashboard stopped.");
     expect(existsSync(statePath)).toBe(false);
-    expect(existsSync(serverUrlPath)).toBe(false);
+    expect(getDashboardUrl()).toBeNull();
 
-    // The child should exit shortly after SIGTERM/SIGKILL.
-    await new Promise<void>((resolve) => {
-      child.on("exit", () => resolve());
-      setTimeout(() => {
-        try {
-          process.kill(child.pid!, 0);
-        } catch {
-          resolve();
-        }
-      }, 2500);
-    });
+    // The server is closed — GET should fail/refuse.
+    expect(await httpGet(url)).toEqual({ ok: false });
   });
 
-  it("is idempotent when state.json is missing", async () => {
-    const result = await teardownDashboard(statePath, serverUrlPath);
+  it("is idempotent when no dashboard is running", async () => {
+    const result = await teardownDashboard(statePath);
 
     expect(result.ok).toBe(true);
     expect(result.message).toBe("No dashboard running.");
     expect(existsSync(statePath)).toBe(false);
   });
-
-  it("cleans files and reports stopped when the recorded PID is already dead", async () => {
-    // Spawn and wait for exit to obtain a guaranteed-dead PID.
-    const child = spawn(process.execPath, ["-e", "process.exit(0)"]);
-    await new Promise<void>((resolve) => child.on("exit", () => resolve()));
-
-    writeFileSync(
-      statePath,
-      JSON.stringify({ pid: child.pid, server_started: Date.now(), events: [] }),
-    );
-
-    const result = await teardownDashboard(statePath, serverUrlPath);
-
-    expect(result.ok).toBe(true);
-    expect(existsSync(statePath)).toBe(false);
-  });
 });
 
-describe("session_shutdown cleanup", () => {
+describe("session_shutdown cleanup (in-process)", () => {
   let tmpDir: string;
   let statePath: string;
-  let serverUrlPath: string;
-  let child: ChildProcess | undefined;
+  let originalHome: string | undefined;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(path.join(os.tmpdir(), "digest-dashboard-shutdown-"));
+    originalHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    process.env.PI_DIGEST_NO_BROWSER = "1";
     statePath = path.join(tmpDir, ".pi", "aura", "state.json");
-    serverUrlPath = path.join(tmpDir, ".pi", "aura", "server-url.json");
     mkdirSync(path.dirname(statePath), { recursive: true });
   });
 
-  afterEach(() => {
-    if (child && !child.killed) {
-      try {
-        process.kill(child.pid!, "SIGKILL");
-      } catch {
-        // ignore
-      }
+  afterEach(async () => {
+    await teardownDashboard(statePath).catch(() => {});
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
     }
+    delete process.env.PI_DIGEST_NO_BROWSER;
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("kills a leaked PID and deletes files", async () => {
-    child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"]);
-    await new Promise<void>((resolve) => child!.on("spawn", () => resolve()));
-
-    writeFileSync(
-      statePath,
-      JSON.stringify({ pid: child.pid, server_started: Date.now(), events: [] }),
-    );
-    writeFileSync(serverUrlPath, JSON.stringify({ url: "http://127.0.0.1:1234/" }));
-
+  it("session_shutdown closes a running in-process server", async () => {
     const pi = createFakePi();
-    const originalHome = process.env.HOME;
-    process.env.HOME = tmpDir;
-    try {
-      installExtension(pi as unknown as import("@earendil-works/pi-coding-agent").ExtensionAPI);
-      const [shutdownHandler] = pi._events["session_shutdown"] ?? [];
-      expect(shutdownHandler).toBeDefined();
-      await shutdownHandler();
-    } finally {
-      process.env.HOME = originalHome;
-    }
+    installExtension(pi);
+    const ctx = createCtx();
 
+    // Start the dashboard.
+    const startResult = await startDashboard(pi, ctx);
+    expect(startResult.ok).toBe(true);
+    const url = startResult.url!;
+    expect(await httpGet(url)).toEqual({ ok: true });
+
+    // Trigger session_shutdown — the extension registers a handler for it.
+    const onCalls = (pi.on as ReturnType<typeof vi.fn>).mock.calls as [
+      event: string,
+      handler: (...args: unknown[]) => unknown,
+    ][];
+    const shutdownHandler = onCalls.find(([event]) => event === "session_shutdown")?.[1];
+    expect(shutdownHandler).toBeDefined();
+    await shutdownHandler!();
+
+    // The server is closed and state.json is deleted.
+    expect(getDashboardUrl()).toBeNull();
     expect(existsSync(statePath)).toBe(false);
-    expect(existsSync(serverUrlPath)).toBe(false);
+    expect(await httpGet(url)).toEqual({ ok: false });
   });
 });
