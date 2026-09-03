@@ -1,28 +1,18 @@
-// aura.ts — Aura digest script (fetch / render / cleanup / save / diff / last).
+// aura-digest.ts — the Aura digest fetch core (in-process).
 //
-// Usage:
-//   node dist/aura.mjs fetch                 Create a random /tmp/aura-morning-<hex>/
-//                                            dir, fetch all Aura data (+ verify review
-//                                            states), write raw.json + digest.json +
-//                                            report.json, print "output directory:
-//                                            <path>/" to stdout.
-//   node dist/aura.mjs render <dir>          Read <dir>/digest.json and write the
-//                                            rendered markdown to stdout.
-//   node dist/aura.mjs render <dir> <out>     Write the rendered markdown to <out>
-//                                            instead of stdout.
-//   node dist/aura.mjs cleanup <dir>         Delete <dir> and its contents.
-//   node dist/aura.mjs save <dir>            Save <dir>/digest.json as the last
-//                                            presented digest (~/.pi/aura/last-digest.json).
-//   node dist/aura.mjs diff <dir>            Print (JSON) what changed since the last
-//                                            saved digest.
-//   node dist/aura.mjs last                  Print the last saved digest (JSON).
+// This module exports the pure-function fetchAction (the in-process digest-
+// fetch; the digest-dashboard extension's digest-fetch tool calls it with an
+// onProgress adapter that pushes to the in-memory store) and saveLastDigest
+// (writes ~/.pi/aura/last-digest.json from a digest object). The CLI bundle
+// (aura-digest.mjs) + the render/save/diff/cleanup/last CLI actions were
+// deleted in the cli-deletion-and-rewire task — the digest is now fully
+// tool-driven + in-process.
 //
-// fetch is deterministic (same API state -> same files). It constructs an
-// AuraClient (via createDefaultAuraClient) and calls the typed methods;
-// a missing PAT/base URL fails fast at construction with a clear error.
-// render renders whatever sections are present in digest.json, skipping nulls.
-// cleanup removes the temp directory created by fetch. save/diff/last manage
-// the persistent last-digest store at ~/.pi/aura/last-digest.json.
+// fetchAction is deterministic (same API state -> same {digest, report, raw}).
+// It constructs an AuraClient (via createDefaultAuraClient, or an injected
+// auraClient) and calls the typed methods; a missing PAT/base URL fails fast
+// at construction with a clear error. saveLastDigest writes the
+// last-digest store at ~/.pi/aura/last-digest.json.
 
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
