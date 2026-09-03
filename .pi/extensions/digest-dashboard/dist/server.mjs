@@ -1,7 +1,7 @@
 // server.ts
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
-import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2, mkdirSync as mkdirSync2, rmSync } from "node:fs";
+import { readFileSync as readFileSync2, existsSync as existsSync2, rmSync } from "node:fs";
 import { watch } from "node:fs";
 import path2 from "node:path";
 import { exec } from "node:child_process";
@@ -249,10 +249,6 @@ data: {"id":${latest.id},"type":"${latest.type}"}
       }
       const port = address.port;
       const url = `http://127.0.0.1:${port}/`;
-      const serverUrlPayload = { url, pid: process.pid };
-      mkdirSync2(path2.dirname(opts.serverUrlPath), { recursive: true });
-      writeFileSync2(opts.serverUrlPath, JSON.stringify(serverUrlPayload, null, 2), "utf-8");
-      console.log(url);
       const done = async () => {
         for (const w of watchers.slice()) {
           w.close();
@@ -306,8 +302,7 @@ if (invokedPath && path2.resolve(invokedPath) === path2.resolve(modulePath)) {
   process.on("beforeExit", cleanup);
   startServer({
     dashboardPath: process.env.DASHBOARD_DIGEST_PATH ?? defaults.dashboardPath,
-    statePath,
-    serverUrlPath
+    statePath
   }).catch((err) => {
     console.error("Failed to start digest-dashboard server:", err);
     cleanup();
