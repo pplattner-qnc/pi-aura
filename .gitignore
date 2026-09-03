@@ -9,7 +9,6 @@ profiles/
 dist/**
 !.pi/extensions/digest-dashboard/dist/app.js
 !.pi/extensions/digest-dashboard/dist/app.css
-!.pi/extensions/digest-dashboard/dist/server.mjs
 
 # Impeccable skill install (per-env, from pi-impeccable)
 .agents/

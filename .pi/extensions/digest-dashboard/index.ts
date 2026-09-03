@@ -6,14 +6,15 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 import { spawn } from "node:child_process";
+import type { Server } from "node:http";
 import { existsSync, rmSync, readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { readState, writePid } from "./state.ts";
 import { startListener, type ListenerHandle } from "./listener.ts";
-import { openBrowser } from "./server.ts";
-import { readDashboardUrl, joinUrl } from "@pi-aura/shared/digest/progress-emitter";
+import { startServer, openBrowser } from "./server.ts";
+import { joinUrl } from "@pi-aura/shared/digest/progress-emitter";
+import { resetStore } from "./store.ts";
 
 export interface TeardownResult {
   ok: boolean;
@@ -70,24 +71,34 @@ let sessionCwd: string | undefined;
 // In-process listener handle. Kept so stop/session_shutdown can close fs.watch.
 let listenerHandle: ListenerHandle | undefined;
 
+// Module-scope server handle for the in-process HTTP server.
+// startDashboard stores the {server, port, url, done} here; teardownDashboard
+// closes it. No spawned child, no server-url.json, no pid.
+interface ServerHandle {
+  server: Server;
+  port: number;
+  url: string;
+  done: () => Promise<void>;
+}
+
+let serverHandle: ServerHandle | null = null;
+
+/** Return the in-process dashboard URL, or null when the dashboard is stopped. */
+export function getDashboardUrl(): string | null {
+  return serverHandle?.url ?? null;
+}
+
 function defaultAuraPaths(): {
   auraDir: string;
   dashboardPath: string;
   statePath: string;
-  serverUrlPath: string;
 } {
   const auraDir = path.join(os.homedir(), ".pi", "aura");
   return {
     auraDir,
     dashboardPath: path.join(auraDir, "digest.json"),
     statePath: path.join(auraDir, "state.json"),
-    serverUrlPath: path.join(auraDir, "server-url.json"),
   };
-}
-
-function resolveServerEntryPath(): string {
-  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(moduleDir, "dist", "server.mjs");
 }
 
 function resolveAuraDigestScriptPath(): string {
@@ -129,97 +140,8 @@ async function runAuraDigest(args: string[]): Promise<SpawnResult> {
   });
 }
 
-async function waitForServerUrl(
-  serverUrlPath: string,
-  child: ReturnType<typeof spawn>,
-): Promise<{ url: string } | null> {
-  const maxTries = 100;
-  const intervalMs = 50;
-
-  for (let i = 0; i < maxTries; i++) {
-    // If the child died before writing server-url.json, give up early.
-    if (child.exitCode !== null) {
-      return null;
-    }
-
-    if (existsSync(serverUrlPath)) {
-      try {
-        const raw = readFileSync(serverUrlPath, "utf-8");
-        const parsed = JSON.parse(raw) as { url?: string; pid?: number };
-        // Only accept the URL if THIS child wrote it. A stale server-url.json
-        // left by a previous/orphaned server can otherwise satisfy the poll
-        // immediately with a dead port — startDashboard would return a URL
-        // that the browser can't reach and digest-fetch can't POST to. The
-        // server writes { url, pid: process.pid }, so match the spawned pid.
-        if (parsed.url && parsed.pid === child.pid) {
-          return { url: parsed.url };
-        }
-      } catch {
-        // Ignore malformed/transient file; retry.
-      }
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-
-  return null;
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function terminateProcess(pid: number): Promise<void> {
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ESRCH") {
-      return;
-    }
-    throw err;
-  }
-
-  // Give the process a short grace period, then escalate to SIGKILL.
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-
-  if (isProcessAlive(pid)) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ESRCH") {
-        return;
-      }
-      throw err;
-    }
-    // Wait for the SIGKILL to take effect so callers can rely on the
-    // process being gone before they delete the state files that record
-    // its pid. A detached/unref'd child can take a tick to be reaped.
-    for (let i = 0; i < 20 && isProcessAlive(pid); i++) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-}
-
-function deleteFiles(statePath: string, serverUrlPath: string): void {
-  for (const filePath of [statePath, serverUrlPath]) {
-    try {
-      if (existsSync(filePath)) {
-        rmSync(filePath, { force: true });
-      }
-    } catch (err) {
-      console.error("teardown: failed to delete", filePath, err);
-    }
-  }
-}
-
 export async function teardownDashboard(
   statePath: string,
-  serverUrlPath: string,
 ): Promise<TeardownResult> {
   // Stop the in-process listener first so it does not outlive teardown.
   if (listenerHandle) {
@@ -227,35 +149,30 @@ export async function teardownDashboard(
     listenerHandle = undefined;
   }
 
-  if (!existsSync(statePath)) {
+  // Close the in-process server deterministically.
+  if (serverHandle) {
+    try {
+      await serverHandle.done();
+    } catch (err) {
+      console.error("teardown: server close error:", err);
+    }
+    serverHandle = null;
+  } else {
     return { ok: true, message: "No dashboard running." };
   }
 
-  let state;
+  // Delete state.json (best-effort — may linger from a pre-slice-2 session).
   try {
-    state = readState(statePath);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    deleteFiles(statePath, serverUrlPath);
-    return { ok: false, message: `Could not read state: ${message}` };
-  }
-
-  const pid = state.pid;
-
-  if (pid !== null && isProcessAlive(pid)) {
-    try {
-      await terminateProcess(pid);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      deleteFiles(statePath, serverUrlPath);
-      return {
-        ok: false,
-        message: `Failed to stop dashboard process: ${message}`,
-      };
+    if (existsSync(statePath)) {
+      rmSync(statePath, { force: true });
     }
+  } catch (err) {
+    console.error("teardown: failed to delete", statePath, err);
   }
 
-  deleteFiles(statePath, serverUrlPath);
+  // Reset the in-memory store so a fresh start is clean (no stale digest/events).
+  resetStore();
+
   return { ok: true, message: "Digest dashboard stopped." };
 }
 
@@ -264,28 +181,12 @@ export async function startDashboard(
   ctx: ExtensionCommandContext | ExtensionContext,
   options: StartDashboardOptions = {},
 ): Promise<StartResult> {
-  const { statePath, serverUrlPath } = defaultAuraPaths();
-  const state = readState(statePath);
-
-  if (state.pid !== null && isProcessAlive(state.pid)) {
-    // The recorded pid is alive. If server-url.json is also present, the
-    // dashboard is genuinely running — no-op. If server-url.json is ABSENT,
-    // the dashboard is an orphan: a prior teardown (e.g. session_shutdown)
-    // deleted the URL file without reaping the detached server, so the
-    // browser is still connected but digest-fetch cannot find it. Kill the
-    // orphan and respawn a fresh, findable server instead of getting stuck.
-    if (existsSync(serverUrlPath)) {
-      return {
-        ok: false,
-        message: "Digest dashboard already running. Use the digest-dashboard-stop tool first.",
-      };
-    }
-    // Orphaned: best-effort reap, then fall through to start a fresh one.
-    try {
-      await terminateProcess(state.pid);
-    } catch {
-      // Best-effort — proceed to spawn regardless.
-    }
+  // Already running — no orphan-reap branch needed (no detached child).
+  if (serverHandle !== null) {
+    return {
+      ok: false,
+      message: "Digest dashboard already running. Use the digest-dashboard-stop tool first.",
+    };
   }
 
   // Clean up any stale listener handle before starting a fresh one.
@@ -294,86 +195,50 @@ export async function startDashboard(
     listenerHandle = undefined;
   }
 
-  const serverEntryPath = resolveServerEntryPath();
-  if (!existsSync(serverEntryPath)) {
-    return {
-      ok: false,
-      message: `Server bundle not found at ${serverEntryPath}. Run npm run build in .pi/extensions/digest-dashboard.`,
-    };
-  }
-
-  const child = spawn(process.execPath, [serverEntryPath], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
-
-  if (!child.pid) {
-    return { ok: false, message: "Failed to spawn digest dashboard server." };
-  }
-
-  // Clear any stale server-url.json left by a previous/orphaned server BEFORE
-  // we spawn the new one, so waitForServerUrl cannot read the stale file and
-  // return a dead port as success. The new server writes its own pid-matched
-  // server-url.json on listen; waitForServerUrl checks pid === child.pid.
+  // Start the server in-process — no spawn, no waitForServerUrl.
+  // startServer no longer needs dashboardPath/statePath (in-memory backing).
+  let started;
   try {
-    if (existsSync(serverUrlPath)) rmSync(serverUrlPath, { force: true });
-  } catch {
-    // Best-effort — the pid check in waitForServerUrl is the real guard.
-  }
-
-  try {
-    await writePid(statePath, child.pid, Date.now());
+    started = await startServer({
+      openBrowser: false,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, message: `Failed to record server PID: ${message}` };
+    return { ok: false, message: `Failed to start digest dashboard server: ${message}` };
   }
 
-  const serverUrl = await waitForServerUrl(serverUrlPath, child);
-
-  if (!serverUrl) {
-    // Best-effort cleanup of the failed child.
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      // ignore
-    }
-    try {
-      rmSync(statePath, { force: true });
-    } catch {
-      // ignore
-    }
-    return {
-      ok: false,
-      message: "Digest dashboard server did not report its URL within the timeout.",
-    };
-  }
+  serverHandle = {
+    server: started.server,
+    port: started.port,
+    url: started.url,
+    done: started.done,
+  };
 
   if (options.openBrowser !== false && process.env.PI_DIGEST_NO_BROWSER !== "1") {
     try {
-      openBrowser(serverUrl.url);
+      openBrowser(started.url);
     } catch {
       // Best-effort: browser failures should not stop the dashboard.
     }
   }
 
   try {
-    listenerHandle = startListener({ pi, statePath });
+    listenerHandle = startListener({ pi });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
       ok: false,
       message: `Server started but listener failed to start: ${message}`,
-      url: serverUrl.url,
+      url: started.url,
     };
   }
 
-  const message = `Digest dashboard running at ${serverUrl.url}`;
+  const message = `Digest dashboard running at ${started.url}`;
   if ("ui" in ctx && ctx.ui) {
     ctx.ui.notify(message, "info");
   }
 
-  return { ok: true, message, url: serverUrl.url };
+  return { ok: true, message, url: started.url };
 }
 
 const DIGEST_TOOLS: readonly string[] = [
@@ -448,8 +313,8 @@ export default function (pi: ExtensionAPI): void {
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
     ): Promise<AgentToolResult<Record<string, never>>> {
-      const { statePath, serverUrlPath } = defaultAuraPaths();
-      const result = await teardownDashboard(statePath, serverUrlPath);
+      const { statePath } = defaultAuraPaths();
+      const result = await teardownDashboard(statePath);
       return {
         content: [{ type: "text", text: result.message }],
         details: {},
@@ -473,7 +338,7 @@ export default function (pi: ExtensionAPI): void {
       // Check whether the dashboard was running before the fetch started. The
       // flag is read once here and evaluated once at the end of the success
       // path — a one-shot warning, never per-event.
-      const dashboardWasDown = readDashboardUrl() === null;
+      const dashboardWasDown = getDashboardUrl() === null;
 
       const result = await runAuraDigest(["fetch"]);
       if (result.exitCode !== 0) {
@@ -576,7 +441,7 @@ export default function (pi: ExtensionAPI): void {
       _signal: AbortSignal | undefined,
       _onUpdate: unknown,
     ): Promise<AgentToolResult<Record<string, never>>> {
-      const dashboardUrl = readDashboardUrl();
+      const dashboardUrl = getDashboardUrl();
       if (dashboardUrl === null) {
         return {
           content: [
@@ -632,7 +497,7 @@ export default function (pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async () => {
-    const { statePath, serverUrlPath } = defaultAuraPaths();
-    await teardownDashboard(statePath, serverUrlPath);
+    const { statePath } = defaultAuraPaths();
+    await teardownDashboard(statePath);
   });
 }

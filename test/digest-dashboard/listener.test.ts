@@ -1,12 +1,16 @@
-// Unit tests for digest-dashboard listener.ts.
-// Uses a fake pi (captures sendMessage calls) and a temp state.json.
+// Unit tests for digest-dashboard listener.ts (in-memory subscription).
+// The listener subscribes to the in-memory event stream (store.subscribe)
+// and forwards page→agent action_click events to pi.sendMessage.
+// No fs.watch, no state.json, no polling.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
-import path from "node:path";
-import os from "node:os";
-import { startListener, type ListenerHandle, type ListenerOptions } from "../../.pi/extensions/digest-dashboard/listener.ts";
+import {
+  resetStore,
+  pushEvent,
+} from "../../.pi/extensions/digest-dashboard/store.ts";
+import { startListener, type ListenerHandle } from "../../.pi/extensions/digest-dashboard/listener.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { StateEvent } from "../../.pi/extensions/digest-dashboard/state.ts";
 
 interface SentMessage {
   message: { customType: string; content: string; details: unknown; display?: boolean };
@@ -23,9 +27,9 @@ function createFakePi(): { pi: ExtensionAPI; sent: SentMessage[] } {
   return { pi, sent };
 }
 
-function createActionEvent(id: number, overrides?: Partial<{ section: string; key: string; label: string; instruction: string }>): Record<string, unknown> {
+function createActionEvent(instruction = "Handle AURA-1"): StateEvent {
   return {
-    id,
+    id: 0,
     ts: new Date().toISOString(),
     dir: "page→agent",
     type: "action_click",
@@ -33,15 +37,21 @@ function createActionEvent(id: number, overrides?: Partial<{ section: string; ke
       section: "overdue",
       key: "AURA-1",
       action: "advance",
-      label: overrides?.label ?? "Advance AURA-1",
-      instruction: overrides?.instruction ?? "Handle AURA-1",
+      label: "Advance AURA-1",
+      instruction,
       aura_use_case: "task-management",
     },
   };
 }
 
-function writeState(statePath: string, state: { pid?: number | null; server_started?: number | null; events: Record<string, unknown>[] }): void {
-  writeFileSync(statePath, JSON.stringify({ pid: null, server_started: null, ...state }, null, 2));
+function createAckEvent(): StateEvent {
+  return {
+    id: 0,
+    ts: new Date().toISOString(),
+    dir: "agent→page",
+    type: "ack",
+    payload: { event_id: 1, status: "done" },
+  };
 }
 
 function delay(ms: number): Promise<void> {
@@ -58,27 +68,24 @@ async function waitFor(condition: () => boolean, timeoutMs = 2000, intervalMs = 
   }
 }
 
-describe("listener.ts", () => {
-  let tmpDir: string;
-  let statePath: string;
+describe("listener.ts (in-memory subscription)", () => {
   let listener: ListenerHandle | undefined;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(path.join(os.tmpdir(), "digest-dashboard-listener-"));
-    statePath = path.join(tmpDir, "state.json");
+    resetStore();
   });
 
   afterEach(async () => {
     await listener?.stop();
     listener = undefined;
-    rmSync(tmpDir, { recursive: true, force: true });
+    resetStore();
   });
 
   it("forwards a single page→agent action_click via sendMessage", async () => {
     const { pi, sent } = createFakePi();
-    listener = await startListener({ pi, statePath, pollIntervalMs: 10 } as ListenerOptions);
+    listener = startListener({ pi });
 
-    writeState(statePath, { events: [createActionEvent(1)] });
+    pushEvent(createActionEvent("Handle AURA-1"));
 
     await waitFor(() => sent.length === 1);
 
@@ -91,9 +98,10 @@ describe("listener.ts", () => {
 
   it("forwards two action_click events in order", async () => {
     const { pi, sent } = createFakePi();
-    listener = await startListener({ pi, statePath, pollIntervalMs: 10 } as ListenerOptions);
+    listener = startListener({ pi });
 
-    writeState(statePath, { events: [createActionEvent(1, { instruction: "first" }), createActionEvent(2, { instruction: "second" })] });
+    pushEvent(createActionEvent("first"));
+    pushEvent(createActionEvent("second"));
 
     await waitFor(() => sent.length === 2);
 
@@ -102,111 +110,99 @@ describe("listener.ts", () => {
     expect(sent[1].message.content).toBe("second");
   });
 
-  it("ignores agent→page ack events but advances the cursor", async () => {
+  it("ignores agent→page ack events", async () => {
     const { pi, sent } = createFakePi();
-    listener = await startListener({ pi, statePath, pollIntervalMs: 10 } as ListenerOptions);
+    listener = startListener({ pi });
 
-    writeState(statePath, {
-      events: [
-        createActionEvent(1, { instruction: "first" }),
-        {
-          id: 2,
-          ts: new Date().toISOString(),
-          dir: "agent→page",
-          type: "ack",
-          payload: { event_id: 1, status: "done" },
-        },
-        createActionEvent(3, { instruction: "second" }),
-      ],
+    pushEvent(createActionEvent("first"));
+    pushEvent(createAckEvent());
+    pushEvent(createActionEvent("second"));
+
+    await waitFor(() => sent.length === 2);
+
+    expect(sent).toHaveLength(2);
+    expect(sent[0].message.content).toBe("first");
+    expect(sent[1].message.content).toBe("second");
+  });
+
+  it("ignores progress events (agent→page)", async () => {
+    const { pi, sent } = createFakePi();
+    listener = startListener({ pi });
+
+    pushEvent({
+      id: 0,
+      ts: new Date().toISOString(),
+      dir: "agent→page",
+      type: "progress",
+      payload: {
+        id: "node-1",
+        label: "Fetching tasks",
+        status: "running",
+        startedAt: Date.now(),
+        kind: "start",
+      },
     });
 
-    await waitFor(() => sent.length === 2);
-
-    expect(sent).toHaveLength(2);
-    expect(sent[0].message.content).toBe("first");
-    expect(sent[1].message.content).toBe("second");
-  });
-
-  it("exits and resolves stop() when state.json is deleted", async () => {
-    const { pi } = createFakePi();
-    writeState(statePath, { events: [] });
-    listener = await startListener({ pi, statePath, pollIntervalMs: 10 } as ListenerOptions);
-
-    rmSync(statePath, { force: true });
-
-    await waitFor(() => !existsSync(statePath));
-    await listener.stop();
-
-    expect(existsSync(statePath)).toBe(false);
-  });
-
-  it("does not replay events after an atomic replace of state.json", async () => {
-    const { pi, sent } = createFakePi();
-    listener = await startListener({ pi, statePath, pollIntervalMs: 10 } as ListenerOptions);
-
-    writeState(statePath, { events: [createActionEvent(1, { instruction: "first" })] });
-    await waitFor(() => sent.length === 1);
-
-    // Atomic replace: write a temp file and rename it over statePath.
-    const replacementPath = `${statePath}.replacement`;
-    writeFileSync(replacementPath, JSON.stringify({ pid: null, server_started: null, events: [createActionEvent(1, { instruction: "first" }), createActionEvent(2, { instruction: "second" })] }, null, 2));
-    rmSync(statePath, { force: true });
-    await delay(20);
-    // Use node's renameSync if available; otherwise writeFileSync after rm is sufficient for the test seam.
-    const { renameSync } = await import("node:fs");
-    renameSync(replacementPath, statePath);
-
-    await waitFor(() => sent.length === 2);
-
-    expect(sent).toHaveLength(2);
-    expect(sent[0].message.content).toBe("first");
-    expect(sent[1].message.content).toBe("second");
-  });
-
-  it("starts with the cursor at the max existing event id (no replay)", async () => {
-    const { pi, sent } = createFakePi();
-    writeState(statePath, {
-      events: [
-        createActionEvent(1, { instruction: "old" }),
-        createActionEvent(2, { instruction: "older" }),
-      ],
-    });
-
-    listener = await startListener({ pi, statePath, pollIntervalMs: 10 } as ListenerOptions);
-
-    // Give fs.watch/polling a chance to fire; the old events should NOT be forwarded.
     await delay(100);
     expect(sent).toHaveLength(0);
-
-    writeState(statePath, {
-      events: [
-        createActionEvent(1, { instruction: "old" }),
-        createActionEvent(2, { instruction: "older" }),
-        createActionEvent(3, { instruction: "new" }),
-      ],
-    });
-
-    await waitFor(() => sent.length === 1);
-    expect(sent).toHaveLength(1);
-    expect(sent[0].message.content).toBe("new");
   });
 
-  it("skips malformed events without throwing and advances the cursor", async () => {
+  it("stops forwarding after stop() unsubscribes", async () => {
     const { pi, sent } = createFakePi();
-    listener = await startListener({ pi, statePath, pollIntervalMs: 10 } as ListenerOptions);
+    listener = startListener({ pi });
 
-    writeState(statePath, {
-      events: [
-        createActionEvent(1, { instruction: "good" }),
-        { id: 2, ts: new Date().toISOString(), dir: "page→agent", type: "action_click" },
-        createActionEvent(3, { instruction: "also good" }),
-      ],
+    pushEvent(createActionEvent("before stop"));
+    await waitFor(() => sent.length === 1);
+
+    await listener.stop();
+    listener = undefined;
+
+    pushEvent(createActionEvent("after stop"));
+    await delay(100);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].message.content).toBe("before stop");
+  });
+
+  it("skips malformed action_click events (missing payload fields)", async () => {
+    const { pi, sent } = createFakePi();
+    listener = startListener({ pi });
+
+    // First event: a well-formed action_click
+    pushEvent(createActionEvent("good"));
+    // Second event: malformed action_click (missing instruction in payload)
+    pushEvent({
+      id: 0,
+      ts: new Date().toISOString(),
+      dir: "page→agent",
+      type: "action_click",
+      payload: { section: "overdue" },
     });
+    // Third event: another well-formed action_click
+    pushEvent(createActionEvent("also good"));
 
     await waitFor(() => sent.length === 2);
 
     expect(sent).toHaveLength(2);
     expect(sent[0].message.content).toBe("good");
     expect(sent[1].message.content).toBe("also good");
+  });
+
+  it("does not replay events that were pushed before startListener subscribed", async () => {
+    // Push an event BEFORE the listener starts — the listener should not
+    // see it (the store's pushEvent only notifies current subscribers).
+    const { pi, sent } = createFakePi();
+    pushEvent(createActionEvent("pre-existing"));
+
+    listener = startListener({ pi });
+
+    await delay(100);
+    expect(sent).toHaveLength(0);
+
+    pushEvent(createActionEvent("new"));
+    await waitFor(() => sent.length === 1);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].message.content).toBe("new");
   });
 });

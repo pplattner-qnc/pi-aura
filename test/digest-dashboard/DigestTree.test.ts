@@ -131,7 +131,7 @@ function agentLogEvent(message: string, eventId = 1): StateEvent {
   };
 }
 
-/** Build a StateFile (state.json shape) with the given events. */
+/** Build a state object with the given events. */
 function stateFile(events: StateEvent[]) {
   return { pid: null, server_started: null, events };
 }

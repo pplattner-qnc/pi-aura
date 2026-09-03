@@ -150,25 +150,35 @@ end-to-end gate (the actual `task gen-rest-index` with the cached model) — not
 just mocked unit tests — before declaring the slice done.
 
 
-The interactive digest-dashboard extension (Svelte SPA + dumb file server +
-`state.json` listener + teardown) has a vitest suite at `test/digest-dashboard/`
-(`Digest.test.ts`, `server.test.ts`, `state.test.ts`, `listener.test.ts`,
-`teardown.test.ts`, `start.test.ts`; ~42 tests) using `happy-dom` for the
-component. Config: `vitest.config.ts` at repo root. devDeps (`svelte`, `vite`,
+The interactive digest-dashboard extension (Svelte SPA + in-process HTTP
+server + in-memory event stream + teardown) has a vitest suite at
+`test/digest-dashboard/` (`Digest.test.ts`, `server.test.ts`, `state.test.ts`,
+`listener.test.ts`, `teardown.test.ts`, `start.test.ts`, plus
+`dead-code-sweep.test.ts`; ~200 tests) using `happy-dom` for the component.
+Config: `vitest.config.ts` at repo root. devDeps (`svelte`, `vite`,
 `@sveltejs/vite-plugin-svelte`, `vitest`, `happy-dom`) are at the root
 `package.json` (the sub-package `package.json` is a marker with no deps;
 Vite resolves via walk-up to root `node_modules`).
 
+The server runs **in-process** (task `in-process-server`): `index.ts` holds a
+module-scope `serverHandle` and imports `startServer` from `./server.ts`
+directly — no spawned child, no `server-url.json`, no `state.json` pid. The
+backing is an in-memory `store.ts` (`currentDigest`/`events`/`sseClients`/
+`pushEvent`/`subscribe`/`setCurrentDigest`). `teardownDashboard` calls
+`server.closeAllConnections()` + `server.close()` (so SSE keep-alive tabs don't
+hang teardown) then `resetStore()`. The build is **vite-only** — there is no
+`dist/server.mjs` and no esbuild config in the extension anymore.
+
 ```bash
 npx vitest run                              # all digest-dashboard tests
-cd .pi/extensions/digest-dashboard && npm run build    # vite (app.js) + esbuild (server.mjs)
+cd .pi/extensions/digest-dashboard && npm run build    # vite only (app.js + app.css); no server.mjs
 cd .pi/extensions/digest-dashboard && npm run typecheck
 ```
 
-The extension ships only committed `dist/` (`app.js`, `app.css`, `server.mjs`)
-— zero runtime npm deps for end users. `index.ts` + `listener.ts` are loaded
-by pi's jiti at runtime (not bundled); `server.ts` is esbuild-bundled to
-`dist/server.mjs` (the detached entry `spawn` runs).
+The extension ships only committed `dist/` (`app.js`, `app.css`) — zero
+runtime npm deps for end users. `index.ts` + `listener.ts` + `server.ts` +
+`store.ts` are loaded by pi's jiti at runtime (not bundled); the Svelte SPA
+is Vite-built to `dist/app.js` + `dist/app.css`.
 
 ### Real-data-shaped fixtures (the stuck-loading regression)
 

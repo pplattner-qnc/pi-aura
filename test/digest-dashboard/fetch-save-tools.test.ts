@@ -2,9 +2,12 @@
 // - digest-fetch returns { digest, report } + details.dir and confirms dashboard digest.json
 // - digest-save writes last-digest.json
 // - fetch failures return a clear error AgentToolResult without throwing
+//
+// Updated for in-process lifecycle: "dashboard up" is simulated by calling
+// startDashboard (in-process server), not by writing server-url.json.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
   mkdtempSync,
   mkdirSync,
@@ -16,7 +19,11 @@ import {
 import path from "node:path";
 import os from "node:os";
 import { EventEmitter } from "node:events";
-import { default as installExtension } from "../../.pi/extensions/digest-dashboard/index.ts";
+import {
+  startDashboard,
+  teardownDashboard,
+  default as installExtension,
+} from "../../.pi/extensions/digest-dashboard/index.ts";
 
 interface RegisterToolCall {
   name: string;
@@ -77,8 +84,7 @@ vi.mock("node:child_process", async (importOriginal) => {
                     fetched_at: digest.meta?.generated_at ?? new Date().toISOString(),
                     digest,
                   },
-                  null,
-                  2,
+                  null, 2,
                 ) + "\n",
                 "utf8",
               );
@@ -114,6 +120,10 @@ function createCtx(): ExtensionContext {
   return {} as ExtensionContext;
 }
 
+function createCmdCtx(): ExtensionCommandContext {
+  return {} as unknown as ExtensionCommandContext;
+}
+
 interface NotifyCall {
   message: string;
   severity: string;
@@ -138,6 +148,14 @@ function findTool(pi: ExtensionAPI, name: string): RegisterToolCall {
   return def[0];
 }
 
+function statePath(): string {
+  return path.join(process.env.HOME!, ".pi", "aura", "state.json");
+}
+
+async function ensureTeardown(): Promise<void> {
+  await teardownDashboard(statePath()).catch(() => {});
+}
+
 describe("digest-fetch tool", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
@@ -147,16 +165,19 @@ describe("digest-fetch tool", () => {
     tmpDir = mkdtempSync(path.join(os.tmpdir(), "digest-fetch-"));
     originalHome = process.env.HOME;
     process.env.HOME = tmpDir;
+    process.env.PI_DIGEST_NO_BROWSER = "1";
     auraDir = path.join(tmpDir, ".pi", "aura");
     mkdirSync(auraDir, { recursive: true });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await ensureTeardown();
     if (originalHome !== undefined) {
       process.env.HOME = originalHome;
     } else {
       delete process.env.HOME;
     }
+    delete process.env.PI_DIGEST_NO_BROWSER;
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -168,8 +189,8 @@ describe("digest-fetch tool", () => {
     writeFileSync(path.join(tmpDir, "digest.json"), JSON.stringify({ title: "digest fixture" }), "utf8");
     writeFileSync(path.join(tmpDir, "report.json"), JSON.stringify({ title: "report fixture" }), "utf8");
     writeFileSync(path.join(auraDir, "digest.json"), JSON.stringify({ title: "dashboard fixture" }), "utf8");
-    // Dashboard is up — write server-url.json so the absent-dashboard warning is NOT triggered
-    writeFileSync(path.join(auraDir, "server-url.json"), JSON.stringify({ url: "http://127.0.0.1:9999/" }), "utf8");
+    // Dashboard is up — start the in-process server so getDashboardUrl() returns a URL.
+    await startDashboard(pi, createCmdCtx());
 
     nextSpawnOutcome = {
       exitCode: 0,
@@ -214,23 +235,24 @@ describe("digest-fetch dashboard-absent warning", () => {
   let tmpDir: string;
   let originalHome: string | undefined;
   let auraDir: string;
-  let serverUrlPath: string;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(path.join(os.tmpdir(), "digest-fetch-warning-"));
     originalHome = process.env.HOME;
     process.env.HOME = tmpDir;
+    process.env.PI_DIGEST_NO_BROWSER = "1";
     auraDir = path.join(tmpDir, ".pi", "aura");
     mkdirSync(auraDir, { recursive: true });
-    serverUrlPath = path.join(auraDir, "server-url.json");
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await ensureTeardown();
     if (originalHome !== undefined) {
       process.env.HOME = originalHome;
     } else {
       delete process.env.HOME;
     }
+    delete process.env.PI_DIGEST_NO_BROWSER;
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -242,7 +264,7 @@ describe("digest-fetch dashboard-absent warning", () => {
     writeFileSync(path.join(tmpDir, "digest.json"), JSON.stringify({ title: "digest fixture" }), "utf8");
     writeFileSync(path.join(tmpDir, "report.json"), JSON.stringify({ title: "report fixture" }), "utf8");
     writeFileSync(path.join(auraDir, "digest.json"), JSON.stringify({ title: "dashboard fixture" }), "utf8");
-    // server-url.json deliberately NOT written (dashboard down)
+    // Dashboard deliberately NOT started (dashboard down)
 
     nextSpawnOutcome = {
       exitCode: 0,
@@ -285,8 +307,8 @@ describe("digest-fetch dashboard-absent warning", () => {
     writeFileSync(path.join(tmpDir, "digest.json"), JSON.stringify({ title: "digest fixture" }), "utf8");
     writeFileSync(path.join(tmpDir, "report.json"), JSON.stringify({ title: "report fixture" }), "utf8");
     writeFileSync(path.join(auraDir, "digest.json"), JSON.stringify({ title: "dashboard fixture" }), "utf8");
-    // Dashboard is up — server-url.json is present
-    writeFileSync(serverUrlPath, JSON.stringify({ url: "http://127.0.0.1:9999/" }), "utf8");
+    // Dashboard is up — start the in-process server so getDashboardUrl() returns a URL.
+    await startDashboard(pi, createCmdCtx());
 
     nextSpawnOutcome = {
       exitCode: 0,
@@ -329,16 +351,19 @@ describe("digest-save tool", () => {
     tmpDir = mkdtempSync(path.join(os.tmpdir(), "digest-save-"));
     originalHome = process.env.HOME;
     process.env.HOME = tmpDir;
+    process.env.PI_DIGEST_NO_BROWSER = "1";
     auraDir = path.join(tmpDir, ".pi", "aura");
     mkdirSync(auraDir, { recursive: true });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await ensureTeardown();
     if (originalHome !== undefined) {
       process.env.HOME = originalHome;
     } else {
       delete process.env.HOME;
     }
+    delete process.env.PI_DIGEST_NO_BROWSER;
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
