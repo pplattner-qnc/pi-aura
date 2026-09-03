@@ -7622,7 +7622,7 @@ var require_content_type = __commonJS({
   }
 });
 
-// src/aura-digest.ts
+// ../packages/shared/src/digest/aura-digest.ts
 import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync5, rmSync, existsSync as existsSync5 } from "node:fs";
 import { resolve, join as join6 } from "node:path";
 import { tmpdir, homedir as homedir6 } from "node:os";
@@ -9352,11 +9352,11 @@ async function createDefaultAuraClient() {
   return new HeyApiAuraClient({ keyring, baseUrl, pat });
 }
 
-// src/devlinks.ts
+// ../packages/shared/src/digest/devlinks.ts
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-// src/clients.ts
+// ../packages/shared/src/digest/clients.ts
 import { readFileSync as readFileSync2 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
 import { join as join3 } from "node:path";
@@ -19590,7 +19590,7 @@ var StreamableHTTPClientTransport = class {
   }
 };
 
-// src/mcp-client.ts
+// ../packages/shared/src/digest/mcp-client.ts
 var McpClient = class {
   client;
   opts;
@@ -19682,7 +19682,7 @@ var McpClient = class {
   }
 };
 
-// src/clients.ts
+// ../packages/shared/src/digest/clients.ts
 var MCP_CONFIG_PATH = join3(homedir3(), ".config", "mcp", "mcp.json");
 function loadMcpConfig(path = MCP_CONFIG_PATH) {
   return JSON.parse(readFileSync2(path, "utf8"));
@@ -19735,7 +19735,7 @@ async function atlassianClient(serverName = "atlassian", opts) {
   });
 }
 
-// src/bitbucket.ts
+// ../packages/shared/src/digest/bitbucket.ts
 async function loadCreds(keyring, defaultWorkspace) {
   const { email: email2, token } = await readBitbucketCredentials(keyring);
   if (!defaultWorkspace) {
@@ -19796,7 +19796,7 @@ async function searchRepoBranches(workspace, repo, q, keyring) {
   return data.values;
 }
 
-// src/devlinks.ts
+// ../packages/shared/src/digest/devlinks.ts
 var execFileAsync = promisify(execFile);
 async function ghSearchPRsOnce(query, owner) {
   try {
@@ -20478,7 +20478,7 @@ function joinUrl(base, path) {
   return `${b}${p}`;
 }
 
-// src/aura-digest.ts
+// ../packages/shared/src/digest/aura-digest.ts
 var WORKDAY_HOURS = 8;
 var NOTIF_PAGE_SIZE = 50;
 var NOTIF_FETCH_CAP = 500;
@@ -20518,10 +20518,18 @@ function fmtPct(pct) {
   if (pct === null) return "\u2014";
   return `${pct}%`;
 }
+var FailError = class extends Error {
+  code;
+  usage;
+  constructor(msg, usage, code = 2) {
+    super(msg);
+    this.name = "FailError";
+    this.usage = usage;
+    this.code = code;
+  }
+};
 function fail(msg, usage, code = 2) {
-  console.error(msg);
-  if (usage) console.error(usage);
-  process.exit(code);
+  throw new FailError(msg, usage, code);
 }
 var USAGE = `Usage:
   node aura.mjs fetch                 create temp dir, fetch Aura data (+ verification), print path
@@ -21457,11 +21465,12 @@ function diffAction() {
 function lastAction() {
   const last = loadLastDigest();
   if (!last) {
-    console.error(`no last digest found at ${LAST_DIGEST_PATH}`);
-    process.exit(1);
+    throw new FailError(`no last digest found at ${LAST_DIGEST_PATH}`, void 0, 1);
   }
   process.stdout.write(JSON.stringify(last, null, 2) + "\n");
 }
+
+// src/aura-digest.ts
 async function main() {
   const action = process.argv[2];
   switch (action) {
@@ -21484,13 +21493,18 @@ async function main() {
       lastAction();
       return;
     default:
-      fail(
+      throw new FailError(
         action ? `unknown action: ${action}` : "missing action",
         USAGE
       );
   }
 }
 main().catch((e) => {
+  if (e instanceof FailError) {
+    console.error(e.message);
+    if (e.usage) console.error(e.usage);
+    process.exit(e.code);
+  }
   console.error("aura failed:", e instanceof Error ? e.message : String(e));
   process.exit(1);
 });

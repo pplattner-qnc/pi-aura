@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import { describe, it, expect } from "vitest";
 import type { Keyring, SecretKey, StoredSecret } from "@pi-aura/shared/keyring";
 
-import { loadCreds } from "../../scripts/src/bitbucket.js";
+import { loadCreds } from "@pi-aura/shared/digest/bitbucket";
 
 // ---------------------------------------------------------------------------
 // Fake Keyring — implements the Keyring interface for testing.

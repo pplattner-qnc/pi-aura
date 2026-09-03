@@ -19,7 +19,7 @@ import type { Keyring, SecretKey, StoredSecret } from "@pi-aura/shared/keyring";
 import {
   readBitbucketCredentials,
   readAtlassianEmail,
-} from "../../scripts/src/clients.js";
+} from "@pi-aura/shared/digest/clients";
 
 // ---------------------------------------------------------------------------
 // Fake Keyring — implements the Keyring interface for testing.
