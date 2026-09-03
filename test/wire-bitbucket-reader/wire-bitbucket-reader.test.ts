@@ -24,12 +24,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Keyring, SecretKey, StoredSecret } from "@pi-aura/shared/keyring";
 
-import { loadCreds } from "../../scripts/src/bitbucket.js";
+import { loadCreds } from "@pi-aura/shared/digest/bitbucket";
 import {
   readAtlassianCredentials,
   readBitbucketCredentials,
   atlassianClient,
-} from "../../scripts/src/clients.js";
+} from "@pi-aura/shared/digest/clients";
 
 // ---------------------------------------------------------------------------
 // Fake Keyring — implements the Keyring interface for testing.

@@ -1,16 +1,17 @@
 // Unit tests for the progress emitter — the onProgress hook passed to
 // runTasks that POSTs batched progress events to the dashboard's /api/state.
 //
-// Tests mirror the scheduler.test.ts vitest style (import from .js with
-// vitest). The seams tested here are:
+// Tests use node:test + node:assert (matching the shared package convention).
+// The seams tested here are:
 //   1. readDashboardUrl() reads ~/.pi/aura/server-url.json once (no-op if absent).
 //   2. createProgressEmitter batches on a ~50ms timer + flushes at run end;
 //      near-instant open→done pairs coalesce to a single "done" event.
 //   3. Events are POSTed in batches to /api/state.
 //
-// Run with: npx vitest run --config vitest.config.ts
+// Run with: npx tsx --test test/digest/aura-digest-progress.test.ts
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, beforeEach, afterEach } from "node:test";
+import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -20,7 +21,7 @@ import {
   createProgressEmitter,
   type ProgressEventLike,
   type ProgressStateEvent,
-} from "./progress-emitter.js";
+} from "../../src/digest/progress-emitter.js";
 
 /** A minimal ProgressEvent shape compatible with the scheduler's ProgressEvent. */
 function makeEvent(overrides: Partial<ProgressEventLike> = {}): ProgressEventLike {
@@ -53,33 +54,32 @@ describe("readDashboardUrl", () => {
   });
 
   it("returns null when server-url.json is absent", () => {
-    expect(readDashboardUrl(serverUrlPath)).toBeNull();
+    assert.equal(readDashboardUrl(serverUrlPath), null);
   });
 
   it("returns the url when server-url.json exists", () => {
     writeFileSync(serverUrlPath, JSON.stringify({ url: "http://127.0.0.1:9876/", pid: 12345 }));
-    expect(readDashboardUrl(serverUrlPath)).toBe("http://127.0.0.1:9876/");
+    assert.equal(readDashboardUrl(serverUrlPath), "http://127.0.0.1:9876/");
   });
 
   it("returns null for malformed JSON (does not throw)", () => {
     writeFileSync(serverUrlPath, "not-json{");
-    expect(readDashboardUrl(serverUrlPath)).toBeNull();
+    assert.equal(readDashboardUrl(serverUrlPath), null);
   });
 });
 
 describe("createProgressEmitter — no-op path", () => {
   it("returns a no-op hook when dashboardUrl is null (no POSTs attempted)", async () => {
-    const posts: unknown[] = [];
-    const fetchMock = vi.fn(async () => {
-      posts.push("called");
+    let callCount = 0;
+    const fetchMock = async () => {
+      callCount++;
       return new Response("ok", { status: 200 });
-    });
-    const hook = createProgressEmitter(null, { fetchImpl: fetchMock });
+    };
+    const hook = createProgressEmitter(null, { fetchImpl: fetchMock as unknown as typeof fetch });
     hook(makeEvent());
     hook(makeEvent({ id: "2" }));
     await hook.flush();
-    expect(posts).toHaveLength(0);
-    expect(fetchMock).not.toHaveBeenCalled();
+    assert.equal(callCount, 0);
   });
 });
 
@@ -132,35 +132,35 @@ describe("createProgressEmitter — batching", () => {
   });
 
   it("POSTs events in a single batch within ~50ms when 10 rapid events are pushed", async () => {
-    // Deterministic: use fake timers + mock fetch (no real HTTP, no real
-    // setTimeout wait) so the test does not flake under load (FIX 6).
-    vi.useFakeTimers();
+    // Use a short batchMs (1ms) + a real mock fetch (no fake timers needed).
+    // Push 10 events, then wait past the batch timer so the drain fires.
     const mockPosts: { body: string }[] = [];
-    const mockFetch = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+    const mockFetch = async (_url: string, init?: RequestInit): Promise<Response> => {
       mockPosts.push({ body: init?.body as string });
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
-    });
+    };
 
-    const hook = createProgressEmitter(serverUrl, { fetchImpl: mockFetch as unknown as typeof fetch });
+    const hook = createProgressEmitter(serverUrl, {
+      fetchImpl: mockFetch as unknown as typeof fetch,
+      batchMs: 1,
+    });
 
     // Push 10 rapid events (all different ids — no coalescing).
     for (let i = 0; i < 10; i++) {
       hook(makeEvent({ id: String(i), label: `node ${i}`, startedAt: i }));
     }
 
-    // Advance past the ~50ms batch timer so the drain fires.
-    await vi.advanceTimersByTimeAsync(60);
+    // Wait past the short batch timer so the drain fires.
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    // Should have POSTed 10 events in one batch (all from the same ~50ms window).
-    // They are individual POSTs but all arrive within the same ~50ms batch.
-    expect(mockPosts.length).toBe(10);
+    // Should have POSTed 10 events in one batch (all from the same ~1ms window).
+    // They are individual POSTs but all arrive within the same batch.
+    assert.equal(mockPosts.length, 10);
 
     // All 10 payloads should be present.
     const payloads = extractPayloads(mockPosts);
     const ids = payloads.map((p) => p.id).sort();
-    expect(ids).toEqual(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
-
-    vi.useRealTimers();
+    assert.deepEqual(ids, ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
   });
 
   it("flushes remaining events at run end (final flush)", async () => {
@@ -169,9 +169,9 @@ describe("createProgressEmitter — batching", () => {
     hook(makeEvent({ id: "1", label: "final flush test" }));
     await hook.flush();
 
-    expect(receivedPosts.length).toBe(1);
+    assert.equal(receivedPosts.length, 1);
     const payload = (JSON.parse(receivedPosts[0].body) as ProgressStateEvent).payload;
-    expect(payload.id).toBe("1");
+    assert.equal(payload.id, "1");
   });
 
   it("coalesces near-instant open→done pairs to a single done event", async () => {
@@ -183,10 +183,10 @@ describe("createProgressEmitter — batching", () => {
 
     await hook.flush();
 
-    expect(receivedPosts.length).toBe(1);
+    assert.equal(receivedPosts.length, 1);
     const payload = (JSON.parse(receivedPosts[0].body) as ProgressStateEvent).payload;
-    expect(payload.status).toBe("done");
-    expect(payload.id).toBe("1");
+    assert.equal(payload.status, "done");
+    assert.equal(payload.id, "1");
   });
 
   it("does not coalesce events with different ids", async () => {
@@ -197,10 +197,10 @@ describe("createProgressEmitter — batching", () => {
 
     await hook.flush();
 
-    expect(receivedPosts.length).toBe(2);
+    assert.equal(receivedPosts.length, 2);
     const payloads = extractPayloads(receivedPosts);
-    expect(payloads).toHaveLength(2);
-    expect(payloads.map((p) => p.id).sort()).toEqual(["1", "2"]);
+    assert.equal(payloads.length, 2);
+    assert.deepEqual(payloads.map((p) => p.id).sort(), ["1", "2"]);
   });
 
   it("coalesces a running→error pair to a single error event", async () => {
@@ -211,9 +211,9 @@ describe("createProgressEmitter — batching", () => {
 
     await hook.flush();
 
-    expect(receivedPosts.length).toBe(1);
+    assert.equal(receivedPosts.length, 1);
     const payload = (JSON.parse(receivedPosts[0].body) as ProgressStateEvent).payload;
-    expect(payload.status).toBe("error");
+    assert.equal(payload.status, "error");
   });
 
   it("keeps a running event when no done/error follows for that id", async () => {
@@ -223,8 +223,8 @@ describe("createProgressEmitter — batching", () => {
 
     await hook.flush();
 
-    expect(receivedPosts.length).toBe(1);
+    assert.equal(receivedPosts.length, 1);
     const payload = (JSON.parse(receivedPosts[0].body) as ProgressStateEvent).payload;
-    expect(payload.status).toBe("running");
+    assert.equal(payload.status, "running");
   });
 });

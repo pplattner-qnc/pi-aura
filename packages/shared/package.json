@@ -25,6 +25,17 @@
     ".": "./src/index.ts",
     "./keyring": "./src/keyring/index.ts",
     "./aura-client": "./src/aura-client.ts",
+    "./digest/scheduler": "./src/digest/scheduler.ts",
+    "./digest/progress-emitter": "./src/digest/progress-emitter.ts",
+    "./digest/build-actions": "./src/digest/build-actions.ts",
+    "./digest/write-dashboard-digest": "./src/digest/write-dashboard-digest.ts",
+    "./digest/types": "./src/digest/types.ts",
+    "./digest/settings": "./src/digest/settings.ts",
+    "./digest/aura-digest": "./src/digest/aura-digest.ts",
+    "./digest/devlinks": "./src/digest/devlinks.ts",
+    "./digest/clients": "./src/digest/clients.ts",
+    "./digest/mcp-client": "./src/digest/mcp-client.ts",
+    "./digest/bitbucket": "./src/digest/bitbucket.ts",
     "./*": "./src/*.ts"
   }
 }
