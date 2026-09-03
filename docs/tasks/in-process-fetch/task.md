@@ -6,7 +6,7 @@ title: digest-fetch calls fetchAction in-process with onProgress wired to the in
 map: in-process-aura-digest
 status: ready
 blocked_by: [core-move, in-process-server]
-slices: []
+slices: [1-fetchAction-returns-object, 2-digest-fetch-in-process, 3-drop-digest-json-and-rework-save]
 ---
 
 ## User-visible outcome
@@ -60,3 +60,7 @@ server serves it); `~/.pi/aura/digest.json` is **not** written.
   fetch→save handoff (with task 4).
 - Fog resolved here: `last-digest.json` write path; `details.dir`
   handoff; whether `createProgressEmitter` survives.
+
+## Implementation notes
+
+_The land-worker appends a per-slice note here as each slice lands._
