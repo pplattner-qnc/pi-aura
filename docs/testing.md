@@ -58,17 +58,26 @@ task openapi-sync     # refresh packages/shared/openapi/openapi.yaml from the Au
   pulled in transitively via `@pi-aura/shared` must be added to
   `scripts/esbuild.config.mjs`'s `external` array or the bundle breaks.
 
-## `scripts/src/{build-actions,followup-working-on,write-dashboard-digest}.test.ts`
+## `packages/shared/test/digest/{build-actions,write-dashboard-digest,scheduler,aura-digest-progress}.test.ts`
 
 Pure-logic unit tests for the digest data half (the `actions[]` routing table,
 the `followup.currentlyWorkingOn` default, the `~/.pi/aura/digest.json`
-write). They import only `./types.ts` + the helper under test — no
-`@pi-aura/shared` boundary — so `node --experimental-strip-types` works.
+write, the scheduler reducer, and the progress-emitter batching). These
+moved out of `scripts/src/` when the digest core moved into `@pi-aura/shared`
+(task `core-move`); they now live under `packages/shared/test/digest/` and run
+under the shared package's `tsx --test` runner (Node's built-in test runner via
+`tsx`). The two that were vitest-based (`scheduler`, `aura-digest-progress`)
+were converted to `node:test` + `node:assert` to match the shared package's
+convention. They import the digest core via the package path
+(`@pi-aura/shared/digest/...`) or intra-package relative imports.
 
 ```bash
-node --experimental-strip-types scripts/src/build-actions.test.ts
-node --experimental-strip-types scripts/src/followup-working-on.test.ts
-node --experimental-strip-types scripts/src/write-dashboard-digest.test.ts
+cd packages/shared
+npx tsx --test test/digest/build-actions.test.ts
+npx tsx --test test/digest/write-dashboard-digest.test.ts
+npx tsx --test test/digest/scheduler.test.ts
+npx tsx --test test/digest/aura-digest-progress.test.ts
+# or all shared tests: npm test
 ```
 
 ## `scripts/src/{rest-list-describe,rest-call,rest-search,...}.test.ts` (the `rest` CLI)
@@ -98,11 +107,15 @@ task):
    via the **package path** (`@pi-aura/shared/rest/closest-match`), not a
    sibling `.js` — the package path resolves under both runners. `import type`
    with `.js` is fine (erased at runtime).
-2. **Two `scripts/src` suites are vitest, not node-test:**
-   `scripts/src/scheduler.test.ts` and `scripts/src/aura-digest-progress.test.ts`
-   are in `vitest.config.ts`'s `include` — run them with `npx vitest run`, not
-   `node --test` (running them with `node --test` shows false `ERR_MODULE_NOT_FOUND`
-   failures because vitest, not node, resolves their imports).
+2. **The digest-core vitest suites moved to `packages/shared`.** The two
+   suites that used to live in `scripts/src/` and run under vitest
+   (`scheduler.test.ts` and `aura-digest-progress.test.ts`) moved to
+   `packages/shared/test/digest/` with the digest core (task `core-move`)
+   and were converted to `node:test` + `node:assert` to match the shared
+   package's `tsx --test` convention. `vitest.config.ts`'s `include` no
+   longer references them — it's just `["test/**/*.test.ts"]` now. Run them
+   with `cd packages/shared && npm test` (or `npx tsx --test
+   test/digest/<suite>.test.ts`), NOT `npx vitest run`.
 
 ### Mock-fidelity for external-library integration (the `_embedRaw` lesson)
 

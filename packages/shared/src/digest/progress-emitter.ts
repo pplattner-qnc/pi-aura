@@ -2,8 +2,12 @@
 // progress events to the dashboard's /api/state.
 //
 // This is a separate module from aura-digest.ts so it can be unit-tested
-// without importing aura-digest.ts (which has module-level side effects:
-// the `main().catch()` call that invokes process.exit on error).
+// without importing aura-digest.ts (which pulls in the network/keyring
+// stack and the full fetch/render/save action set). The shared core's
+// aura-digest.ts no longer has module-level side effects — it exports the
+// actions and a FailError the CLI shim catches — but keeping the progress
+// emitter split lets these tests exercise the batching/coalescing logic in
+// isolation.
 //
 // Design:
 //   - readDashboardUrl(path?) reads ~/.pi/aura/server-url.json ONCE at fetch

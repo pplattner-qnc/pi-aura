@@ -2,7 +2,7 @@
  * Unit tests for buildActions() — the digest action routing table.
  *
  * Run with:
- *   node --experimental-strip-types scripts/src/build-actions.test.ts
+ *   cd packages/shared && npx tsx --test test/digest/build-actions.test.ts
  */
 
 import assert from "node:assert/strict";

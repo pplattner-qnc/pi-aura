@@ -2,7 +2,7 @@
  * Unit tests for writeDashboardDigest() — the ~/.pi/aura/digest.json writer.
  *
  * Run with:
- *   node --experimental-strip-types scripts/src/write-dashboard-digest.test.ts
+ *   cd packages/shared && npx tsx --test test/digest/write-dashboard-digest.test.ts
  */
 
 import assert from "node:assert/strict";
