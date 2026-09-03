@@ -58,4 +58,10 @@ but changes no behavior.
 
 ## Implementation notes
 
-_The land-worker appends a per-slice note here as each slice lands._
+### Slice 1-leaf-core-to-shared — Move digest leaf core into @pi-aura/shared
+
+- Moved 6 leaf modules (scheduler, progress-emitter, build-actions, write-dashboard-digest, types, settings) from `scripts/src/` into `packages/shared/src/digest/` via `git mv` (history preserved); added explicit `./digest/*` export subpaths to `packages/shared/package.json`.
+- Re-pointed `scripts/src/aura-digest.ts`, `scripts/src/devlinks.ts`, and `scripts/src/followup-working-on.test.ts` imports to `@pi-aura/shared/digest/*`.
+- Moved 4 test files to `packages/shared/test/digest/`; converted the 2 vitest-based tests (scheduler, aura-digest-progress) to `node:test` + `node:assert` to match the shared package `tsx --test` convention (semantically equivalent assertions).
+- `vitest.config.ts` include trimmed to `["test/**/*.test.ts"]` (the 2 moved vitest paths removed); root vitest count went 20 files/210 → 18 files/177, with the 35 moved tests now running under `packages/shared` `tsx --test` (184 total there).
+- Cross-import seam verified: extension `tsc --noEmit` imports `@pi-aura/shared/digest/*` with no TS6059 (the gate for slices 2-3 / tasks 2-4). CLI bundle builds and runs identically.
