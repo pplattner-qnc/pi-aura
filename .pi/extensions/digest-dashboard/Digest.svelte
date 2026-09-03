@@ -432,7 +432,7 @@
   <div class="h-screen overflow-hidden bg-base-100 text-base-content p-4 sm:p-6">
     <div class="h-full max-w-3xl mx-auto flex flex-col gap-4">
       <header class="shrink-0">
-        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">{#if isRootDone(buildProgressTree(progressNodes))}Refining…{:else}Fetching digest…{/if}</h1>
+        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight">{#if digest}Refining…{:else}Fetching digest…{/if}</h1>
       </header>
 
       <section class="flex-1 min-h-0 overflow-auto" data-progress-tree>
