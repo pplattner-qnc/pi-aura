@@ -4,9 +4,15 @@ type: feature
 slug: cli-deletion-and-rewire
 title: Delete the aura-digest CLI bundle + esbuild config; rewire skills/docs/tests off it
 map: in-process-aura-digest
-status: ready
-blocked_by: [core-move, in-process-fetch, in-process-log-save]
-slices: [1-delete-cli-shim-and-bundle, 2-drop-dead-shared-exports, 3-rewrite-skill-doc-and-tests]
+status: done
+blocked_by:
+- core-move
+- in-process-fetch
+- in-process-log-save
+slices:
+- 1-delete-cli-shim-and-bundle
+- 2-drop-dead-shared-exports
+- 3-rewrite-skill-doc-and-tests
 ---
 
 ## User-visible outcome
