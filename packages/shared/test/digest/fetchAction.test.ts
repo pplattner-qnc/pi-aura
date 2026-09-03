@@ -83,10 +83,6 @@ function makeFakeAuraClient(): AuraClient {
     items: [],
     pagination: { page: 1, limit: 5, total: 0 },
   };
-  const reviewTasks: TaskList = {
-    items: [],
-    pagination: { page: 1, limit: 5, total: 0 },
-  };
   const notifList: NotificationList = {
     items: [],
     pagination: { page: 1, limit: 50, total: 0 },
