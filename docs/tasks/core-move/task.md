@@ -58,6 +58,15 @@ but changes no behavior.
 
 ## Implementation notes
 
+### Slice 3-remove-readDashboardUrl-duplicate — Remove extension readDashboardUrl/joinUrl duplicate; use shared progress-emitter
+
+- Exported `joinUrl` from `@pi-aura/shared/digest/progress-emitter` (was module-private); `readDashboardUrl` was already exported.
+- Removed the local `readDashboardUrl` and `joinUrl` duplicates from `.pi/extensions/digest-dashboard/index.ts` and imported both from the shared core (`import { readDashboardUrl, joinUrl } from "@pi-aura/shared/digest/progress-emitter"`) — single source of truth. Removed the stale TS6059-workaround comment that explained the local copy.
+- This closes the TS6059 workaround originally introduced in `digest-live-progress-tree` slice 5 (the extension copied `readDashboardUrl` locally because importing `scripts/src/progress-emitter.ts` violated `rootDir`).
+- `digest-log` behavior unchanged: `log-tool.test.ts` passes — no-op-safe when the dashboard is down (no `server-url.json` → returns `null` → log skipped, no fetch), POSTs to `/api/state` when up.
+- Verification: extension `tsc --noEmit` clean (no TS6059); `packages/shared` tsc + `tsx --test` 188 pass (+4 new `joinUrl-export.test.ts`); `scripts` tsc clean; root `npx vitest run` 18 files / 177 tests pass.
+- Note: `readDashboardUrl` becomes dead code only after task 4 (in-process-fetch) rewires `digest-log` to not read `server-url.json`; this slice keeps it and just de-duplicates.
+
 ### Slice 2-aura-digest-and-deps-to-shared — Move aura-digest + devlinks/clients/mcp-client/bitbucket into @pi-aura/shared
 
 - Moved 5 files (aura-digest, devlinks, clients, mcp-client, bitbucket) from `scripts/src/` into `packages/shared/src/digest/` via `git mv` (history preserved); added 5 `./digest/*` export subpaths to `packages/shared/package.json`.
