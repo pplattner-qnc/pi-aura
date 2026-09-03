@@ -147,8 +147,10 @@ describe("/aura-digest command", () => {
     expect(activeTools).toContain("digest-fetch");
     expect(activeTools).toContain("digest-save");
     expect(activeTools).toContain("digest-log");
+    expect(activeTools).toContain("digest-update");
+    expect(activeTools).toContain("digest-ack");
     expect(activeTools).toContain("some-other-tool");
-    expect(activeTools.filter((t) => t.startsWith("digest-"))).toHaveLength(5);
+    expect(activeTools.filter((t) => t.startsWith("digest-"))).toHaveLength(7);
   });
 
   it("injects the aura-digest SKILL.md with triggerTurn", async () => {
@@ -174,8 +176,8 @@ describe("/aura-digest command", () => {
     await digestCommand.def.handler("", ctx);
     await digestCommand.def.handler("", ctx);
 
-    expect(activeTools).toHaveLength(5);
-    expect([...new Set(activeTools)]).toHaveLength(5);
+    expect(activeTools).toHaveLength(7);
+    expect([...new Set(activeTools)]).toHaveLength(7);
   });
 
   it("reports a clear error when SKILL.md cannot be read", async () => {

@@ -45,13 +45,15 @@ between `digest-fetch` and `digest-save`.
 Starting the dashboard first means the live progress tree (from `progress`
 events) and the augment log (from `digest-log` calls) stream into the browser
 while the fetch runs. If `digest-fetch` detects that the dashboard was never
-started (`~/.pi/aura/server-url.json` absent), the fetch still succeeds and
-writes the digest — a one-shot warning is shown at the end instead of a live
-tree.
+started (`getDashboardUrl()` returns null — the in-process server isn't
+running), the fetch still succeeds and populates the in-memory digest — a
+one-shot warning is shown at the end instead of a live tree.
 
-The interactive dashboard reads `~/.pi/aura/digest.json` (actions + followup)
-and `~/.pi/aura/state.json` (ack events), and is started/stopped via the
-`digest-dashboard-start` and `digest-dashboard-stop` tools.
+The interactive dashboard reads the **in-memory current digest** (served by
+the in-process server's `/api/digest`, populated by `digest-fetch` /
+`digest-update`) and the **in-memory event stream** (`/events` SSE, fed by
+`pushEvent`), and is started/stopped via the `digest-dashboard-start` and
+`digest-dashboard-stop` tools.
 
 ---
 
@@ -158,9 +160,11 @@ Then update the parsed `digest` object in place:
    you → current (non-stale) rejections needing revision → active committed
    work. Drop actions for stale rejections that are already addressed.
 
-Write the corrected `digest` back to the in-memory store by calling
-`digest-fetch` again or by updating the parsed object you hold. The subsequent
-`digest-save` persists the corrected version from the in-memory current digest.
+Write the corrected `digest` back to the in-memory store with the
+`digest-update` tool (pass the corrected `digest` object). The subsequent
+`digest-save` persists that corrected version from the in-memory current
+digest. (Do NOT call `digest-fetch` again — that re-fetches and overwrites
+your corrections.)
 
 ### `digest-log` — push status lines to the dashboard
 
@@ -204,17 +208,21 @@ digest). Run `digest-fetch` first to populate the in-memory store.
      `task-management` / `artifact-management` / `capacity-planning` /
      `aura-digest` (for `run_setup`). Use `action.instruction` as the
      human-readable form of what to do.
-   - **Set the in-flight lock** before acting: write
-     `followup.currentlyWorkingOn` in `~/.pi/aura/digest.json` to the action's
-     key (e.g. `"overdue/AURA-42"`) so the page shows the spinner and disables
-     sibling buttons. The exact command is documented in the next section.
+   - **Set the in-flight lock** before acting: call the `digest-update` tool
+     with the current digest object and `followup.currentlyWorkingOn` set to
+     the action's key (e.g. `"overdue/AURA-42"` = `<section>/<key>`) so the
+     page shows the spinner and disables sibling buttons. (The tool updates the
+     in-memory current digest + fans out a `'change'` SSE so the page
+     hot-reloads.)
    - **Act** via the `aura` skill: look up the task, post/resolve, comment,
      etc., following its conventions (`is_ai_generated`, `mcp*` variants,
      `recordTaskProgress`).
-   - **Write an `ack` event** to `~/.pi/aura/state.json` and **clear**
-     `followup.currentlyWorkingOn` in `~/.pi/aura/digest.json` so the page
-     hot-reloads the buttons back to enabled. The exact command is documented
-     in the next section.
+   - **Acknowledge the click + clear the lock** after acting: call the
+     `digest-ack` tool with the `event_id` of the `action_click` event the
+     agent received (from the forwarded message's `details`, or the event's
+     `id`). The tool appends an `agent→page` `'ack'` event to the in-memory
+     stream + clears `followup.currentlyWorkingOn`, so the page re-enables the
+     sibling buttons.
    - **Report** the outcome concisely.
 5. **Return to step 4** (wait for the next click), unless:
    - The user says "stop" / "done" / "that's all" → run the clean close below.
@@ -223,39 +231,33 @@ digest). Run `digest-fetch` first to populate the in-memory store.
 
 The digest does not mark notifications as read automatically.
 
-### Agent-side writes (set the lock + ack/clear)
+### In-flight lock + ack (the `digest-update` + `digest-ack` tools)
 
-The dashboard mechanism does not provide helper subcommands for these two
-writes, so use the `node -e` one-liners below. Both edit `~/.pi/aura/digest.json`
-and/or `~/.pi/aura/state.json`; because the dashboard server `fs.watch`es these
-files, each write emits an SSE and the page hot-reloads automatically. Set the
-lock **before** acting; write the ack + clear the lock **after** acting.
+The dashboard's in-flight lock (`followup.currentlyWorkingOn` on the current
+digest) and the click acknowledgement (an `agent→page` `'ack'` event) are now
+first-class tools — no `node -e` one-liners. Set the lock **before** acting;
+ack + clear the lock **after** acting.
 
 #### Set the in-flight lock (before acting)
 
-```bash
-node -e 'const p=require("fs"),os=require("os"),Path=require("path");const f=Path.join(os.homedir(),".pi","aura","digest.json");const d=JSON.parse(p.readFileSync(f,"utf8"));d.followup.currentlyWorkingOn="<KEY>";p.writeFileSync(f,JSON.stringify(d,null,2));'
-```
-
-Replace `<KEY>` with the action's key path, e.g. `overdue/AURA-42`
-(`<section>/<key>`). This makes the page show a spinner on that button and
-disables the sibling action buttons.
+Call `digest-update` with the current digest object (as returned by
+`digest-fetch`, or the corrected one from Step 3) and `followup.currentlyWorkingOn`
+set to the action's key path, e.g. `"overdue/AURA-42"` (`<section>/<key>`).
+The tool replaces the in-memory current digest + fans out a `'change'` SSE,
+so the page shows a spinner on that button and disables the sibling action
+buttons.
 
 #### Write the ack + clear the lock (after acting)
 
-```bash
-node -e 'const p=require("fs"),os=require("os"),Path=require("path");const sf=Path.join(os.homedir(),".pi","aura","state.json");const df=Path.join(os.homedir(),".pi","aura","digest.json");const s=JSON.parse(p.readFileSync(sf,"utf8"));s.events.push({id:Date.now(),ts:new Date().toISOString(),dir:"agent→page",type:"ack",payload:{event_id:<CLICK_ID>,status:"done"}});p.writeFileSync(sf,JSON.stringify(s,null,2));const d=JSON.parse(p.readFileSync(df,"utf8"));d.followup.currentlyWorkingOn=null;p.writeFileSync(df,JSON.stringify(d,null,2));'
-```
+Call `digest-ack` with `{ event_id: <CLICK_ID> }`, where `<CLICK_ID>` is the
+`id` of the `action_click` event the agent received (from the forwarded
+message's `details`, or the event's `id`). The tool appends the `ack` event
+to the in-memory stream (fanned out via SSE) and clears
+`followup.currentlyWorkingOn`, so the page re-enables the buttons.
 
-Replace `<CLICK_ID>` with the `id` of the `action_click` event the agent
-received (from the custom message's `details`, or the event's `id`). This
-appends the ack to `state.json` and clears `followup.currentlyWorkingOn` in
-`digest.json`, so the page re-enables the buttons.
-
-Note: these one-liners assume `~/.pi/aura/digest.json` and
-`~/.pi/aura/state.json` already exist (written by `digest-fetch` and
-`digest-dashboard-start`). If a file is missing, re-run the dashboard or fetch
-rather than creating it by hand.
+Note: both tools operate on the in-memory store populated by `digest-fetch`.
+Run `digest-fetch` first; if the dashboard is not running the tools are still
+safe (the store updates; no SSE fans out).
 
 ### Clean close
 
@@ -320,10 +322,12 @@ store from the current in-memory digest (populated by `digest-fetch`).
 | `fetched_at` | When the data was fetched (mirrors `digest.meta.generated_at`) |
 | `digest` | The full corrected `Digest` from the last presented run |
 
-## digest.json contract
+## digest contract
 
-The versioned shape passed from fetch → orchestrator → save. See `src/types.ts`
-(`Digest`) for the authoritative TypeScript definition.
+The versioned shape passed from fetch → orchestrator → save. See
+`@pi-aura/shared/digest/types` (`Digest`) for the authoritative TypeScript
+definition. (In-process, `meta.raw_path`/`meta.report_path` are empty strings —
+the CLI path fills them; the in-memory store holds the object directly.)
 
 | Field | Filled by | Purpose |
 |-------|-----------|---------|

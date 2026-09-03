@@ -62,6 +62,22 @@ const logToolParameters = Type.Object({
 
 type LogToolParams = Static<typeof logToolParameters>;
 
+const updateToolParameters = Type.Object({
+  digest: Type.Any({
+    description: "The full corrected digest object (as returned by digest-fetch's digest, with summary/reviews/actions/corrections/followup applied). Replaces the in-memory current digest the dashboard serves.",
+  }),
+});
+
+type UpdateToolParams = Static<typeof updateToolParameters>;
+
+const ackToolParameters = Type.Object({
+  event_id: Type.Number({
+    description: "The id of the action_click event being acknowledged (from the forwarded click's details).",
+  }),
+});
+
+type AckToolParams = Static<typeof ackToolParameters>;
+
 const stopToolParameters = Type.Object({});
 
 type StopToolParams = Static<typeof stopToolParameters>;
@@ -247,6 +263,8 @@ const DIGEST_TOOLS: readonly string[] = [
   "digest-fetch",
   "digest-save",
   "digest-log",
+  "digest-update",
+  "digest-ack",
 ];
 
 export async function digestCommandHandler(
@@ -464,6 +482,70 @@ export default function (pi: ExtensionAPI): void {
           details: {},
         };
       }
+    },
+  });
+
+  pi.registerTool({
+    name: "digest-update",
+    label: "Update the in-memory digest",
+    description:
+      "Replace the in-memory current digest the dashboard serves (used after correcting the digest — summary, review enrichments, re-ranked actions, corrections — and to set/clear the in-flight followup.currentlyWorkingOn lock before/after acting on a click). The dashboard's /api/digest re-serves this + fans out a 'change' SSE so the browser hot-reloads. No-op safe if the dashboard is not running (the store is still updated).",
+    promptSnippet: "digest-update — replace the in-memory digest (corrections or the in-flight lock).",
+    promptGuidelines: [
+      "Use digest-update to write the corrected digest back to the in-memory store after augmenting (before digest-save).",
+      "Use digest-update to set followup.currentlyWorkingOn = \"<section>/<key>\" before acting on a click, and to clear it (null) after the ack.",
+    ],
+    parameters: updateToolParameters,
+    async execute(
+      _toolCallId: string,
+      params: UpdateToolParams,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+    ): Promise<AgentToolResult<Record<string, never>>> {
+      setCurrentDigest(params.digest);
+      return {
+        content: [{ type: "text", text: "digest-update: in-memory digest updated" }],
+        details: {},
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "digest-ack",
+    label: "Acknowledge a click + clear the in-flight lock",
+    description:
+      "Acknowledge an action_click the agent acted on (appends an agent→page 'ack' event the dashboard uses to mark the click handled) and clear the in-flight followup.currentlyWorkingOn lock (re-enables sibling buttons). Pass the action_click event's id. A no-op for the ack if the dashboard is not running (the lock still clears).",
+    promptSnippet: "digest-ack — acknowledge a click + clear the working-on lock.",
+    promptGuidelines: [
+      "Use digest-ack after acting on an action_click to mark it done + re-enable sibling buttons.",
+    ],
+    parameters: ackToolParameters,
+    async execute(
+      _toolCallId: string,
+      params: AckToolParams,
+      _signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+    ): Promise<AgentToolResult<Record<string, never>>> {
+      pushEvent({
+        id: 0,
+        ts: new Date().toISOString(),
+        dir: "agent→page",
+        type: "ack",
+        payload: { event_id: params.event_id, status: "done" },
+      });
+      // Clear the in-flight lock so sibling buttons re-enable.
+      const current = getCurrentDigest();
+      if (current && typeof current === "object" && "followup" in current) {
+        const d = structuredClone(current) as { followup?: { currentlyWorkingOn?: string | null } };
+        if (d.followup) {
+          d.followup.currentlyWorkingOn = null;
+          setCurrentDigest(d);
+        }
+      }
+      return {
+        content: [{ type: "text", text: `digest-ack: acknowledged event ${params.event_id} + cleared working-on lock` }],
+        details: {},
+      };
     },
   });
 
