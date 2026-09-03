@@ -257,14 +257,11 @@ describe("fetchAction — pure-function seam", () => {
     assert.equal(auraMorningDirs.length, 0, "no temp aura-morning dirs created");
   });
 
-  it("does not call readDashboardUrl or createProgressEmitter internally", async () => {
-    // fetchAction should not call readDashboardUrl/createProgressEmitter.
-    // We verify this by asserting the returned object doesn't depend on any
-    // dashboard server wiring — a no-op onProgress is the default.
-    // If fetchAction still called readDashboardUrl internally, it would try
-    // to read ~/.pi/aura/server-url.json; with our tmp HOME that file doesn't
-    // exist, so readDashboardUrl would return null (no crash). The key test is
-    // that fetchAction does NOT need server-url.json to function.
+  it("works without a dashboard server (no server-url.json needed)", async () => {
+    // fetchAction is a pure function — it does not need any dashboard
+    // server wiring to function. We verify this by asserting the returned
+    // object doesn't depend on any dashboard server wiring — a no-op
+    // onProgress is the default.
     const fake = makeFakeAuraClient();
     const result = await fetchAction({ auraClient: fake });
     assert.ok(result.digest, "fetchAction works without server-url.json");

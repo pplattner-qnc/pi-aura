@@ -24,13 +24,12 @@
 // cleanup removes the temp directory created by fetch. save/diff/last manage
 // the persistent last-digest store at ~/.pi/aura/last-digest.json.
 
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { createDefaultAuraClient } from "@pi-aura/shared/aura-client";
 import { loadAuraClientSettings } from "@pi-aura/shared/settings";
 import type {
-  ApprovalDecision,
   ArtifactApprovals,
   AuraClient,
   BoardItem,
@@ -52,7 +51,6 @@ import type {
   DigestAttention,
   DigestAttentionItem,
   DigestCapacity,
-  DigestDiff,
   DigestNotifications,
   DigestNotificationItem,
   DigestQueueRow,
@@ -85,20 +83,15 @@ function humanStatus(status: string): string {
 
 function pctToHours(pct: number | null): number | null {
   if (pct === null) return null;
-  // Exact hours (20% -> 1.6); the quarter-hour rounding + ~H:MM formatting
-  // happens in fmtHours so the raw digest.json keeps a precise value.
   return (pct * WORKDAY_HOURS) / 100;
 }
 
-/** Format hours as "~H:MM" rounded to the nearest quarter hour.
- * null -> "—". */
-function fmtHours(hours: number | null): string {
-  if (hours === null) return "—";
-  // Round to nearest 0.25h, then express as H:MM.
-  const rounded = Math.round(hours / 0.25) * 0.25;
-  const h = Math.floor(rounded);
-  const m = Math.round((rounded - h) * 60);
-  return `~${h}:${String(m).padStart(2, "0")}`;
+function stateEmoji(state: string): string {
+  const s = state.toUpperCase();
+  if (s === "OPEN") return "🟢";
+  if (s === "MERGED") return "✅";
+  if (s === "CLOSED" || s === "DECLINED") return "⚫";
+  return "•";
 }
 
 /** Compact Git column summary for a queue row, e.g. "1: 🟢, 2: 🌿"
@@ -122,44 +115,8 @@ function safeString(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-function fmtPct(pct: number | null): string {
-  if (pct === null) return "—";
-  return `${pct}%`;
-}
-
-/** Error subclass thrown by fail() instead of process.exit-ing. The
- *  CLI shim catches this, prints the message (+ usage if present), and
- *  exits with the code. This keeps the shared core side-effect-free for
- *  in-process callers (the extension's fetchAction call). */
-export class FailError extends Error {
-  readonly code: number;
-  readonly usage: string | undefined;
-  constructor(msg: string, usage?: string, code = 2) {
-    super(msg);
-    this.name = "FailError";
-    this.usage = usage;
-    this.code = code;
-  }
-}
-
-function fail(msg: string, usage?: string, code = 2): never {
-  throw new FailError(msg, usage, code);
-}
-
-export const USAGE = `Usage:
-  node aura.mjs fetch                 create temp dir, fetch Aura data (+ verification), print path
-  node aura.mjs render <dir> [out]    render <dir>/digest.json to markdown (stdout or <out>)
-  node aura.mjs cleanup <dir>         delete <dir>
-  node aura.mjs save <dir>            save <dir>/digest.json as the last presented digest
-  node aura.mjs diff <dir>            print what changed since the last saved digest (JSON)
-  node aura.mjs last                  print the last saved digest (JSON)`;
-
 /** Path to the persistent last-digest store. */
 const LAST_DIGEST_PATH = join(homedir(), ".pi", "aura", "last-digest.json");
-/** Path to the live dashboard digest file (SPA data source). Exported so
- *  the CLI shim can write ~/.pi/aura/digest.json (fetchAction no longer
- *  writes it — it's a pure function returning the object). */
-export const DASHBOARD_DIGEST_PATH = join(homedir(), ".pi", "aura", "digest.json");
 const LAST_DIGEST_SCHEMA_VERSION = 1;
 
 // ===========================================================================
@@ -938,265 +895,6 @@ function extractVerifyTargets(
 }
 
 // ===========================================================================
-// render
-// ===========================================================================
-
-function attentionLine(emoji: string, label: string, items: DigestAttentionItem[]): string {
-  if (items.length === 0) return `- ${emoji} **${label}:** None`;
-  const parts = items.map((i) => {
-    let s = `${i.key} — ${i.title}`;
-    if (i.days) s += ` (${i.days}d)`;
-    return s;
-  });
-  return `- ${emoji} **${label}:** ${parts.join("; ")}`;
-}
-
-function renderAttention(d: Digest): string {
-  const lines: string[] = ["### Needs your attention"];
-  lines.push(attentionLine("🔴", "Overdue", d.attention.overdue));
-  lines.push(attentionLine("🟡", "Waiting on you", d.attention.waiting_on_you));
-  lines.push(attentionLine("🔵", "Waiting on others", d.attention.waiting_on_others ?? []));
-  const since = d.attention.notifications.since_last_run.length > 0
-    ? d.attention.notifications.since_last_run.map((n) => n.line).join("\n  - ")
-    : "Nothing new since last run.";
-  lines.push(`- 📬 **Since last run:** ${since}`);
-  const older = d.attention.notifications.older_unread.length > 0
-    ? d.attention.notifications.older_unread.map((n) => n.line).join("\n  - ")
-    : "No unread notifications.";
-  lines.push(`- 📬 **Older unread:** ${older}`);
-  return lines.join("\n");
-}
-
-function renderQueue(d: Digest): string {
-  const lines: string[] = ["### Today's queue", ""];
-  if (d.queue.length === 0) {
-    lines.push("_No tasks in the queue._");
-    return lines.join("\n");
-  }
-  lines.push("| # | Task [key] | Status | Role | Cap | Hours | Git |");
-  lines.push("|---|-------------|--------|------|-----|------|-----|");
-  for (const row of d.queue) {
-    lines.push(
-      `| ${row.rank} | ${row.title} [${row.key}] | ${row.status} | ${row.role} | ${fmtPct(row.capacity_pct)} | ${fmtHours(row.hours)} | ${row.git_summary ?? ""} |`
-    );
-  }
-  const committedRows = d.queue.filter((r) => r.capacity_pct !== null && r.capacity_pct > 0);
-  const totalPct = committedRows.reduce((s, r) => s + (r.capacity_pct ?? 0), 0);
-  const totalHours = committedRows.reduce((s, r) => s + (r.hours ?? 0), 0);
-  lines.push(
-    `|   | **Committed** | | | **${totalPct}%** | **${fmtHours(totalHours)}** | |`
-  );
-  lines.push("");
-  lines.push(`_8hr workday → hours = capacity% × ${WORKDAY_HOURS}, rounded to ¼h_`);
-  return lines.join("\n");
-}
-
-function renderCapacity(d: Digest): string {
-  const c = d.capacity;
-  const warn = c.over ? " ⚠️ over-committed" : "";
-  return [
-    "### Capacity",
-    "",
-    `- Base: ${c.base_pct}% | Committed: ${c.committed_pct}% | Free: ${c.free_pct}% | Utilization: ${c.utilization_pct}%${warn}`,
-    `- Committed hours: **${c.total_hours.toFixed(1)}h** / ${WORKDAY_HOURS}h workday`,
-  ].join("\n");
-}
-
-function decisionEmoji(d: ApprovalDecision): string {
-  if (!d.decided) return "⏳";
-  const dec = d.decision.toUpperCase();
-  if (dec === "APPROVED") return "✅";
-  if (dec === "REJECTED" || dec === "NEEDS_REVISION") return "❌";
-  return "•";
-}
-
-function renderReviews(d: Digest): string {
-  const lines: string[] = ["### Reviews due", ""];
-  if (d.reviews.length === 0) {
-    lines.push("Nothing pending.");
-    return lines.join("\n");
-  }
-  // Terse table: one row per artifact, one column per reviewer (emoji only,
-  // all reviewers present — decided AND assigned-but-pending). Column headers
-  // are first names to keep it narrow.
-  const allReviewerNames: string[] = [];
-  const seen = new Set<string>();
-  const addName = (fullName: string) => {
-    const first = fullName.split(",")[0].trim();
-    if (first && !seen.has(first)) { seen.add(first); allReviewerNames.push(first); }
-  };
-  for (const r of d.reviews) {
-    for (const dec of r.decisions) addName(dec.user_name);
-    for (const o of r.open_reviews) addName(o.user_name);
-  }
-  const header = ["Artifact", "v", ...allReviewerNames];
-  lines.push(`| ${header.join(" | ")} |`);
-  lines.push(`|${header.map(() => "---").join("|")}|`);
-  for (const r of d.reviews) {
-    const byName = new Map(r.decisions.map((dec) => [dec.user_name.split(",")[0].trim(), decisionEmoji(dec)]));
-    const pending = new Set(r.open_reviews.filter((o) => !o.decided).map((o) => o.user_name.split(",")[0].trim()));
-    const cells = allReviewerNames.map((n) => byName.get(n) ?? (pending.has(n) ? "🔵" : ""));
-    lines.push(`| ${r.title} | ${r.version} | ${cells.join(" | ")} |`);
-  }
-  lines.push("");
-  lines.push("_🔵 assigned · ⏳ pending · ✅ approved · ❌ rejected/needs revision_");
-  return lines.join("\n");
-}
-
-/** Render the "reviews I owe" list (artifacts assigned to me, not yet decided). */
-function renderReviewsOwed(d: Digest): string {
-  const lines: string[] = ["### Reviews I owe", ""];
-  const owed = d.reviews_owed ?? [];
-  if (owed.length === 0) {
-    lines.push("_None — you're not blocking any reviews._");
-    return lines.join("\n");
-  }
-  for (const r of owed) {
-    const deadline = r.deadline ? ` (due ${r.deadline.slice(0, 10)})` : "";
-    const initiator = r.initiator ? ` — from ${r.initiator}` : "";
-    lines.push(`- **${r.title}** v${r.version}${deadline}${initiator}`);
-  }
-  return lines.join("\n");
-}
-
-function renderCorrections(d: Digest): string {
-  const lines: string[] = ["### Corrections", ""];
-  const stale = d.corrections.filter((c) => c.stale);
-  if (stale.length === 0) {
-    lines.push("_All reported review states match current versions._");
-    return lines.join("\n");
-  }
-  for (const c of stale) {
-    // The correction note is self-describing (it includes the reported state,
-    // current version, and verdict), so we just prefix the title.
-    lines.push(`- **${c.title}** — ${c.note}`);
-  }
-  return lines.join("\n");
-}
-
-function renderSuggestedActions(d: Digest): string {
-  const lines: string[] = ["### Suggested actions", ""];
-  if (d.suggested_actions.length === 0) {
-    lines.push("_No suggestions._");
-    return lines.join("\n");
-  }
-  d.suggested_actions.forEach((a, i) => lines.push(`${i + 1}. ${a}`));
-  return lines.join("\n");
-}
-
-/** Render a warnings block at the bottom when any non-fatal degradation happened
- * (e.g. Teamwork Graph skipped because the keyring read failed). Omitted when
- * everything ran fully, so a clean digest has no warnings block. */
-function renderWarnings(d: Digest): string {
-  const warnings = d.warnings ?? [];
-  if (warnings.length === 0) return "";
-  const lines: string[] = ["### ⚠️ Warnings", ""];
-  for (const w of warnings) lines.push(`- ${w}`);
-  return lines.join("\n");
-}
-
-function stateEmoji(state: string): string {
-  const s = state.toUpperCase();
-  if (s === "OPEN") return "🟢";
-  if (s === "MERGED") return "✅";
-  if (s === "CLOSED" || s === "DECLINED") return "⚫";
-  return "•";
-}
-
-function renderDevLinks(d: Digest): string {
-  const lines: string[] = ["### Dev links", ""];
-  const links = d.dev_links ?? [];
-  if (links.length === 0) {
-    lines.push("_No dev-links configured (set auraDigest in settings to enable)._");
-    return lines.join("\n");
-  }
-  const withPrs = links.filter((l) => l.pull_requests.length > 0 || l.branches.length > 0);
-  if (withPrs.length === 0) {
-    lines.push("_No related PRs or branches found for queue tasks._");
-    return lines.join("\n");
-  }
-  // Numbered list; task key inlined into each line (no separate header).
-  let n = 0;
-  for (const l of withPrs) {
-    for (const pr of l.pull_requests) {
-      n++;
-      const keyPart = `${l.task_key}: `;
-      lines.push(
-        `${n}. ${keyPart}${stateEmoji(pr.state)} [${pr.provider} #${pr.id}](${pr.url}) — ${pr.title} (${pr.state.toLowerCase()})`
-      );
-    }
-    for (const b of l.branches) {
-      n++;
-      lines.push(`${n}. ${l.task_key}: 🌿 ${b.provider} \`${b.repo}\` **${b.name}**`);
-    }
-  }
-  const errs = links.flatMap((l) => l.errors.map((e) => `${l.task_key}: ${e}`));
-  if (errs.length > 0) {
-    lines.push("");
-    lines.push("_errors:_");
-    for (const e of errs.slice(0, 3)) lines.push(`  - ${e}`);
-  }
-  return lines.join("\n");
-}
-
-function render(d: Digest): string {
-  const sections: string[] = [];
-  const day = new Date(d.date + "T00:00:00").toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-  });
-  sections.push(`## Morning briefing — ${day}`, "");
-  if (d.summary) {
-    sections.push(`> ${d.summary.replace(/\n/g, "\n> ")}`, "");
-  }
-  sections.push(renderAttention(d), "");
-  sections.push(renderQueue(d), "");
-  sections.push(renderCapacity(d), "");
-  sections.push(renderReviews(d), "");
-  sections.push(renderReviewsOwed(d), "");
-  sections.push(renderCorrections(d), "");
-  sections.push(renderDevLinks(d), "");
-  sections.push(renderSuggestedActions(d), "");
-  const w = renderWarnings(d);
-  if (w) sections.push(w, "");
-  return sections.join("\n") + "\n";
-}
-
-export function renderAction(): void {
-  const dir = process.argv[3];
-  const outPath = process.argv[4];
-  if (!dir) fail("render: missing <dir> argument", USAGE);
-  const digestPath = join(dir, "digest.json");
-  if (!existsSync(digestPath)) fail(`render: ${digestPath} not found`);
-  let d: Digest;
-  try {
-    d = JSON.parse(readFileSync(digestPath, "utf8")) as Digest;
-  } catch (e) {
-    fail(`render: failed to parse ${digestPath}: ${e instanceof Error ? e.message : String(e)}`, undefined, 1);
-  }
-  const md = render(d);
-  if (outPath) {
-    writeFileSync(outPath, md, "utf8");
-    console.error(`rendered ${outPath}`);
-  } else {
-    process.stdout.write(md);
-  }
-}
-
-// ===========================================================================
-// cleanup
-// ===========================================================================
-
-export function cleanupAction(): void {
-  const dir = process.argv[3];
-  if (!dir) fail("cleanup: missing <dir> argument", USAGE);
-  if (!existsSync(dir)) fail(`cleanup: ${dir} not found`);
-  rmSync(dir, { recursive: true, force: true });
-  console.error(`cleaned up ${dir}`);
-}
-
-// ===========================================================================
 // last-digest store: save / diff / last
 // ===========================================================================
 
@@ -1225,104 +923,4 @@ export function saveLastDigest(
   mkdirSync(join(homedir(), ".pi", "aura"), { recursive: true });
   writeFileSync(dest, JSON.stringify(store, null, 2) + "\n", "utf8");
   console.error(`saved last digest to ${dest} (presented ${presentedAt})`);
-}
-
-export function saveAction(): void {
-  const dir = process.argv[3];
-  if (!dir) fail("save: missing <dir> argument", USAGE);
-  const digestPath = join(dir, "digest.json");
-  if (!existsSync(digestPath)) fail(`save: ${digestPath} not found`);
-  const digest = JSON.parse(readFileSync(digestPath, "utf8")) as Digest;
-  saveLastDigest(digest);
-}
-
-function daysBetween(aIso: string, bIso: string): number {
-  const a = new Date(aIso.slice(0, 10) + "T00:00:00").getTime();
-  const b = new Date(bIso.slice(0, 10) + "T00:00:00").getTime();
-  return Math.round((b - a) / 86_400_000);
-}
-
-/** Compute a structured delta between a previous digest and the current one. */
-function computeDiff(prev: Digest, cur: Digest): DigestDiff {
-  const prevQueue = new Map(prev.queue.map((r) => [r.key, r]));
-  const curQueue = new Map(cur.queue.map((r) => [r.key, r]));
-  const queue_added = cur.queue.filter((r) => !prevQueue.has(r.key));
-  const queue_removed = prev.queue.filter((r) => !curQueue.has(r.key));
-  const queue_status_changed = cur.queue
-    .filter((r) => prevQueue.has(r.key) && prevQueue.get(r.key)!.status !== r.status)
-    .map((r) => ({ key: r.key, title: r.title, from: prevQueue.get(r.key)!.status, to: r.status }));
-
-  const capacity_delta_pct = cur.capacity.committed_pct - prev.capacity.committed_pct;
-  const capacity_delta_hours = cur.capacity.total_hours - prev.capacity.total_hours;
-
-  const prevReviews = new Map(prev.reviews.map((r) => [r.artifact_id, r]));
-  const reviews_added = cur.reviews.filter((r) => !prevReviews.has(r.artifact_id));
-  const reviews_progressed = cur.reviews
-    .filter((r) => prevReviews.has(r.artifact_id))
-    .map((r) => {
-      const p = prevReviews.get(r.artifact_id)!;
-      return {
-        artifact_id: r.artifact_id,
-        title: r.title,
-        from_decided: p.decided_count,
-        to_decided: r.decided_count,
-        from_version: p.version,
-        to_version: r.version,
-      };
-    })
-    .filter((d) => d.to_decided > d.from_decided || d.to_version > d.from_version);
-
-  const prevCorr = new Map(prev.corrections.map((c) => [c.artifact_id, c]));
-  const curCorr = new Map(cur.corrections.map((c) => [c.artifact_id, c]));
-  // Resolved: was stale last time, not stale (or absent) now.
-  const corrections_resolved = prev.corrections.filter(
-    (c) => c.stale && (!curCorr.has(c.artifact_id) || !curCorr.get(c.artifact_id)!.stale)
-  );
-  const corrections_new = cur.corrections.filter(
-    (c) => c.stale && !prevCorr.has(c.artifact_id)
-  );
-
-  const prevOverdue = new Map(prev.attention.overdue.map((i) => [i.key, i]));
-  const curOverdue = new Map(cur.attention.overdue.map((i) => [i.key, i]));
-  const overdue_added = cur.attention.overdue.filter((i) => !prevOverdue.has(i.key));
-  const overdue_cleared = prev.attention.overdue.filter((i) => !curOverdue.has(i.key));
-
-  return {
-    queue_added,
-    queue_removed,
-    queue_status_changed,
-    capacity_delta_pct,
-    capacity_delta_hours,
-    reviews_added,
-    reviews_progressed,
-    corrections_resolved,
-    corrections_new,
-    overdue_added,
-    overdue_cleared,
-    days_elapsed: daysBetween(prev.date, cur.date),
-  };
-}
-
-export function diffAction(): void {
-  const dir = process.argv[3];
-  if (!dir) fail("diff: missing <dir> argument", USAGE);
-  const curPath = join(dir, "digest.json");
-  if (!existsSync(curPath)) fail(`diff: ${curPath} not found`);
-  const last = loadLastDigest();
-  if (!last) {
-    console.error(`no previous digest found at ${LAST_DIGEST_PATH}`);
-    process.stdout.write(JSON.stringify({ first_run: true }, null, 2) + "\n");
-    return;
-  }
-  const cur = JSON.parse(readFileSync(curPath, "utf8")) as Digest;
-  const diff = computeDiff(last.digest, cur);
-  process.stdout.write(JSON.stringify(diff, null, 2) + "\n");
-}
-
-export function lastAction(): void {
-  const last = loadLastDigest();
-  if (!last) {
-    throw new FailError(`no last digest found at ${LAST_DIGEST_PATH}`, undefined, 1);
-  }
-  process.stdout.write(JSON.stringify(last, null, 2) + "\n");
 }
