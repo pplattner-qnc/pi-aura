@@ -58,6 +58,15 @@ but changes no behavior.
 
 ## Implementation notes
 
+### Slice 2-aura-digest-and-deps-to-shared — Move aura-digest + devlinks/clients/mcp-client/bitbucket into @pi-aura/shared
+
+- Moved 5 files (aura-digest, devlinks, clients, mcp-client, bitbucket) from `scripts/src/` into `packages/shared/src/digest/` via `git mv` (history preserved); added 5 `./digest/*` export subpaths to `packages/shared/package.json`.
+- **The `fail()` seam:** the shared-core `fail()` now throws a `FailError` (an `Error` subclass carrying `code` + `usage`); the module-level `main().catch()` was removed from the shared core (moved to the CLI shim). `scripts/src/aura-digest.ts` is now a thin CLI shim importing `fetchAction`/`renderAction`/`saveAction`/`diffAction`/`cleanupAction`/`lastAction`/`USAGE`/`FailError` from `@pi-aura/shared/digest/aura-digest`, dispatching on `process.argv`, and catching `FailError` to preserve exit codes (2 for unknown/missing action, 1 for no-last-digest). Verified: no-args → 2, bogus → 2, `last` → 0.
+- **CODEGEN FIX (replaces the tdd-worker's hand-patches):** added `packages/shared/tsconfig.codegen.json` (`moduleResolution: NodeNext`) and set `output.tsConfigPath` in `openapi-ts.config.ts` to an absolute path resolving to that file. openapi-ts 0.99 auto-appends `.js` to generated relative imports when it sees `nodenext`, so the generated SDK tree is now correct out-of-the-box and survives `npm run codegen`. No hand-patching of generated files. The shared package's own bundler typecheck is unaffected (`.js` specifiers resolve under bundler too).
+- The `fetchAction` cross-import seam (the gate for tasks 2-4) is verified: a scratch `import { fetchAction } from "@pi-aura/shared/digest/aura-digest"` in the extension typechecks under `tsc --noEmit` with no TS6059.
+- `scripts/src/keyring.ts` left in place (orphaned — no importers after the move — but it's a 601-line full implementation, not a re-export, so the slice doc's drop-condition isn't met; flagged as dead code, out of scope to delete here).
+- NOTE: the original tdd-worker had also split `aura-client.ts` into a type/value re-export with a new `./aura-client-impl` subpath; the orchestrator reverted that as unnecessary once the codegen fix made the generated SDK's imports resolve under NodeNext. `aura-client.ts` is back to its original single-export form (types + `createDefaultAuraClient` value re-exported together).
+
 ### Slice 1-leaf-core-to-shared — Move digest leaf core into @pi-aura/shared
 
 - Moved 6 leaf modules (scheduler, progress-emitter, build-actions, write-dashboard-digest, types, settings) from `scripts/src/` into `packages/shared/src/digest/` via `git mv` (history preserved); added explicit `./digest/*` export subpaths to `packages/shared/package.json`.
