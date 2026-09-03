@@ -191,6 +191,11 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Digest
 
       const done = async (): Promise<void> => {
         return new Promise((res) => {
+          // Close existing (keep-alive) connections first so server.close()
+          // resolves promptly — otherwise a lingering /events SSE response keeps
+          // the event loop alive until the OS TCP timeout. closeAllConnections()
+          // is available on Node >= 18.2 (we target node22).
+          server.closeAllConnections();
           server.close((err) => {
             if (err) {
               console.error("Server close error:", err.message);
