@@ -1,6 +1,6 @@
 ---
 name: aura-digest
-description: Morning routine — fetches your Aura briefing, attention items, priority queue, capacity, and reviews via a deterministic Node script (aura-digest.mjs), verifies review states, then presents a concise digest with a diff against the last run. Use when the user wants to start their day, get an Aura digest, or see what changed since last time.
+description: Morning routine — fetches your Aura briefing, attention items, priority queue, capacity, and reviews via in-process tools (digest-fetch / digest-log / digest-save / digest-update / digest-ack + the digest-dashboard), verifies review states, then presents a concise digest with a diff against the last run. Use when the user wants to start their day, get an Aura digest, or see what changed since last time.
 disable-model-invocation: true
 ---
 
@@ -11,8 +11,7 @@ drive the whole pipeline through to the dashboard — do not ask the user for
 confirmation, do not summarize the plan first. This skill was invoked
 explicitly (via `/aura-digest`), so the user already wants the flow to run.
 
-Inline, tool-driven pipeline. The heavy lifting still happens in the compiled
-`aura-digest.mjs` script, but this skill drives the flow through typed tools:
+Inline, tool-driven pipeline. The flow runs entirely in-process via typed tools:
 `digest-dashboard-start` (ready state) → `digest-fetch` (streams the live tree) →
 augment (agent calls `digest-log` per sub-step) → `digest-save` → wait for
 clicks → act on one via the `aura` skill → `ack` + clear →
@@ -59,33 +58,24 @@ the in-process server's `/api/digest`, populated by `digest-fetch` /
 
 ## Prerequisites
 
-The script source lives in `scripts/src/` (shared with future scripts) and is
-bundled by esbuild into `skills/core/aura-digest/dist/aura-digest.mjs`. The compiled `.mjs`
-file is committed, so end users of the pi package don't need to build — but in
-development, rebuild after editing `scripts/src/`:
+The digest runs entirely in-process via typed tools — no compiled script,
+no bundle, no spawned child. The `digest-fetch` tool calls `fetchAction`
+from `@pi-aura/shared/digest/aura-digest` directly in-process, fetching all
+Aura data and verifying review states in a single pass.
 
-```bash
-task                # from repo root: install build deps, typecheck, build, verify
-# or: task build     # typecheck + bundle (assumes `task install` was run once)
-```
-
-See the repo-root `Taskfile.yml`. Build tooling (esbuild, typescript, the MCP SDK)
-is isolated in `scripts/package.json` with its own `node_modules` (gitignored),
-keeping the published pi package manifest clean.
-
-`digest-fetch` internally invokes `aura-digest.mjs fetch`, which reads
-`~/.config/mcp/mcp.json` at runtime for the Aura server URL + bearer token. The
-token is never baked into the bundle.
+`digest-fetch` reads `~/.config/mcp/mcp.json` at runtime for the Aura server
+URL + bearer token (the same `mcp.json` the in-process MCP client uses).
+The token is never baked into anything.
 
 **Runtime dependency (dev-links Teamwork Graph layer):** `@napi-rs/keyring` is
 declared in the root `package.json` `dependencies` so pi's `npm install` (run
 automatically after cloning the package) places the platform-specific native
-binding in the repo-root `node_modules/`, where Node resolves it from
-`dist/aura-digest.mjs` via walk-up. The import is dynamic, so if the binding is ever
-missing or unsupported on a platform, the Teamwork Graph layer silently skips
-(dev-links still returns GitHub + Bitbucket results) rather than crashing.
-Users who never authenticate the `atlassian` MCP server see the same graceful
-skip — no setup skill is required.
+binding in the repo-root `node_modules/`, where the in-process `fetchAction`
+resolves it. The import is dynamic, so if the binding is ever missing or
+unsupported on a platform, the Teamwork Graph layer silently skips (dev-links
+still returns GitHub + Bitbucket results) rather than crashing. Users who
+never authenticate the `atlassian` MCP server see the same graceful skip — no
+setup skill is required.
 
 ---
 
@@ -344,14 +334,13 @@ the CLI path fills them; the in-memory store holds the object directly.)
 
 ## Development
 
-Run from the repo root via `task`:
+The digest flow runs entirely in-process via typed tools — there is no
+digest bundle to build. The `task build` target in the repo-root `Taskfile.yml`
+builds only the `aura` skill's `aura.mjs` bundle (a separate skill); the
+digest tools call `fetchAction` / `saveLastDigest` from `@pi-aura/shared`
+directly at runtime (loaded by pi's jiti, no compile step).
 
-- `task typecheck` — TypeScript type-check (no emit)
-- `task build` — esbuild bundle to `skills/core/aura-digest/dist/aura-digest.mjs`
-- `task watch` — rebuild on change
-- `task clean` — remove `scripts/node_modules` + built `dist/`
-
-The script is plain ESM. `digest-fetch` internally invokes the bundled `.mjs`,
-which uses the `@modelcontextprotocol/sdk` `StreamableHTTPClientTransport` with
-the bearer token from `mcp.json` passed via `requestInit.headers`; the Atlassian
-(Jira) client reuses the OAuth token pi-mcp-adapter persists in the OS keyring.
+The shared MCP client (`@pi-aura/shared/mcp-client`) uses the
+`@modelcontextprotocol/sdk` `StreamableHTTPClientTransport` with the bearer
+token from `mcp.json` passed via `requestInit.headers`; the Atlassian (Jira)
+client reuses the OAuth token pi-mcp-adapter persists in the OS keyring.

@@ -9,7 +9,7 @@ Aura integration for [pi](https://github.com/badlogic/pi-mono) — skills, agent
 | Skill | Description |
 |---|---|
 | `aura` | Reference skill for working with Aura — use cases (tasks, artifacts, wiki, code search, capacity, etc.) and process knowledge (workflow phases, roles, escalation, integrations) |
-| `aura-digest` | Morning routine — fetches your briefing, attention items, priority queue, capacity, and reviews via a deterministic script pipeline, then presents a concise digest |
+| `aura-digest` | Morning routine — fetches your briefing, attention items, priority queue, capacity, and reviews via in-process tools, then presents a concise digest |
 
 ### Agents
 
