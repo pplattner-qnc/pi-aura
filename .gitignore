@@ -13,9 +13,6 @@ dist/**
 # Impeccable skill install (per-env, from pi-impeccable)
 .agents/
 
-# Task-workflow runtime state
-docs/tasks/state.yaml
-
 # Subagent per-slice scratch outputs (tdd/verify/deviation/land/ui-noter results)
 # — these are workflow artifacts, not repo content.
 tdd-*/
@@ -23,3 +20,6 @@ verify-*/
 deviation-*/
 land-*/
 ui-note-*/
+
+# docs/tasks/state.yaml is TRACKED: the task/slice pointers and the
+# schema_version stamp persist across clones so setup-workflow is idempotent.
