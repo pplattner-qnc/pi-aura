@@ -24,6 +24,7 @@ import auraReferences, {
   extractReferenceToken,
   filterReferenceItems,
   refreshReferenceKind,
+  TASK_REF_INSTRUCTION,
   MAX_SUGGESTIONS,
   type ReferenceItem,
 } from "./aura-references.ts";
@@ -1406,6 +1407,22 @@ console.log("provider failure modes (defer, no throw): ok");
 }
 
 console.log("parsePartial decline deferral: ok");
+
+// ---------------------------------------------------------------------------
+// TASK_REF_INSTRUCTION (the per-turn system-prompt block)
+// ---------------------------------------------------------------------------
+
+{
+  assert.ok(TASK_REF_INSTRUCTION.includes("<task-ref"), "shows the task-ref tag shape");
+  assert.ok(TASK_REF_INSTRUCTION.includes("key="), "names the key attribute");
+  assert.ok(TASK_REF_INSTRUCTION.includes("status="), "names the status attribute");
+  assert.ok(/element text is the task title/.test(TASK_REF_INSTRUCTION), "names the title part");
+  assert.ok(TASK_REF_INSTRUCTION.includes("aura"), "points at the aura skill");
+  assert.ok(/SKILL\.md/.test(TASK_REF_INSTRUCTION), "tells the agent how to load the skill");
+  assert.ok(TASK_REF_INSTRUCTION.startsWith("\n## "), "starts with a markdown heading");
+}
+
+console.log("TASK_REF_INSTRUCTION: ok");
 
 // ---------------------------------------------------------------------------
 // Factory is a function (smoke; the factory itself is pi-runtime verified)

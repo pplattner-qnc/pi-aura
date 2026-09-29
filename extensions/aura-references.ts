@@ -528,6 +528,36 @@ async function resolveMention(
 }
 
 // ---------------------------------------------------------------------------
+// Per-turn system-prompt instruction (the <task-ref> block)
+// ---------------------------------------------------------------------------
+
+/** Slim per-turn system-prompt block that teaches the model what the
+ *  `<task-ref>` tags mean and where to go to act on a referenced task.
+ *  Injected via `before_agent_start` (the same hook `aura-tasks.ts` and
+ *  `aura-skill-instruction.ts` use); pi rebuilds the base system prompt each
+ *  turn, so appending here re-applies cleanly without accumulating across
+ *  the session.
+ *
+ *  Kept deliberately short: the tag is self-describing (labelled attributes
+ *  + element text), so this only names the parts and points at the `aura`
+ *  skill for anything beyond reading the reference. `aura-tasks.ts` keeps
+ *  its own `<aura-task>` block until the task-alias ticket removes it; the
+ *  interim double instruction block is accepted. */
+export const TASK_REF_INSTRUCTION = `
+## Aura task references
+
+User messages may contain inline Aura task references rendered as tagged elements:
+
+  <task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>
+
+- \`key\` is the task's human-readable identifier (e.g. \`AURA-42\`).
+- \`status\` is its current Aura workflow status (e.g. \`OPEN\`, \`IN_REVIEW\`, \`DONE\`).
+- The element text is the task title.
+
+These references carry only the key, status, and title, never the task body. To read the full task, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further task details from the reference alone.
+`;
+
+// ---------------------------------------------------------------------------
 // Task kind adapter (the first kind)
 // ---------------------------------------------------------------------------
 
@@ -830,11 +860,18 @@ async function createDefaultClient(): Promise<TaskAuraClient> {
 
 export default function (pi: ExtensionAPI): void {
   const taskAdapter = createTaskAdapter({ createClient: createDefaultClient });
+  // No legacy alias is registered in production wiring: the alias table is
+  // empty until the task-alias and rule tickets register `@AURA-` / `@rule:`
+  // through the registry's alias API.
   const registry = createReferenceRegistry([taskAdapter]);
   // The session cache lives from session_start on. It starts empty (the
   // provider defers on an empty cache) and is populated by the fire-and-forget
   // warmup. A /reload re-emits session_start and swaps in a fresh cache.
   let sessionCache: ReferenceCache | null = null;
+  // Latched once per session by the probe below (credentials appearing later
+  // do not re-arm until /reload): without Aura credentials no targeted
+  // expansion fetch may be attempted at all.
+  let clientAvailable = false;
 
   pi.on("session_start", async (_event, ctx) => {
     // The SWR refresh gate: off until one client build succeeds in this
@@ -842,11 +879,13 @@ export default function (pi: ExtensionAPI): void {
     // warmup relies on, probed once here: without credentials (no baseUrl or
     // no PAT in the keyring) no refresh is fired at all. Like the warmup,
     // this is one-shot: credentials appearing later in the session do not
-    // re-arm the gate until a /reload re-emits session_start.
+    // re-arm the gate until a /reload re-emits session_start. The same
+    // success latches `clientAvailable` for the expansion lookup.
     let refreshAllowed = false;
     void createDefaultClient()
       .then(() => {
         refreshAllowed = true;
+        clientAvailable = true;
       })
       .catch(() => {
         // No credentials: the gate stays off for the whole session; the
@@ -874,5 +913,36 @@ export default function (pi: ExtensionAPI): void {
           // session-start handler from ever rejecting into the session.
         });
     }
+  });
+
+  // Inline expansion on submit: every typed `#kind:` mention resolves
+  // cache-first via its kind adapter (`resolveFullToken`, then the targeted
+  // getTaskByHumanKey fallback) and expands to the uniform tag. Unresolvable
+  // references stay exactly as typed. Without Aura credentials (or before
+  // the one-shot probe resolves) no targeted fetch may be attempted at all:
+  // null is passed as the lookup and the transform leaves every mention as
+  // typed without resolving anything.
+  pi.on("input", async (event) => {
+    const cache = sessionCache;
+    if (cache === null) return;
+    const text = await expandReferenceMentions(
+      event.text,
+      registry,
+      clientAvailable
+        ? (kind, token) => {
+            const adapter = registry.kinds.get(kind);
+            return adapter ? adapter.resolveFullToken(token, cache) : Promise.resolve(null);
+          }
+        : null,
+    );
+    if (text === event.text) return; // unchanged: pass through
+    return { action: "transform", text };
+  });
+
+  // Teach the model what the `<task-ref>` tags mean and that it must reach
+  // for the `aura` skill to act on a referenced task. Appended every turn
+  // (pi rebuilds the base system prompt each turn, so this never accumulates).
+  pi.on("before_agent_start", async (event, _ctx) => {
+    return { systemPrompt: event.systemPrompt + "\n" + TASK_REF_INSTRUCTION };
   });
 }
