@@ -932,34 +932,62 @@ async function createDefaultClient(): Promise<TaskAuraClient> {
 }
 
 /**
- * Build the session's reference cache: the persistent sqlite store at
- * `~/.pi/agent/aura-reference-cache.db` (WAL journal mode, one table keyed
- * by base URL + kind + id, shared by all pi sessions), so autocomplete is
- * instant in every session, not just warm ones. The base URL for the keying
- * comes from the same settings the AuraClient reads (`aura.baseUrl`), so
- * multi-instance setups never cross-contaminate.
+ * Build the session's reference cache plus its warmup decision: the
+ * persistent sqlite store at `~/.pi/agent/aura-reference-cache.db` (WAL
+ * journal mode, one table keyed by base URL + kind + id, shared by all pi
+ * sessions), so autocomplete is instant in every session, not just warm
+ * ones. The base URL for the keying comes from the same settings the
+ * AuraClient reads (`aura.baseUrl`), so multi-instance setups never
+ * cross-contaminate.
  *
- * Dynamic imports on both seams (the settings reader and the store module):
- * the unit-test entry point stays runnable with
+ * The returned `shouldSkipWarmup(kind)` implements the TTL gating of the
+ * session-start warmup: while the persisted cache is within TTL
+ * (`aura.references.cacheTtlMs`, global settings with a project override,
+ * default 6 hours) and non-empty, the warmup fetch is skipped entirely
+ * (instant session start, far fewer Aura calls); expired or empty caches
+ * fetch. Reads always serve entries instantly regardless of expiry
+ * (stale-while-revalidate), and the per-query background refresh stays
+ * always-on and untouched.
+ *
+ * Dynamic imports on both seams (the settings reader and the store
+ * module): the unit-test entry point stays runnable with
  * `node --experimental-strip-types`, and a session whose Node build cannot
  * load the sqlite module degrades to the in-memory cache instead of failing
  * the extension load. Any failure here falls back to the session-scoped
- * in-memory cache (which is also the unit-test fake); nothing ever throws
- * into the session.
+ * in-memory cache (which is also the unit-test fake) with an always-fetch
+ * warmup, exactly the pre-gate behavior; nothing ever throws into the
+ * session.
  */
-async function createSessionCache(): Promise<ReferenceCache> {
+async function createSessionCache(): Promise<{
+  cache: ReferenceCache;
+  shouldSkipWarmup: (kind: string) => boolean;
+}> {
   try {
     const [{ loadAuraClientSettings }, cacheModule] = await Promise.all([
       import("@pi-aura/shared/settings"),
       import("./aura-reference-cache.ts"),
     ]);
     const baseUrl = loadAuraClientSettings().baseUrl ?? "";
-    return cacheModule.createSqliteReferenceCache({
+    const cache = cacheModule.createSqliteReferenceCache({
       dbPath: cacheModule.defaultReferenceCacheDbPath(),
       baseUrl,
     });
+    const ttlMs = cacheModule.loadReferenceCacheTtlMs();
+    return {
+      cache,
+      shouldSkipWarmup: (kind: string) =>
+        cacheModule.shouldSkipReferenceWarmup({
+          items: cache.read(kind),
+          fetchedAt: cache.fetchedAt(kind),
+          ttlMs,
+          now: Date.now(),
+        }),
+    };
   } catch {
-    return createInMemoryReferenceCache();
+    return {
+      cache: createInMemoryReferenceCache(),
+      shouldSkipWarmup: () => false,
+    };
   }
 }
 
@@ -1025,15 +1053,20 @@ export default function (pi: ExtensionAPI): void {
     // unit-test fake and the silent fallback when the store cannot be
     // built. A /reload re-emits session_start and swaps in a fresh session
     // cache backed by the same file.
-    const cache = await createSessionCache();
+    const { cache, shouldSkipWarmup } = await createSessionCache();
     sessionCache = cache;
     warnLegacySyntax = createDeprecationWarningDecision();
 
-    // Fire-and-forget warmup for every registered kind that has one. Missing
-    // credentials and fetch failures are swallowed inside the adapter: the
-    // cache stays empty and the provider keeps deferring (no crash, no
-    // retry) for the rest of the session.
+    // Fire-and-forget warmup for every registered kind that has one, now
+    // gated by the TTL: while the persisted cache is within TTL and
+    // non-empty, the warmup fetch is skipped entirely (instant session
+    // start); expired or empty caches fetch. Missing credentials and fetch
+    // failures are swallowed inside the adapter: the cache stays empty and
+    // the provider keeps deferring (no crash, no retry) for the rest of the
+    // session. The per-query background refresh (slice 2 of
+    // reference-engine-core) is always-on and untouched by this gate.
     for (const adapter of registry.kinds.values()) {
+      if (shouldSkipWarmup(adapter.kind)) continue;
       void Promise.resolve()
         .then(() => adapter.warmup?.(cache))
         .catch(() => {
