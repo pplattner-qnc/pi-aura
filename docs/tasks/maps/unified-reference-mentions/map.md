@@ -29,7 +29,7 @@ tasks:
   blocked_by:
   - reference-engine-core
   - reference-cache-sqlite
-  done: false
+  done: true
 - slug: reference-wiki-kind
   blocked_by:
   - reference-engine-core

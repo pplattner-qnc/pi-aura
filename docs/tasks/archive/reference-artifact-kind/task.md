@@ -4,9 +4,13 @@ type: feature
 slug: reference-artifact-kind
 title: "#artifact: references end-to-end"
 map: unified-reference-mentions
-status: ready
-blocked_by: [reference-engine-core, reference-cache-sqlite]
-slices: [1-artifact-autocomplete, 2-artifact-expansion-instruction]
+status: done
+blocked_by:
+- reference-engine-core
+- reference-cache-sqlite
+slices:
+- 1-artifact-autocomplete
+- 2-artifact-expansion-instruction
 ---
 
 ## What to build
