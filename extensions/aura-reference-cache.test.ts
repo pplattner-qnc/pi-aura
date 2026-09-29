@@ -108,4 +108,80 @@ function clockedOptions(
   });
 }
 
+// ---------------------------------------------------------------------------
+// sqlite store: reopen persistence (the two-session model)
+// ---------------------------------------------------------------------------
+
+{
+  withTempDb((dbPath) => {
+    const [now] = testClock(1700);
+    const first = createSqliteReferenceCache(clockedOptions(dbPath, now));
+    first.write("task", [
+      { kind: "task", id: "t1", key: "AURA-1", title: "Fix the login bug", status: "OPEN" },
+    ]);
+
+    // A fresh store instance on the same file (the next pi session) sees
+    // the persisted rows and stamps instantly, before any fetch lands.
+    const second = createSqliteReferenceCache(clockedOptions(dbPath, now));
+    assert.deepEqual(second.read("task"), [
+      { kind: "task", id: "t1", key: "AURA-1", title: "Fix the login bug", status: "OPEN", fetchedAt: 1700 },
+    ]);
+    assert.equal(second.fetchedAt("task"), 1700);
+
+    // And writes from the second session land for the first (write order
+    // by rowid: the upserted row keeps its original position).
+    second.write("task", [
+      { kind: "task", id: "t9", key: "AURA-9", title: "Added later", status: "OPEN" },
+    ]);
+    assert.deepEqual(
+      first.read("task").map((entry) => entry.key),
+      ["AURA-1", "AURA-9"],
+    );
+
+    console.log("sqlite store: reopen persistence: ok");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// sqlite store: base-URL keying (multi-instance isolation)
+// ---------------------------------------------------------------------------
+
+{
+  withTempDb((dbPath) => {
+    const [now] = testClock(1000);
+    const prod = createSqliteReferenceCache({ dbPath, baseUrl: "https://aura.example/api", now });
+    const staging = createSqliteReferenceCache({ dbPath, baseUrl: "https://staging.example/api", now });
+
+    prod.write("task", [
+      { kind: "task", id: "t1", key: "AURA-1", title: "Prod task", status: "OPEN" },
+    ]);
+    staging.write("task", [
+      { kind: "task", id: "t1", key: "AURA-1", title: "Staging task", status: "OPEN" },
+      { kind: "task", id: "t2", key: "AURA-2", title: "Staging only", status: "OPEN" },
+    ]);
+
+    // Each base URL sees only its own items, even for the same ids.
+    assert.deepEqual(
+      prod.read("task").map((entry) => entry.title),
+      ["Prod task"],
+    );
+    assert.deepEqual(
+      staging.read("task").map((entry) => entry.title),
+      ["Staging task", "Staging only"],
+    );
+    assert.equal(prod.fetchedAt("task"), 1000);
+
+    // The table really holds both instances' rows: same (kind, id) key,
+    // different base_url, two rows.
+    const probe = new DatabaseSync(dbPath);
+    assert.equal(
+      (probe.prepare("SELECT COUNT(*) AS n FROM reference_items").get() as { n: number }).n,
+      3,
+    );
+    probe.close();
+
+    console.log("sqlite store: base-URL keying: ok");
+  });
+}
+
 console.log("all aura-reference-cache tests passed");
