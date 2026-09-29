@@ -79,9 +79,12 @@ In-chat resource references are unified and kind-agnostic:
 - Branching (user mandate): this checkout on `develop` is the live
   package other pi agents consume, so no half-finished implementation may
   land on `develop` (or `main`). All ticket work happens in git worktrees:
-  each ticket is implemented on its own branch (`slice/<ticket-slug>`)
+  each ticket is implemented on its own branch (`task/<ticket-slug>`)
   cut from the integration branch `task/unified-reference-mentions`, which
-  is itself cut from `develop`. A finished ticket merges only into the
+  is itself cut from `develop`. Within a ticket, the workflow package's
+  convention applies: per-slice branches (`slice/<slice-slug>`) are cut
+  from the ticket branch and merged back into it by the land worker. A
+  finished ticket merges only into the
   integration branch (never into `develop`/`main`); `develop` receives a
   single merge of the integration branch once the whole map is
   finalizable. finalize-task's merge-to-main step is overridden
