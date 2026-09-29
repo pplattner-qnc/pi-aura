@@ -1072,6 +1072,50 @@ function expansionRegistry() {
 
 console.log("expandReferenceMentions: single mention + fast path: ok");
 
+{
+  const { lookup } = lookupOver(taskItems());
+  const registry = expansionRegistry();
+  const expansion = '<task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>';
+
+  // Mixed known and unknown mentions: the known one expands, the unknown one
+  // stays exactly as typed (the agent resolves it via the `aura` skill).
+  assert.equal(
+    await expandReferenceMentions("compare #task:AURA-42 with #task:AURA-999", registry, lookup),
+    `compare ${expansion} with #task:AURA-999`,
+  );
+
+  // An all-unknown prompt is left exactly as typed.
+  const unknown = "what is #task:AURA-999 about?";
+  assert.equal(await expandReferenceMentions(unknown, registry, lookup), unknown);
+
+  // An empty partial (`#task:` with nothing typed yet) resolves nothing and
+  // stays as typed.
+  const empty = "open #task: for me";
+  assert.equal(await expandReferenceMentions(empty, registry, lookup), empty);
+
+  // A targeted fetch that throws leaves the prompt unchanged (never throws
+  // into the session): the lookup rejects, the mention stays as typed.
+  const rejecting = async () => {
+    throw new Error("connection reset");
+  };
+  assert.equal(
+    await expandReferenceMentions("fix #task:AURA-42", registry, rejecting),
+    "fix #task:AURA-42",
+  );
+
+  // No credentials: the input handler passes null as the lookup (no targeted
+  // fetch may be attempted at all). Every mention stays as typed and no
+  // lookup is consulted.
+  const gated = lookupOver(taskItems());
+  assert.equal(
+    await expandReferenceMentions("fix #task:AURA-42", registry, null),
+    "fix #task:AURA-42",
+  );
+  assert.equal(gated.calls.length, 0, "a null lookup is never called");
+}
+
+console.log("expandReferenceMentions: unresolvable + failure modes: ok");
+
 // ---------------------------------------------------------------------------
 // createReferenceAutocompleteProvider (the deferral wiring over the registry)
 // ---------------------------------------------------------------------------

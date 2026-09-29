@@ -400,7 +400,10 @@ export async function refreshReferenceKind(
 
 /** Resolve one typed reference mention to an item, or null to leave it as
  *  typed. Production wiring passes the kind adapter's `resolveFullToken`
- *  (cache first, then the targeted server lookup). */
+ *  (cache first, then the targeted server lookup), or null when resolution is
+ *  unavailable for the whole session: without Aura credentials no targeted
+ *  fetch may be attempted at all, so the input handler passes null and every
+ *  mention stays as typed without any lookup call. */
 export type ReferenceResolver = (
   kind: string,
   token: string,
@@ -471,22 +474,38 @@ function collectMentionOccurrences(
 export async function expandReferenceMentions(
   prompt: string,
   registry: ReferenceRegistry,
-  lookup: ReferenceResolver,
+  lookup: ReferenceResolver | null,
 ): Promise<string> {
   const occurrences = collectMentionOccurrences(prompt, registry);
-  if (occurrences.length === 0) return prompt;
+  if (occurrences.length === 0 || lookup === null) return prompt;
   let out = "";
   let pos = 0;
   for (const o of occurrences) {
     if (o.start < pos) continue; // overlapping match: the earlier one wins
     out += prompt.slice(pos, o.start);
-    const adapter = registry.kinds.get(o.kind);
-    const item = adapter ? await lookup(o.kind, o.token) : null;
-    out += adapter && item !== null ? adapter.formatExpansion(item) : prompt.slice(o.start, o.end);
+    out += (await resolveMention(o, registry, lookup)) ?? prompt.slice(o.start, o.end);
     pos = o.end;
   }
   out += prompt.slice(pos);
   return out;
+}
+
+/** Resolve one mention to its expansion text, or null to leave it as typed:
+ *  an unregistered kind, an unresolvable token, or a lookup that rejects (a
+ *  failed targeted fetch never throws into the session). */
+async function resolveMention(
+  o: MentionOccurrence,
+  registry: ReferenceRegistry,
+  lookup: ReferenceResolver,
+): Promise<string | null> {
+  const adapter = registry.kinds.get(o.kind);
+  if (!adapter) return null;
+  try {
+    const item = await lookup(o.kind, o.token);
+    return item === null ? null : adapter.formatExpansion(item);
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
