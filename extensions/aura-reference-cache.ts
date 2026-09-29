@@ -37,7 +37,7 @@
  * `aura-references.ts` dynamic-imports this module to keep that seam.
  */
 
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -259,6 +259,71 @@ export function shouldSkipReferenceWarmup(input: ReferenceWarmupGateInput): bool
 }
 
 // ---------------------------------------------------------------------------
+// Opening the shared database (with a bounded concurrent-first-open retry)
+// ---------------------------------------------------------------------------
+
+/** One successfully opened and configured database: the connection plus
+ *  its prepared statements. */
+interface OpenedStore {
+  db: DatabaseSync;
+  upsert: StatementSync;
+  readStmt: StatementSync;
+  fetchedAtStmt: StatementSync;
+}
+
+/** Open and configure the shared database: `busy_timeout` FIRST (it is
+ *  connection-local and must govern everything that follows, including the
+ *  schema creation), then WAL journal mode, then the schema, then the
+ *  prepared statements. Returns null on any failure, with the connection
+ *  closed again so a retry starts clean. */
+function tryOpenStore(dbPath: string, busyTimeoutMs: number): OpenedStore | null {
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(dbPath);
+    db.exec(`PRAGMA busy_timeout = ${busyTimeoutMs};`);
+    db.exec("PRAGMA journal_mode = WAL;");
+    db.exec(CREATE_TABLE_SQL);
+    const opened: OpenedStore = {
+      db,
+      upsert: db.prepare(UPSERT_SQL),
+      readStmt: db.prepare(READ_SQL),
+      fetchedAtStmt: db.prepare(FETCHED_AT_SQL),
+    };
+    return opened;
+  } catch {
+    try {
+      db?.close();
+    } catch {
+      // Already closed, or closing is what failed; either way the attempt
+      // is over.
+    }
+    return null;
+  }
+}
+
+/** How many times `createSqliteReferenceCache` attempts `tryOpenStore`
+ *  before the silent in-memory fallback. One attempt is the healthy path;
+ *  the retries exist for the concurrent FIRST open: SQLite does not invoke
+ *  the busy handler for a journal-mode switch, so sessions racing the very
+ *  first creation of the shared file see `database is locked` from the WAL
+ *  pragma until the winner's initialization (WAL + schema) is visible. The
+ *  loser side of that race is transient by nature, so a brief bounded
+ *  retry resolves it; only a database that still cannot be opened after
+ *  the retries falls back to the in-memory cache for the session. */
+const OPEN_ATTEMPTS = 5;
+
+/** Backoff between open attempts, in milliseconds (linear: 25, 50, 75, ...).
+ *  Synchronous on purpose: the store factory is a synchronous seam, and
+ *  the wait only ever happens in the rare concurrent-first-open race. */
+const OPEN_RETRY_BACKOFF_MS = 25;
+
+/** Sleep synchronously (the standard `Atomics.wait` technique; Node allows
+ *  it on the main thread). */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// ---------------------------------------------------------------------------
 // The sqlite store
 // ---------------------------------------------------------------------------
 
@@ -281,24 +346,20 @@ export function createSqliteReferenceCache(options: SqliteReferenceCacheOptions)
   const now = options.now ?? Date.now;
   const busyTimeoutMs = Math.max(0, Math.floor(options.busyTimeoutMs ?? 500));
 
-  let db: DatabaseSync;
-  let upsert: ReturnType<DatabaseSync["prepare"]>;
-  let readStmt: ReturnType<DatabaseSync["prepare"]>;
-  let fetchedAtStmt: ReturnType<DatabaseSync["prepare"]>;
-  try {
-    db = new DatabaseSync(dbPath);
-    db.exec("PRAGMA journal_mode = WAL;");
-    db.exec(`PRAGMA busy_timeout = ${busyTimeoutMs};`);
-    db.exec(CREATE_TABLE_SQL);
-    upsert = db.prepare(UPSERT_SQL);
-    readStmt = db.prepare(READ_SQL);
-    fetchedAtStmt = db.prepare(FETCHED_AT_SQL);
-  } catch {
-    // Unreadable path, corrupt file, locked database, or a Node build
-    // without sqlite support: fall back to the session-scoped in-memory
-    // cache. Never throw into the session.
+  let opened: OpenedStore | null = null;
+  for (let attempt = 0; opened === null && attempt < OPEN_ATTEMPTS; attempt++) {
+    opened = tryOpenStore(dbPath, busyTimeoutMs);
+    if (opened === null && attempt < OPEN_ATTEMPTS - 1) {
+      sleepSync(OPEN_RETRY_BACKOFF_MS * (attempt + 1));
+    }
+  }
+  if (opened === null) {
+    // Unreadable path, corrupt file, or a database still locked after the
+    // bounded retries: fall back to the session-scoped in-memory cache.
+    // Never throw into the session.
     return createInMemoryReferenceCache(now);
   }
+  const { db, upsert, readStmt, fetchedAtStmt } = opened;
 
   const rowToEntry = (kind: string, row: ReferenceItemRow): CacheEntry => ({
     kind,

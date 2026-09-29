@@ -699,4 +699,108 @@ function clockedOptions(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Concurrency: parallel cross-process writers (true cross-session races)
+// ---------------------------------------------------------------------------
+
+/** The spawned-writer driver source: each child opens the real store on
+ *  the shared file and writes through its API. `distinct <worker> <n>`
+ *  writes n items only that worker owns; `samekey <worker> <n>` races one
+ *  shared key n times with worker-tagged titles. Written to a temp dir at
+ *  run time; it imports the store module by absolute path so the children
+ *  exercise exactly the production code path. */
+const DRIVER_SOURCE = [
+  "import { pathToFileURL } from 'node:url';",
+  "const [dbPath, modulePath, baseUrl, mode, workerId, count] = process.argv.slice(2);",
+  "const { createSqliteReferenceCache } = await import(pathToFileURL(modulePath).href);",
+  "const store = createSqliteReferenceCache({ dbPath, baseUrl });",
+  "const n = Number(count);",
+  "for (let i = 0; i < n; i++) {",
+  "  if (mode === 'distinct') {",
+  "    store.write('task', [{ kind: 'task', id: workerId + '-' + i, key: 'AURA-' + workerId + i, title: 'task ' + workerId + '/' + i, status: 'OPEN' }]);",
+  "  } else {",
+  "    store.write('task', [{ kind: 'task', id: 'raced', key: 'AURA-1', title: 'w' + workerId + '-' + i, status: 'OPEN' }]);",
+  "  }",
+  "}",
+].join("\n");
+
+{
+  const dir = mkdtempSync(join(tmpdir(), "aura-reference-cache-race-"));
+  try {
+    const dbPath = join(dir, "cache.db");
+    const modulePath = fileURLToPath(new URL("./aura-reference-cache.ts", import.meta.url));
+    const driverPath = join(dir, "driver.ts");
+    writeFileSync(driverPath, DRIVER_SOURCE, "utf8");
+    const baseUrl = "https://aura.example/api";
+
+    /** Spawn one writer child; resolves its exit code (stderr relayed on
+     *  failure for diagnostics). */
+    const runDriver = (mode: string, workerId: string, count: number): Promise<number> =>
+      new Promise((resolve) => {
+        const child = spawn(
+          process.execPath,
+          ["--experimental-strip-types", driverPath, dbPath, modulePath, baseUrl, mode, workerId, String(count)],
+          { stdio: ["ignore", "ignore", "pipe"] },
+        );
+        let stderr = "";
+        child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
+        child.on("error", (error) => {
+          console.error("writer spawn failed:", error);
+          resolve(-1);
+        });
+        child.on("exit", (code) => {
+          if (code !== 0) console.error("writer stderr:", stderr);
+          resolve(code ?? -1);
+        });
+      });
+
+    // Four sessions racing per-keystroke-style writes into the same WAL
+    // file: every item lands, no SQLITE_BUSY error escapes (every child
+    // exits 0), and the database stays intact.
+    const codes = await Promise.all([
+      runDriver("distinct", "w0", 50),
+      runDriver("distinct", "w1", 50),
+      runDriver("distinct", "w2", 50),
+      runDriver("distinct", "w3", 50),
+    ]);
+    assert.deepEqual(codes, [0, 0, 0, 0], "no writer crashed (no error escaped the store)");
+
+    // All 200 items landed and are queryable through a fresh open (the
+    // reopen-after-load check; the children's connections closed at exit).
+    const store = createSqliteReferenceCache({ dbPath, baseUrl });
+    assert.equal(store.read("task").length, 200, "every parallel writer's items landed");
+    const probe = new DatabaseSync(dbPath);
+    assert.equal(
+      (probe.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check,
+      "ok",
+      "no corruption under concurrent load",
+    );
+    assert.equal(
+      (probe.prepare("PRAGMA journal_mode").get() as { journal_mode: string }).journal_mode,
+      "wal",
+    );
+    probe.close();
+
+    // Two sessions racing the SAME key repeatedly: one row survives, its
+    // value is one of the written values (last-writer-wins per key).
+    const raceCodes = await Promise.all([
+      runDriver("samekey", "a", 100),
+      runDriver("samekey", "b", 100),
+    ]);
+    assert.deepEqual(raceCodes, [0, 0], "the same-key race also escapes no error");
+    const probe2 = new DatabaseSync(dbPath);
+    const raced = probe2
+      .prepare("SELECT title FROM reference_items WHERE id = 'raced'")
+      .all() as Array<{ title: string }>;
+    probe2.close();
+    assert.equal(raced.length, 1, "no duplicate rows for the raced key");
+    assert.match(raced[0]?.title ?? "", /^w[ab]-\d+$/, "the survivor is one of the written values");
+    assert.equal(store.read("task").length, 201, "the raced key plus the 200 distinct items");
+
+    console.log("concurrency: parallel cross-process writers land intact, last-writer-wins: ok");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 console.log("all aura-reference-cache tests passed");
