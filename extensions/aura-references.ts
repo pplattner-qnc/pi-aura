@@ -39,9 +39,29 @@
  *    Transient failures are swallowed and without Aura credentials the
  *    refresh gate is off: no refresh is fired at all.
  *
+ * Slice 3 adds inline expansion, the per-turn instruction, and the alias
+ * registry API:
+ *
+ * 6. On submit (`input`), every typed `#kind:` mention (and every registered
+ *    legacy-alias mention) resolves cache-first through its kind adapter
+ *    (`resolveFullToken`, then the targeted `getTaskByHumanKey` fallback)
+ *    and expands in place to the uniform tag. Unresolvable references stay
+ *    exactly as typed so the agent can resolve them via the `aura` skill.
+ *    Without Aura credentials no targeted fetch is attempted at all.
+ * 7. The system prompt gains a slim per-turn instruction block
+ *    (`TASK_REF_INSTRUCTION`) documenting the `<task-ref>` shape and
+ *    pointing at the `aura` skill, appended via `before_agent_start` (pi
+ *    rebuilds the base prompt each turn, so the append never accumulates).
+ * 8. The alias registry API exists: `registerAlias` maps a legacy token
+ *    pattern to a kind adapter and `createDeprecationWarningDecision`
+ *    arms the once-per-session deprecation warning (surfaced via
+ *    `ctx.ui.notify`, user-only, never in the prompt). No alias is
+ *    registered yet: the table stays empty until the task-alias and rule
+ *    tickets register `@AURA-` and `@rule:` through it.
+ *
  * The legacy `@AURA-` behavior is untouched: `aura-tasks.ts` still owns it in
- * parallel on its own trigger character. The alias table below is dormant
- * until the alias tickets register legacy syntaxes through it.
+ * parallel on its own trigger character (the interim double instruction
+ * block is accepted until the task-alias ticket).
  *
  * Credentials: the task adapter talks to Aura through the shared AuraClient
  * (`createDefaultAuraClient`, which reads `aura.baseUrl` from settings plus
@@ -198,7 +218,11 @@ export function createInMemoryReferenceCache(now: () => number = Date.now): Refe
  *  (`@AURA-<n>`, `@rule:<name>`) arrives with the alias tickets; the table is
  *  empty in production wiring until then. The pattern is the full
  *  boundary-anchored token pattern (same shape as the engine's own token
- *  pattern) whose capture group 1 is the partial the kind adapter searches. */
+ *  pattern) whose capture group 1 is the token text handed to the kind
+ *  adapter: the partial the adapter searches while completing, and the full
+ *  token it resolves on submit. Alias patterns therefore capture the full
+ *  key minus the trigger char (e.g. `@(AURA-[^\\s]*)` for `@AURA-42`), so
+ *  one group serves both uses. */
 export interface LegacyAlias {
   pattern: RegExp;
   /** The kind adapter the alias maps to. */
@@ -234,13 +258,20 @@ export interface KindAdapter {
   warmup?(cache: ReferenceCache, options?: { signal?: AbortSignal }): Promise<void>;
 }
 
-/** The registry: kind prefixes, adapters, and the dormant alias table are
+/** The registry: kind prefixes, adapters, and the legacy alias table are
  *  data that extraction, filtering, and the provider dispatch through. */
 export interface ReferenceRegistry {
   /** kind prefix -> adapter. */
   readonly kinds: ReadonlyMap<string, KindAdapter>;
   /** Legacy aliases, dormant (empty) until the alias tickets register them. */
   readonly aliases: readonly LegacyAlias[];
+  /** Register a legacy token pattern mapped to a kind adapter (the arch-spec
+   *  alias-registration contract the task-alias and rule tickets call). Once
+   *  registered, the alias is recognized at the cursor and its mentions
+   *  expand through the kind adapter, and the factory wiring arms the
+   *  once-per-session deprecation warning (via `ctx.ui.notify`, never in the
+   *  prompt). No alias is registered in production wiring in this ticket. */
+  registerAlias(alias: LegacyAlias): void;
   /** Compiled token pattern over all registered kind prefixes: `#` at a token
    *  boundary, kind (case-insensitive), colon, partial (no whitespace), and
    *  the cursor at the end of the token. Group 1 = kind, group 2 = partial. */
@@ -251,13 +282,16 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Build a registry from adapters (+ optional legacy aliases). */
+/** Build a registry from adapters (+ optional legacy aliases). The alias
+ *  table stays mutable through `registerAlias` so legacy syntaxes can be
+ *  registered after construction (the alias tickets' entry point). */
 export function createReferenceRegistry(
   adapters: KindAdapter[],
   aliases: LegacyAlias[] = [],
 ): ReferenceRegistry {
   const kinds = new Map<string, KindAdapter>();
   for (const adapter of adapters) kinds.set(adapter.kind, adapter);
+  const aliasTable: LegacyAlias[] = [...aliases];
   const prefixes = Array.from(kinds.keys()).map(escapeRegExp).join("|");
   // `#` must sit at a token boundary (start of line or after whitespace) so
   // headings and mid-word `#`s never match; the partial runs to the cursor
@@ -265,7 +299,35 @@ export function createReferenceRegistry(
   const tokenPattern = prefixes === ""
     ? new RegExp("(?!)") // no adapters registered: the pattern never matches
     : new RegExp(`(?:^|[ \\t])#(${prefixes}):([^\\s]*)$`, "i");
-  return { kinds, aliases, tokenPattern };
+  return {
+    kinds,
+    aliases: aliasTable,
+    registerAlias(alias) {
+      aliasTable.push(alias);
+    },
+    tokenPattern,
+  };
+}
+
+/**
+ * The once-per-session deprecation-warning decision (the arch-spec alias
+ * contract's second half): a latched decision the factory consults when a
+ * submitted prompt contains a legacy-alias mention. The first call says
+ * "warn now"; every later call in the same session says no, so the user sees
+ * the deprecation warning exactly once per session. The factory builds a
+ * fresh decision per `session_start`, which is what resets the flag per
+ * session (a `/reload` re-emits `session_start` and re-arms it).
+ *
+ * The warning itself is user-only: the wiring surfaces it via `ctx.ui.notify`
+ * and nothing is ever added to the prompt sent to the model.
+ */
+export function createDeprecationWarningDecision(): () => boolean {
+  let warned = false;
+  return () => {
+    if (warned) return false;
+    warned = true;
+    return true;
+  };
 }
 
 /** A token extracted at the cursor: the registered kind, the partial after
@@ -298,6 +360,8 @@ export function extractReferenceToken(
   // Legacy alias recognition hook. No alias is registered in this slice, so
   // this loop is dormant; the alias tickets register `@AURA-`/`@rule:` here
   // (plus the once-per-session deprecation warning) without engine surgery.
+  // Group 1 is the token text handed to the kind adapter (see LegacyAlias):
+  // the autocomplete partial here, the same full key on submit.
   for (const alias of registry.aliases) {
     const aliasMatch = textBeforeCursor.match(alias.pattern);
     if (aliasMatch) {
@@ -393,6 +457,170 @@ export async function refreshReferenceKind(
     // stays, and nothing throws into the session.
   }
 }
+
+// ---------------------------------------------------------------------------
+// Inline expansion (pure): the prompt transform
+// ---------------------------------------------------------------------------
+
+/** Resolve one typed reference mention to an item, or null to leave it as
+ *  typed. Production wiring passes the kind adapter's `resolveFullToken`
+ *  (cache first, then the targeted server lookup), or null when resolution is
+ *  unavailable for the whole session: without Aura credentials no targeted
+ *  fetch may be attempted at all, so the input handler passes null and every
+ *  mention stays as typed without any lookup call. */
+export type ReferenceResolver = (
+  kind: string,
+  token: string,
+) => Promise<ReferenceItem | null>;
+
+/** One mention occurrence found in a submitted prompt: the registry kind it
+ *  routes to, the typed token, and its [start, end) span in the prompt (the
+ *  token only: the boundary whitespace before it is not part of the span). */
+interface MentionOccurrence {
+  kind: string;
+  token: string;
+  start: number;
+  end: number;
+}
+
+/** Recompile an end-anchored token pattern (the registry's `tokenPattern` or
+ *  a registered alias pattern: both match the token ending at the cursor) for
+ *  whole-prompt scanning: the same source without its trailing `$` anchor,
+ *  plus the global and multiline flags, so a mention anywhere in a multiline
+ *  submitted prompt matches. */
+function globalScanPattern(pattern: RegExp): RegExp {
+  const anchored = pattern.source.endsWith("$") && !pattern.source.endsWith("\\$");
+  const source = anchored ? pattern.source.slice(0, -1) : pattern.source;
+  const flags = Array.from(new Set((pattern.flags + "gm").split(""))).join("");
+  return new RegExp(source, flags);
+}
+
+/** Every mention occurrence in the prompt, in prompt order: `#kind:` tokens
+ *  via the registry's compiled kind pattern, then legacy alias tokens via the
+ *  registered alias patterns (whose capture group 1 is the token the kind
+ *  adapter resolves; see LegacyAlias for the group contract). The boundary
+ *  before a token (line start or one space/tab) is matched but not part of
+ *  the token span; alias token shapes never start with whitespace (same
+ *  contract as the engine's own tokens). */
+function collectMentionOccurrences(
+  prompt: string,
+  registry: ReferenceRegistry,
+): MentionOccurrence[] {
+  const occurrences: MentionOccurrence[] = [];
+  const scan = (pattern: RegExp, kindOf: (m: RegExpExecArray) => string, tokenOf: (m: RegExpExecArray) => string) => {
+    for (const m of prompt.matchAll(globalScanPattern(pattern))) {
+      const full = m[0];
+      // The leading boundary alternative (`^`, which consumes nothing, or one
+      // space/tab) is matched but is not part of the token.
+      const boundaryLength = full.startsWith(" ") || full.startsWith("\t") ? 1 : 0;
+      const start = (m.index ?? 0) + boundaryLength;
+      occurrences.push({ kind: kindOf(m), token: tokenOf(m), start, end: start + full.length - boundaryLength });
+    }
+  };
+  scan(registry.tokenPattern, (m) => (m[1] ?? "").toLowerCase(), (m) => m[2] ?? "");
+  for (const alias of registry.aliases) {
+    scan(alias.pattern, () => alias.kind, (m) => m[1] ?? "");
+  }
+  return occurrences.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Expand every typed reference mention in a submitted prompt to its uniform
+ * XML tag: each `#kind:` token (and each registered legacy alias token) is
+ * resolved through the injected lookup and rendered by its kind adapter's
+ * `formatExpansion`. Each unique mention (kind + token, case-insensitive) is
+ * resolved exactly once and every occurrence of it expands. Unresolvable
+ * references (unknown key, unregistered kind, null lookup result) are left
+ * exactly as typed so the agent can resolve them via the `aura` skill. A
+ * prompt without any mention passes through unchanged (the same string,
+ * nothing resolved).
+ *
+ * Pure: the prompt, the registry, and the injected lookup are the only
+ * inputs; the Aura access lives entirely inside the lookup.
+ */
+export async function expandReferenceMentions(
+  prompt: string,
+  registry: ReferenceRegistry,
+  lookup: ReferenceResolver | null,
+): Promise<string> {
+  const occurrences = collectMentionOccurrences(prompt, registry);
+  if (occurrences.length === 0 || lookup === null) return prompt;
+
+  // One resolution per unique (kind, token); duplicate mentions share it.
+  const expansions = new Map<string, string | null>();
+  const seen = new Set<string>();
+  for (const o of occurrences) {
+    const dedupeKey = mentionKey(o);
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    expansions.set(dedupeKey, await resolveMention(o, registry, lookup));
+  }
+
+  let out = "";
+  let pos = 0;
+  for (const o of occurrences) {
+    if (o.start < pos) continue; // overlapping match: the earlier one wins
+    out += prompt.slice(pos, o.start);
+    out += expansions.get(mentionKey(o)) ?? prompt.slice(o.start, o.end);
+    pos = o.end;
+  }
+  out += prompt.slice(pos);
+  return out;
+}
+
+/** Case-insensitive identity of a mention within one prompt (the same token
+ *  typed twice, in any casing, is one resolution). */
+function mentionKey(o: MentionOccurrence): string {
+  return o.kind + "\u0000" + o.token.toLowerCase();
+}
+
+/** Resolve one mention to its expansion text, or null to leave it as typed:
+ *  an unregistered kind, an unresolvable token, or a lookup that rejects (a
+ *  failed targeted fetch never throws into the session). */
+async function resolveMention(
+  o: MentionOccurrence,
+  registry: ReferenceRegistry,
+  lookup: ReferenceResolver,
+): Promise<string | null> {
+  const adapter = registry.kinds.get(o.kind);
+  if (!adapter) return null;
+  try {
+    const item = await lookup(o.kind, o.token);
+    return item === null ? null : adapter.formatExpansion(item);
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Per-turn system-prompt instruction (the <task-ref> block)
+// ---------------------------------------------------------------------------
+
+/** Slim per-turn system-prompt block that teaches the model what the
+ *  `<task-ref>` tags mean and where to go to act on a referenced task.
+ *  Injected via `before_agent_start` (the same hook `aura-tasks.ts` and
+ *  `aura-skill-instruction.ts` use); pi rebuilds the base system prompt each
+ *  turn, so appending here re-applies cleanly without accumulating across
+ *  the session.
+ *
+ *  Kept deliberately short: the tag is self-describing (labelled attributes
+ *  + element text), so this only names the parts and points at the `aura`
+ *  skill for anything beyond reading the reference. `aura-tasks.ts` keeps
+ *  its own `<aura-task>` block until the task-alias ticket removes it; the
+ *  interim double instruction block is accepted. */
+export const TASK_REF_INSTRUCTION = `
+## Aura task references
+
+User messages may contain inline Aura task references rendered as tagged elements:
+
+  <task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>
+
+- \`key\` is the task's human-readable identifier (e.g. \`AURA-42\`).
+- \`status\` is its current Aura workflow status (e.g. \`OPEN\`, \`IN_REVIEW\`, \`DONE\`).
+- The element text is the task title.
+
+These references carry only the key, status, and title, never the task body. To read the full task, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further task details from the reference alone.
+`;
 
 // ---------------------------------------------------------------------------
 // Task kind adapter (the first kind)
@@ -697,11 +925,22 @@ async function createDefaultClient(): Promise<TaskAuraClient> {
 
 export default function (pi: ExtensionAPI): void {
   const taskAdapter = createTaskAdapter({ createClient: createDefaultClient });
+  // No legacy alias is registered in production wiring: the alias table is
+  // empty until the task-alias and rule tickets register `@AURA-` / `@rule:`
+  // through the registry's alias API.
   const registry = createReferenceRegistry([taskAdapter]);
   // The session cache lives from session_start on. It starts empty (the
   // provider defers on an empty cache) and is populated by the fire-and-forget
   // warmup. A /reload re-emits session_start and swaps in a fresh cache.
   let sessionCache: ReferenceCache | null = null;
+  // The once-per-session deprecation-warning decision, built fresh per
+  // session_start (a /reload re-arms it). Null before the first session_start:
+  // no warning is surfaced without a session.
+  let warnLegacySyntax: (() => boolean) | null = null;
+  // Latched once per session by the probe below (credentials appearing later
+  // do not re-arm until /reload): without Aura credentials no targeted
+  // expansion fetch may be attempted at all.
+  let clientAvailable = false;
 
   pi.on("session_start", async (_event, ctx) => {
     // The SWR refresh gate: off until one client build succeeds in this
@@ -709,11 +948,13 @@ export default function (pi: ExtensionAPI): void {
     // warmup relies on, probed once here: without credentials (no baseUrl or
     // no PAT in the keyring) no refresh is fired at all. Like the warmup,
     // this is one-shot: credentials appearing later in the session do not
-    // re-arm the gate until a /reload re-emits session_start.
+    // re-arm the gate until a /reload re-emits session_start. The same
+    // success latches `clientAvailable` for the expansion lookup.
     let refreshAllowed = false;
     void createDefaultClient()
       .then(() => {
         refreshAllowed = true;
+        clientAvailable = true;
       })
       .catch(() => {
         // No credentials: the gate stays off for the whole session; the
@@ -728,6 +969,7 @@ export default function (pi: ExtensionAPI): void {
 
     const cache = createInMemoryReferenceCache();
     sessionCache = cache;
+    warnLegacySyntax = createDeprecationWarningDecision();
 
     // Fire-and-forget warmup for every registered kind that has one. Missing
     // credentials and fetch failures are swallowed inside the adapter: the
@@ -741,5 +983,46 @@ export default function (pi: ExtensionAPI): void {
           // session-start handler from ever rejecting into the session.
         });
     }
+  });
+
+  // Inline expansion on submit: every typed `#kind:` mention resolves
+  // cache-first via its kind adapter (`resolveFullToken`, then the targeted
+  // getTaskByHumanKey fallback) and expands to the uniform tag. Unresolvable
+  // references stay exactly as typed. Without Aura credentials (or before
+  // the one-shot probe resolves) no targeted fetch may be attempted at all:
+  // null is passed as the lookup and the transform leaves every mention as
+  // typed without resolving anything.
+  pi.on("input", async (event, ctx) => {
+    const cache = sessionCache;
+    if (cache === null) return;
+    // Legacy alias deprecation warning: user-only (ctx.ui.notify), at most
+    // once per session, never added to the prompt. Dormant in production
+    // wiring: the alias table is empty until an alias ticket registers.
+    if (
+      warnLegacySyntax !== null &&
+      registry.aliases.some((alias) => globalScanPattern(alias.pattern).test(event.text)) &&
+      warnLegacySyntax()
+    ) {
+      ctx.ui.notify("Legacy reference syntax is deprecated: use the #<kind>:<key> tokens instead.", "warning");
+    }
+    const text = await expandReferenceMentions(
+      event.text,
+      registry,
+      clientAvailable
+        ? (kind, token) => {
+            const adapter = registry.kinds.get(kind);
+            return adapter ? adapter.resolveFullToken(token, cache) : Promise.resolve(null);
+          }
+        : null,
+    );
+    if (text === event.text) return; // unchanged: pass through
+    return { action: "transform", text };
+  });
+
+  // Teach the model what the `<task-ref>` tags mean and that it must reach
+  // for the `aura` skill to act on a referenced task. Appended every turn
+  // (pi rebuilds the base system prompt each turn, so this never accumulates).
+  pi.on("before_agent_start", async (event, _ctx) => {
+    return { systemPrompt: event.systemPrompt + "\n" + TASK_REF_INSTRUCTION };
   });
 }

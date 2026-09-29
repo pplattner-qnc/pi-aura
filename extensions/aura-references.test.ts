@@ -5,13 +5,17 @@
  *   node --experimental-strip-types extensions/aura-references.test.ts
  *
  * Covers the pure seams: `#kind:` token extraction + deferral, the registry
- * (kind prefixes, adapters, dormant alias table), the in-memory reference
- * cache, autocomplete filtering/ranking, the task adapter's warmup + local
- * search, and the provider wiring that defers to the built-in provider for
- * non-reference tokens. The extension factory (which reaches Aura through
- * the dynamic-import seam) is exercised by the pi runtime once credentials
- * are configured, mirroring the `aura-tasks` and `engineering-rules` test
- * files.
+ * (kind prefixes, adapters, the alias registration API), the in-memory
+ * reference cache, autocomplete filtering/ranking, the SWR refresh, the task
+ * adapter's warmup + local search + full-token resolution, the inline
+ * expansion transform (`#kind:` and legacy-alias mentions, tag shapes,
+ * escaping, failure modes), the per-turn instruction constant, and the
+ * once-per-session deprecation-warning decision. The provider wiring that
+ * defers to the built-in provider for non-reference tokens is tested at its
+ * pure wrapper seam. The extension factory (which reaches Aura through the
+ * dynamic-import seam and surfaces the deprecation warning via `ctx.ui.notify`)
+ * is exercised by the pi runtime once credentials are configured, mirroring
+ * the `aura-tasks` and `engineering-rules` test files.
  */
 
 import assert from "node:assert/strict";
@@ -20,9 +24,12 @@ import auraReferences, {
   createReferenceAutocompleteProvider,
   createReferenceRegistry,
   createTaskAdapter,
+  expandReferenceMentions,
   extractReferenceToken,
   filterReferenceItems,
   refreshReferenceKind,
+  createDeprecationWarningDecision,
+  TASK_REF_INSTRUCTION,
   MAX_SUGGESTIONS,
   type ReferenceItem,
 } from "./aura-references.ts";
@@ -997,6 +1004,238 @@ console.log("provider SWR end-to-end: renamed title visible one keystroke later:
 console.log("provider SWR end-to-end: out-of-window task findable by title: ok");
 
 // ---------------------------------------------------------------------------
+// expandReferenceMentions (the expansion seam: prompt in, expanded prompt out)
+// ---------------------------------------------------------------------------
+
+/** A lookup over fixed items standing in for the adapter's resolution
+ *  (cache-first + targeted fetch): resolves a task token case-insensitively
+ *  by key, null when unknown. Records every call so tests can assert how
+ *  often each mention was resolved. */
+function lookupOver(items: ReferenceItem[]): {
+  lookup: (kind: string, token: string) => Promise<ReferenceItem | null>;
+  calls: Array<{ kind: string; token: string }>;
+} {
+  const byKey = new Map(items.map((item) => [item.key.toLowerCase(), item]));
+  const calls: Array<{ kind: string; token: string }> = [];
+  return {
+    async lookup(kind, token) {
+      calls.push({ kind, token });
+      return byKey.get(token.toLowerCase()) ?? null;
+    },
+    calls,
+  };
+}
+
+/** The production-shaped registry (task kind only); the injected client
+ *  factory throws so a test can never reach Aura through it. */
+function expansionRegistry() {
+  return createReferenceRegistry([
+    createTaskAdapter({
+      createClient: async () => {
+        throw new Error("no credentials in this test");
+      },
+    }),
+  ]);
+}
+
+{
+  const { lookup, calls } = lookupOver(taskItems());
+  const registry = expansionRegistry();
+  const expansion = '<task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>';
+
+  // Single mention, middle of the prompt: the token is replaced by the kind
+  // adapter's expansion, everything around it is untouched.
+  assert.equal(
+    await expandReferenceMentions("work on #task:AURA-42 today", registry, lookup),
+    `work on ${expansion} today`,
+  );
+
+  // Mention at the start of the prompt.
+  assert.equal(
+    await expandReferenceMentions("#task:AURA-42 is ready", registry, lookup),
+    `${expansion} is ready`,
+  );
+
+  // Mention at the end of the prompt.
+  assert.equal(
+    await expandReferenceMentions("please fix #task:AURA-42", registry, lookup),
+    `please fix ${expansion}`,
+  );
+
+  // Mention at the start of a later line (a submitted prompt is multiline).
+  assert.equal(
+    await expandReferenceMentions("two things:\nfix #task:AURA-42", registry, lookup),
+    `two things:\nfix ${expansion}`,
+  );
+
+  // Fast path: a prompt without references passes through unchanged (the
+  // same string) and resolves nothing.
+  const fresh = lookupOver(taskItems());
+  const plain = "no references in here, just # headings and text";
+  assert.equal(await expandReferenceMentions(plain, registry, fresh.lookup), plain);
+  assert.equal(fresh.calls.length, 0, "the fast path resolved nothing");
+}
+
+console.log("expandReferenceMentions: single mention + fast path: ok");
+
+{
+  const { lookup } = lookupOver(taskItems());
+  const registry = expansionRegistry();
+  const expansion = '<task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>';
+
+  // Mixed known and unknown mentions: the known one expands, the unknown one
+  // stays exactly as typed (the agent resolves it via the `aura` skill).
+  assert.equal(
+    await expandReferenceMentions("compare #task:AURA-42 with #task:AURA-999", registry, lookup),
+    `compare ${expansion} with #task:AURA-999`,
+  );
+
+  // An all-unknown prompt is left exactly as typed.
+  const unknown = "what is #task:AURA-999 about?";
+  assert.equal(await expandReferenceMentions(unknown, registry, lookup), unknown);
+
+  // An empty partial (`#task:` with nothing typed yet) resolves nothing and
+  // stays as typed.
+  const empty = "open #task: for me";
+  assert.equal(await expandReferenceMentions(empty, registry, lookup), empty);
+
+  // A targeted fetch that throws leaves the prompt unchanged (never throws
+  // into the session): the lookup rejects, the mention stays as typed.
+  const rejecting = async () => {
+    throw new Error("connection reset");
+  };
+  assert.equal(
+    await expandReferenceMentions("fix #task:AURA-42", registry, rejecting),
+    "fix #task:AURA-42",
+  );
+
+  // No credentials: the input handler passes null as the lookup (no targeted
+  // fetch may be attempted at all). Every mention stays as typed and no
+  // lookup is consulted.
+  const gated = lookupOver(taskItems());
+  assert.equal(
+    await expandReferenceMentions("fix #task:AURA-42", registry, null),
+    "fix #task:AURA-42",
+  );
+  assert.equal(gated.calls.length, 0, "a null lookup is never called");
+}
+
+console.log("expandReferenceMentions: unresolvable + failure modes: ok");
+
+{
+  const registry = expansionRegistry();
+  const a42 = '<task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>';
+  const a1337 = '<task-ref key="AURA-1337" status="IN_REVIEW">Ship the dashboard</task-ref>';
+
+  // Multiple distinct mentions: each expands in place.
+  const distinct = lookupOver(taskItems());
+  assert.equal(
+    await expandReferenceMentions("#task:AURA-42 and #task:AURA-1337", registry, distinct.lookup),
+    `${a42} and ${a1337}`,
+  );
+  assert.equal(distinct.calls.length, 2, "one resolution per distinct mention");
+
+  // Duplicate mentions: the same token twice resolves ONCE and both
+  // occurrences expand.
+  const dup = lookupOver(taskItems());
+  assert.equal(
+    await expandReferenceMentions("#task:AURA-42 again #task:AURA-42", registry, dup.lookup),
+    `${a42} again ${a42}`,
+  );
+  assert.equal(dup.calls.length, 1, "a duplicate mention resolves once");
+
+  // Case-insensitive duplicates too: same key, different typed casing, still
+  // one resolution.
+  const mixedCase = lookupOver(taskItems());
+  assert.equal(
+    await expandReferenceMentions("#task:AURA-42 and #task:aura-42", registry, mixedCase.lookup),
+    `${a42} and ${a42}`,
+  );
+  assert.equal(mixedCase.calls.length, 1, "casing does not multiply resolutions");
+
+  // Case-insensitive token matching with canonical key output: a lowercase
+  // typed key resolves and the expansion carries the server-cased key.
+  const lower = lookupOver(taskItems());
+  assert.equal(await expandReferenceMentions("see #task:aura-42", registry, lower.lookup), `see ${a42}`);
+  assert.deepEqual(lower.calls, [{ kind: "task", token: "aura-42" }]);
+}
+
+console.log("expandReferenceMentions: multiple + duplicate + case-insensitive: ok");
+
+// ---------------------------------------------------------------------------
+// Expansion format (criterion 1): <task-ref key status>title</task-ref>,
+// title XML-escaped, attribute values escaped for "", &, <
+// ---------------------------------------------------------------------------
+
+{
+  const adapter = createTaskAdapter({
+    createClient: async () => {
+      throw new Error("no credentials in this test");
+    },
+  });
+
+  // The format: key and status as attributes, title as element text.
+  assert.equal(
+    adapter.formatExpansion({ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }),
+    '<task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>',
+  );
+
+  // A title containing &, < and " is XML-escaped in element text (& and <
+  // escaped; " and > need no escaping there) and never truncated.
+  assert.equal(
+    adapter.formatExpansion({ kind: "task", id: "u2", key: "AURA-7", title: 'Q&A <review> "draft"', status: "OPEN" }),
+    '<task-ref key="AURA-7" status="OPEN">Q&amp;A &lt;review> "draft"</task-ref>',
+  );
+
+  // Key and status attribute values are escaped for ", & and < (> needs no
+  // escaping in an attribute value either).
+  assert.equal(
+    adapter.formatExpansion({ kind: "task", id: "u3", key: 'A"K&<S>', title: "t", status: 'O"S&<T>' }),
+    '<task-ref key="A&quot;K&amp;&lt;S>" status="O&quot;S&amp;&lt;T>">t</task-ref>',
+  );
+
+  // A missing status expands with an empty attribute rather than undefined.
+  assert.equal(
+    adapter.formatExpansion({ kind: "task", id: "u4", key: "AURA-9", title: "t" }),
+    '<task-ref key="AURA-9" status="">t</task-ref>',
+  );
+}
+
+console.log("expansion format + escaping (task-ref tag): ok");
+
+{
+  const registry = expansionRegistry();
+  const { lookup } = lookupOver([
+    { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" },
+  ]);
+  const expansion = '<task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>';
+
+  // A mention adjacent to punctuation keeps the engine token grammar (the
+  // token is the run of non-whitespace after `#kind:`): a trailing comma is
+  // part of the typed token, so it does not resolve and stays exactly as
+  // typed; a `#` after `(` is not a token boundary, so the mention is not a
+  // token at all. (The grammar is kind-agnostic: stripping trailing
+  // punctuation here would mangle future kinds' keys, e.g. wiki paths.)
+  assert.equal(
+    await expandReferenceMentions("fix #task:AURA-42, please", registry, lookup),
+    "fix #task:AURA-42, please",
+  );
+  assert.equal(
+    await expandReferenceMentions("(#task:AURA-42)", registry, lookup),
+    "(#task:AURA-42)",
+  );
+
+  // An expansion that makes the prompt longer than before is used in full:
+  // no truncation (the exact expanded text, longer than the input).
+  const typed = "fix #task:AURA-42";
+  const expanded = await expandReferenceMentions(typed, registry, lookup);
+  assert.equal(expanded, `fix ${expansion}`);
+  assert.ok(expanded.length > typed.length, "the expansion grew the prompt and survived in full");
+}
+
+console.log("expandReferenceMentions: punctuation + no-truncation edges: ok");
+
+// ---------------------------------------------------------------------------
 // createReferenceAutocompleteProvider (the deferral wiring over the registry)
 // ---------------------------------------------------------------------------
 
@@ -1173,6 +1412,156 @@ console.log("provider failure modes (defer, no throw): ok");
 }
 
 console.log("parsePartial decline deferral: ok");
+
+// ---------------------------------------------------------------------------
+// Alias registry API (criterion: register a legacy token pattern to a kind
+// adapter) + no alias in production wiring
+// ---------------------------------------------------------------------------
+
+{
+  // The production wiring builds exactly this registry (one task adapter, no
+  // aliases): its alias table is empty, so legacy syntax is not recognized.
+  // No alias is registered in production in this slice; the alias tickets do.
+  const production = expansionRegistry();
+  assert.equal(production.aliases.length, 0, "the production registry registers no alias");
+  assert.equal(extractReferenceToken("see @AURA-42", production), null, "legacy syntax is unrecognized without a registered alias");
+
+  // The registration API: a legacy token pattern mapped to a kind adapter,
+  // registered on the built registry (what the alias tickets call). Capture
+  // group 1 is the token text the kind adapter sees in both uses: the
+  // autocomplete partial while typing and the full key on submit, so the
+  // pattern captures the full key minus the trigger char (`@AURA-42` ->
+  // "AURA-42").
+  const registry = expansionRegistry();
+  registry.registerAlias({ pattern: /(?:^|[ \t])@(AURA-[^\s]*)$/i, kind: "task" });
+  assert.equal(registry.aliases.length, 1, "registerAlias adds to the alias table");
+
+  // Recognition: the registered alias extracts like any reference token
+  // (kind + partial + raw) and dispatches to the alias's kind adapter.
+  assert.deepEqual(extractReferenceToken("see @AURA-42", registry), { kind: "task", partial: "AURA-42", raw: "@AURA-42" });
+
+  // Expansion routing: the alias mention resolves through the injected lookup
+  // and renders through the task adapter's formatExpansion (the uniform tag).
+  const { lookup } = lookupOver(taskItems());
+  const expansion = '<task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>';
+  assert.equal(await expandReferenceMentions("see @AURA-42", registry, lookup), `see ${expansion}`);
+
+  // Alias mentions and `#kind:` mentions mix freely in one prompt.
+  const a1337 = '<task-ref key="AURA-1337" status="IN_REVIEW">Ship the dashboard</task-ref>';
+  assert.equal(
+    await expandReferenceMentions("@AURA-42 and #task:AURA-1337", registry, lookup),
+    `${expansion} and ${a1337}`,
+  );
+
+  // An unresolvable alias mention stays exactly as typed.
+  assert.equal(await expandReferenceMentions("see @AURA-999", registry, lookup), "see @AURA-999");
+
+  // An alias registered to a kind with no adapter: recognized as a mention,
+  // but expansion has no adapter to route to, so it stays as typed.
+  registry.registerAlias({ pattern: /(?:^|[ \t])@wiki:([^\s]*)$/i, kind: "wiki" });
+  assert.deepEqual(extractReferenceToken("see @wiki:home", registry), { kind: "wiki", partial: "home", raw: "@wiki:home" });
+  assert.equal(await expandReferenceMentions("see @wiki:home", registry, lookup), "see @wiki:home");
+
+  // The warning is user-only: nothing deprecation-shaped is ever added to
+  // the prompt (the factory wiring surfaces it via ctx.ui.notify instead).
+  const expanded = await expandReferenceMentions("see @AURA-42", registry, lookup);
+  assert.ok(!/deprecat/i.test(expanded), "no deprecation warning lands in the prompt");
+}
+
+console.log("alias registry registration + expansion routing: ok");
+
+// ---------------------------------------------------------------------------
+// Once-per-session deprecation-warning decision (user-only: surfaces via
+// ctx.ui.notify in the factory wiring, never in the prompt)
+// ---------------------------------------------------------------------------
+
+{
+  // First call in a session: warn now. Every later call in the same session:
+  // no. Exactly one warning per session no matter how often the decision is
+  // consulted.
+  const warn = createDeprecationWarningDecision();
+  assert.equal(warn(), true, "the first alias mention in a session warns");
+  assert.equal(warn(), false);
+  assert.equal(warn(), false, "exactly once per session");
+
+  // The flag resets per session: a fresh session (a fresh decision, as the
+  // factory builds one per session_start) warns again, once.
+  const nextSession = createDeprecationWarningDecision();
+  assert.equal(nextSession(), true, "a new session re-arms the warning");
+  assert.equal(nextSession(), false);
+}
+
+console.log("once-per-session deprecation-warning decision: ok");
+
+// ---------------------------------------------------------------------------
+// resolveFullToken (the input handler's resolution flow at the adapter
+// interface): cache-first, then the targeted getTaskByHumanKey fallback;
+// unresolvable is null (the mention stays as typed upstream)
+// ---------------------------------------------------------------------------
+
+{
+  // A counting client factory: a cache hit must build no client at all (no
+  // targeted fetch); only the fallback reaches Aura.
+  let clientBuilds = 0;
+  const adapter = createTaskAdapter({
+    createClient: async () => {
+      clientBuilds += 1;
+      return {
+        listTasks: async () => ({ items: [], pagination: {} }),
+        getTaskByHumanKey: async (key: string) => {
+          if (key.toUpperCase() === "AURA-1337") {
+            return { id: "u2", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" };
+          }
+          throw new Error("404 not found");
+        },
+      };
+    },
+  });
+  const cache = createInMemoryReferenceCache(() => 5000);
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+
+  // Cache hit (case-insensitive): resolved from the cache, no client built,
+  // no targeted fetch.
+  assert.deepEqual(
+    await adapter.resolveFullToken("aura-42", cache),
+    { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN", fetchedAt: 5000 },
+  );
+  assert.equal(clientBuilds, 0, "a cache hit builds no client");
+
+  // Cache miss: the targeted getTaskByHumanKey fallback resolves (typed
+  // casing differs; the expansion carries the canonical server key).
+  assert.deepEqual(
+    await adapter.resolveFullToken("aura-1337", cache),
+    { kind: "task", id: "u2", key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" },
+  );
+  assert.equal(clientBuilds, 1, "the fallback built exactly one client");
+
+  // Targeted fetch miss (unknown key): null, so the mention stays as typed.
+  assert.equal(await adapter.resolveFullToken("AURA-999", cache), null);
+
+  // Targeted fetch throws (network failure, missing credentials): null, and
+  // nothing throws into the session.
+  assert.equal(await adapter.resolveFullToken("AURA-404", cache), null);
+  assert.equal(clientBuilds, 3, "each fallback attempt built one client");
+}
+
+console.log("resolveFullToken cache-first + targeted fallback: ok");
+
+// ---------------------------------------------------------------------------
+// TASK_REF_INSTRUCTION (the per-turn system-prompt block)
+// ---------------------------------------------------------------------------
+
+{
+  assert.ok(TASK_REF_INSTRUCTION.includes("<task-ref"), "shows the task-ref tag shape");
+  assert.ok(TASK_REF_INSTRUCTION.includes("key="), "names the key attribute");
+  assert.ok(TASK_REF_INSTRUCTION.includes("status="), "names the status attribute");
+  assert.ok(/element text is the task title/.test(TASK_REF_INSTRUCTION), "names the title part");
+  assert.ok(TASK_REF_INSTRUCTION.includes("aura"), "points at the aura skill");
+  assert.ok(/SKILL\.md/.test(TASK_REF_INSTRUCTION), "tells the agent how to load the skill");
+  assert.ok(TASK_REF_INSTRUCTION.startsWith("\n## "), "starts with a markdown heading");
+}
+
+console.log("TASK_REF_INSTRUCTION: ok");
 
 // ---------------------------------------------------------------------------
 // Factory is a function (smoke; the factory itself is pi-runtime verified)
