@@ -736,6 +736,101 @@ console.log("refreshReferenceKind abort guards: ok");
 
 console.log("refreshReferenceKind rapid queries (later aborts earlier): ok");
 
+{
+  // Transient failures are swallowed: the search rejects (a connection reset
+  // mid-search) and the refresh resolves without throwing, leaving the cache
+  // exactly as it was (items and stamp). Cached suggestions still return.
+  let ts = 0;
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache(() => {
+    ts += 1000;
+    return ts;
+  });
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+
+  const refresh = refreshReferenceKind(cache, adapter, "42");
+  await Promise.resolve(); // let the async search start reach listTasks
+  calls[0]!.reject(new Error("connection reset mid-search"));
+  await refresh; // resolves, never throws into the session
+  const after = cache.read("task");
+  assert.equal(after.length, 1);
+  assert.equal(after[0]?.title, "Fix the login bug");
+  assert.equal(cache.fetchedAt("task"), 1000, "the failure left no stamp");
+}
+
+console.log("refreshReferenceKind swallowed search failure: ok");
+
+{
+  // The never-throws contract holds for any adapter: when the injected search
+  // itself rejects (not every kind adapter swallows internally), the refresh
+  // resolves without throwing and leaves the cache as it was.
+  const rejectingAdapter = {
+    ...stubAdapter("task"),
+    searchServer: async () => {
+      throw new Error("the injected fetch exploded");
+    },
+  };
+  const cache = createInMemoryReferenceCache(() => 3000);
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+  await refreshReferenceKind(cache, rejectingAdapter, "42"); // must resolve, not reject
+  assert.deepEqual(cache.read("task").map((e) => e.key), ["AURA-42"]);
+  assert.equal(cache.fetchedAt("task"), 3000);
+}
+
+console.log("refreshReferenceKind never rejects: ok");
+
+{
+  // The server answers with an empty result: local items are kept (and the
+  // cache keeps its stamp, since nothing new was fetched to write).
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache(() => 7000);
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+
+  const refresh = refreshReferenceKind(cache, adapter, "zzz-nothing-matches");
+  await Promise.resolve(); // let the async search start reach listTasks
+  calls[0]!.resolve({ items: [], pagination: {} });
+  await refresh;
+  const after = cache.read("task");
+  assert.deepEqual(after.map((e) => e.key), ["AURA-42"], "local items kept on an empty server result");
+  assert.equal(cache.fetchedAt("task"), 7000, "an empty result wrote nothing (and stamped nothing)");
+}
+
+console.log("refreshReferenceKind empty server result: ok");
+
+{
+  // Edge: server results with unknown extra fields. The adapter maps a task
+  // to its reference fields; extra fields never reach the cache entries.
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache(() => 9000);
+
+  const refresh = refreshReferenceKind(cache, adapter, "42");
+  await Promise.resolve(); // let the async search start reach listTasks
+  calls[0]!.resolve({
+    items: [
+      {
+        id: "u1",
+        human_key: "AURA-42",
+        title: "Fix the login bug",
+        status: "OPEN",
+        assignee: "someone@example.com",
+        priority: "P1",
+        updated_at: "2026-01-01T00:00:00Z",
+        secret_internal_field: { nested: true },
+      },
+    ],
+    pagination: {},
+  });
+  await refresh;
+  assert.deepEqual(cache.read("task"), [
+    { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN", fetchedAt: 9000 },
+  ]);
+}
+
+console.log("refreshReferenceKind unknown extra fields: ok");
+
 // ---------------------------------------------------------------------------
 // createReferenceAutocompleteProvider (the deferral wiring over the registry)
 // ---------------------------------------------------------------------------

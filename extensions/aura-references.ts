@@ -350,7 +350,10 @@ export function filterReferenceItems(
  *
  * Pure in the arch-spec sense: the Aura access is the injected fetch (the
  * adapter's `searchServer`, whose `createClient` the caller controls) and the
- * cache is the injected cache; nothing else is touched.
+ * cache is the injected cache; nothing else is touched. The refresh resolves
+ * rather than rejects: a failed or empty server search (and an aborted
+ * request) leaves the cache, items and stamps, exactly as it was, and nothing
+ * ever throws into the session.
  */
 export async function refreshReferenceKind(
   cache: ReferenceCache,
@@ -362,12 +365,20 @@ export async function refreshReferenceKind(
   // The request was already superseded (aborted) before the refresh started:
   // no fetch is fired at all.
   if (signal?.aborted) return;
-  const results = await adapter.searchServer(partial, { signal });
-  // The request was aborted while the fetch was in flight: the late results
-  // are dropped, nothing is written after the abort.
-  if (signal?.aborted) return;
-  if (results.length === 0) return;
-  cache.write(adapter.kind, results);
+  try {
+    const results = await adapter.searchServer(partial, { signal });
+    // The request was aborted while the fetch was in flight: the late results
+    // are dropped, nothing is written after the abort.
+    if (signal?.aborted) return;
+    // Nothing fresh came back: a failed search returns [] (the adapter
+    // swallows its own errors) or an empty server result. Either way the
+    // cache stays as it is: no write, no fresh stamp.
+    if (results.length === 0) return;
+    cache.write(adapter.kind, results);
+  } catch {
+    // Transient failure (adapter search or cache write): the cached view
+    // stays, and nothing throws into the session.
+  }
 }
 
 // ---------------------------------------------------------------------------
