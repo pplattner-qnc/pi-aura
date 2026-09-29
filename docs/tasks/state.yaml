@@ -1,3 +1,4 @@
-task: reference-rule-kind
 slice: null
 schema_version: 3
+map: null
+task: reference-artifact-kind

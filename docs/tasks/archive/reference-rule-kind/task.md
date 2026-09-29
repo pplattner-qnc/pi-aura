@@ -4,9 +4,12 @@ type: feature
 slug: reference-rule-kind
 title: "#rule: and legacy @rule: through the engine"
 map: unified-reference-mentions
-status: ready
-blocked_by: [reference-engine-core]
-slices: [1-rule-kind-hash-token, 2-rule-alias-atomic-switch]
+status: done
+blocked_by:
+- reference-engine-core
+slices:
+- 1-rule-kind-hash-token
+- 2-rule-alias-atomic-switch
 ---
 
 ## What to build

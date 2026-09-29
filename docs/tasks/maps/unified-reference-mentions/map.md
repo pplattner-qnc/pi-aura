@@ -4,37 +4,37 @@ slug: unified-reference-mentions
 title: "Unified in-chat resource references (#task:, #rule:, #artifact:, #wiki:)"
 status: active
 tasks:
-  - slug: pi-autocomplete-async-constraints
-    blocked_by: []
-    done: true
-  - slug: reference-expansion-ux-prototype
-    blocked_by: []
-    done: true
-  - slug: reference-engine-core
-    blocked_by: []
-    done: true
-  - slug: reference-cache-sqlite
-    blocked_by:
-      - reference-engine-core
-    done: true
-  - slug: reference-task-alias
-    blocked_by:
-      - reference-engine-core
-    done: true
-  - slug: reference-rule-kind
-    blocked_by:
-      - reference-engine-core
-    done: false
-  - slug: reference-artifact-kind
-    blocked_by:
-      - reference-engine-core
-      - reference-cache-sqlite
-    done: false
-  - slug: reference-wiki-kind
-    blocked_by:
-      - reference-engine-core
-      - reference-cache-sqlite
-    done: false
+- slug: pi-autocomplete-async-constraints
+  blocked_by: []
+  done: true
+- slug: reference-expansion-ux-prototype
+  blocked_by: []
+  done: true
+- slug: reference-engine-core
+  blocked_by: []
+  done: true
+- slug: reference-cache-sqlite
+  blocked_by:
+  - reference-engine-core
+  done: true
+- slug: reference-task-alias
+  blocked_by:
+  - reference-engine-core
+  done: true
+- slug: reference-rule-kind
+  blocked_by:
+  - reference-engine-core
+  done: true
+- slug: reference-artifact-kind
+  blocked_by:
+  - reference-engine-core
+  - reference-cache-sqlite
+  done: false
+- slug: reference-wiki-kind
+  blocked_by:
+  - reference-engine-core
+  - reference-cache-sqlite
+  done: false
 ---
 
 ## Destination
