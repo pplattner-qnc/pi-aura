@@ -656,4 +656,47 @@ function clockedOptions(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Concurrency: interleaved same-key upserts from two stores
+// ---------------------------------------------------------------------------
+
+{
+  await withTempDb(async (dbPath) => {
+    const [now] = testClock(1000);
+    const a = createSqliteReferenceCache(clockedOptions(dbPath, now));
+    const b = createSqliteReferenceCache(clockedOptions(dbPath, now));
+
+    // Two stores (two sessions) interleaving writes of the same key, plus
+    // full-batch writes that overlap the other's items.
+    for (let round = 0; round < 100; round++) {
+      a.write("task", [
+        { kind: "task", id: "shared", key: "AURA-1", title: `a-${round}`, status: "OPEN" },
+        { kind: "task", id: `a-${round}`, key: `AURA-${round + 2}`, title: `a item ${round}`, status: "OPEN" },
+      ]);
+      b.write("task", [
+        { kind: "task", id: "shared", key: "AURA-1", title: `b-${round}`, status: "DONE" },
+      ]);
+    }
+
+    // One row per key, the shared key holds the last writer's value, and
+    // the state is intact and queryable through a fresh open.
+    const probe = new DatabaseSync(dbPath);
+    const shared = probe.prepare(
+      "SELECT item_key, title, status, fetched_at FROM reference_items WHERE id = 'shared'",
+    ).all() as Array<{ item_key: string; title: string; status: string; fetched_at: number }>;
+    const total = (probe.prepare("SELECT COUNT(*) AS n FROM reference_items").get() as { n: number }).n;
+    probe.close();
+    assert.equal(shared.length, 1, "no duplicate rows for the raced key");
+    assert.equal(shared[0]?.item_key, "AURA-1");
+    assert.equal(shared[0]?.title, "b-99");
+    assert.equal(shared[0]?.status, "DONE");
+    assert.equal(total, 101, "the shared key plus each round's a item");
+
+    const fresh = createSqliteReferenceCache(clockedOptions(dbPath, now));
+    assert.equal(fresh.read("task").length, 101);
+
+    console.log("concurrency: interleaved same-key upserts, no duplicates, intact reopen: ok");
+  });
+}
+
 console.log("all aura-reference-cache tests passed");
