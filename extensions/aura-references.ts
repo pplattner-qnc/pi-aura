@@ -602,7 +602,12 @@ export function createReferenceAutocompleteProvider(
   current: AutocompleteProvider,
   registry: ReferenceRegistry,
   getCache: () => ReferenceCache | null,
+  refreshOptions: { canRefresh?: () => boolean } = {},
 ): AutocompleteProvider {
+  // The background-refresh gate. Production wiring latches the no-credentials
+  // state (createDefaultAuraClient() throws) and passes a gate that is off for
+  // the whole session, so a credential-less session fires no refresh at all.
+  const canRefresh = refreshOptions.canRefresh ?? (() => true);
   return {
     triggerCharacters: ["#"],
     async getSuggestions(lines, cursorLine, cursorCol, options): Promise<AutocompleteSuggestions | null> {
@@ -631,8 +636,11 @@ export function createReferenceAutocompleteProvider(
       // that writes the fresh server results through to the cache, so they
       // surface on the next keystroke. The refresh is guarded by this
       // request's abort signal (pi-tui aborts superseded requests), so an
-      // aborted query stops its work and writes nothing.
-      void refreshReferenceKind(cache, adapter, partial, { signal: options.signal });
+      // aborted query stops its work and writes nothing. Without Aura
+      // credentials the gate is off and no refresh is fired at all.
+      if (canRefresh()) {
+        void refreshReferenceKind(cache, adapter, partial, { signal: options.signal });
+      }
       const rows = adapter.searchLocal(cache.read(adapter.kind), partial);
       if (rows.length === 0) {
         // Zero-match partial: defer to the built-in provider.
@@ -683,8 +691,26 @@ export default function (pi: ExtensionAPI): void {
   let sessionCache: ReferenceCache | null = null;
 
   pi.on("session_start", async (_event, ctx) => {
+    // The SWR refresh gate: off until one client build succeeds in this
+    // session. Detection is the same createDefaultAuraClient() throw the
+    // warmup relies on, probed once here: without credentials (no baseUrl or
+    // no PAT in the keyring) no refresh is fired at all. Like the warmup,
+    // this is one-shot: credentials appearing later in the session do not
+    // re-arm the gate until a /reload re-emits session_start.
+    let refreshAllowed = false;
+    void createDefaultClient()
+      .then(() => {
+        refreshAllowed = true;
+      })
+      .catch(() => {
+        // No credentials: the gate stays off for the whole session; the
+        // provider defers on the empty cache exactly as in slice 1.
+      });
+
     ctx.ui.addAutocompleteProvider((current) =>
-      createReferenceAutocompleteProvider(current, registry, () => sessionCache),
+      createReferenceAutocompleteProvider(current, registry, () => sessionCache, {
+        canRefresh: () => refreshAllowed,
+      }),
     );
 
     const cache = createInMemoryReferenceCache();

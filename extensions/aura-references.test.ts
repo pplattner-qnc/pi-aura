@@ -917,6 +917,33 @@ console.log("provider SWR: every reference query refreshes with its partial: ok"
 
 console.log("provider SWR: the request abort signal guards the write: ok");
 
+{
+  // Criterion: without credentials no refresh is fired at all. The factory
+  // latches the no-credentials state (createDefaultAuraClient() throws) and
+  // passes it as the provider's `canRefresh` gate; with the gate off, queries
+  // still answer from the cache but fire no server search.
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", taskItems());
+  const gated = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => gated.client });
+  const registry = createReferenceRegistry([adapter]);
+  const current = fakeCurrent();
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache, {
+    canRefresh: () => false,
+  });
+
+  await suggestAt(provider, "#task:42", 8);
+  await suggestAt(provider, "#task:", 6);
+  await suggestAt(provider, "#task:zzz", 9); // zero-match: defers, and no refresh either
+  await Promise.resolve(); // a fired refresh would have reached listTasks by now
+  assert.equal(gated.calls.length, 0, "no refresh fired without credentials");
+  // The cached answers still come out.
+  const suggestions = await suggestAt(provider, "#task:42", 8);
+  assert.deepEqual(suggestions?.items.map((i) => i.value), ["#task:AURA-42", "#task:AURA-424"]);
+}
+
+console.log("provider SWR: no refresh without credentials (canRefresh gate): ok");
+
 // ---------------------------------------------------------------------------
 // createReferenceAutocompleteProvider (the deferral wiring over the registry)
 // ---------------------------------------------------------------------------
