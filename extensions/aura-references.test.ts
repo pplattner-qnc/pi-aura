@@ -1409,6 +1409,63 @@ console.log("provider failure modes (defer, no throw): ok");
 console.log("parsePartial decline deferral: ok");
 
 // ---------------------------------------------------------------------------
+// Alias registry API (criterion: register a legacy token pattern to a kind
+// adapter) + no alias in production wiring
+// ---------------------------------------------------------------------------
+
+{
+  // The production wiring builds exactly this registry (one task adapter, no
+  // aliases): its alias table is empty, so legacy syntax is not recognized.
+  // No alias is registered in production in this slice; the alias tickets do.
+  const production = expansionRegistry();
+  assert.equal(production.aliases.length, 0, "the production registry registers no alias");
+  assert.equal(extractReferenceToken("see @AURA-42", production), null, "legacy syntax is unrecognized without a registered alias");
+
+  // The registration API: a legacy token pattern mapped to a kind adapter,
+  // registered on the built registry (what the alias tickets call). Capture
+  // group 1 is the token text the kind adapter sees in both uses: the
+  // autocomplete partial while typing and the full key on submit, so the
+  // pattern captures the full key minus the trigger char (`@AURA-42` ->
+  // "AURA-42").
+  const registry = expansionRegistry();
+  registry.registerAlias({ pattern: /(?:^|[ \t])@(AURA-[^\s]*)$/i, kind: "task" });
+  assert.equal(registry.aliases.length, 1, "registerAlias adds to the alias table");
+
+  // Recognition: the registered alias extracts like any reference token
+  // (kind + partial + raw) and dispatches to the alias's kind adapter.
+  assert.deepEqual(extractReferenceToken("see @AURA-42", registry), { kind: "task", partial: "AURA-42", raw: "@AURA-42" });
+
+  // Expansion routing: the alias mention resolves through the injected lookup
+  // and renders through the task adapter's formatExpansion (the uniform tag).
+  const { lookup } = lookupOver(taskItems());
+  const expansion = '<task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>';
+  assert.equal(await expandReferenceMentions("see @AURA-42", registry, lookup), `see ${expansion}`);
+
+  // Alias mentions and `#kind:` mentions mix freely in one prompt.
+  const a1337 = '<task-ref key="AURA-1337" status="IN_REVIEW">Ship the dashboard</task-ref>';
+  assert.equal(
+    await expandReferenceMentions("@AURA-42 and #task:AURA-1337", registry, lookup),
+    `${expansion} and ${a1337}`,
+  );
+
+  // An unresolvable alias mention stays exactly as typed.
+  assert.equal(await expandReferenceMentions("see @AURA-999", registry, lookup), "see @AURA-999");
+
+  // An alias registered to a kind with no adapter: recognized as a mention,
+  // but expansion has no adapter to route to, so it stays as typed.
+  registry.registerAlias({ pattern: /(?:^|[ \t])@wiki:([^\s]*)$/i, kind: "wiki" });
+  assert.deepEqual(extractReferenceToken("see @wiki:home", registry), { kind: "wiki", partial: "home", raw: "@wiki:home" });
+  assert.equal(await expandReferenceMentions("see @wiki:home", registry, lookup), "see @wiki:home");
+
+  // The warning is user-only: nothing deprecation-shaped is ever added to
+  // the prompt (the factory wiring surfaces it via ctx.ui.notify instead).
+  const expanded = await expandReferenceMentions("see @AURA-42", registry, lookup);
+  assert.ok(!/deprecat/i.test(expanded), "no deprecation warning lands in the prompt");
+}
+
+console.log("alias registry registration + expansion routing: ok");
+
+// ---------------------------------------------------------------------------
 // TASK_REF_INSTRUCTION (the per-turn system-prompt block)
 // ---------------------------------------------------------------------------
 

@@ -198,7 +198,11 @@ export function createInMemoryReferenceCache(now: () => number = Date.now): Refe
  *  (`@AURA-<n>`, `@rule:<name>`) arrives with the alias tickets; the table is
  *  empty in production wiring until then. The pattern is the full
  *  boundary-anchored token pattern (same shape as the engine's own token
- *  pattern) whose capture group 1 is the partial the kind adapter searches. */
+ *  pattern) whose capture group 1 is the token text handed to the kind
+ *  adapter: the partial the adapter searches while completing, and the full
+ *  token it resolves on submit. Alias patterns therefore capture the full
+ *  key minus the trigger char (e.g. `@(AURA-[^\\s]*)` for `@AURA-42`), so
+ *  one group serves both uses. */
 export interface LegacyAlias {
   pattern: RegExp;
   /** The kind adapter the alias maps to. */
@@ -234,13 +238,20 @@ export interface KindAdapter {
   warmup?(cache: ReferenceCache, options?: { signal?: AbortSignal }): Promise<void>;
 }
 
-/** The registry: kind prefixes, adapters, and the dormant alias table are
+/** The registry: kind prefixes, adapters, and the legacy alias table are
  *  data that extraction, filtering, and the provider dispatch through. */
 export interface ReferenceRegistry {
   /** kind prefix -> adapter. */
   readonly kinds: ReadonlyMap<string, KindAdapter>;
   /** Legacy aliases, dormant (empty) until the alias tickets register them. */
   readonly aliases: readonly LegacyAlias[];
+  /** Register a legacy token pattern mapped to a kind adapter (the arch-spec
+   *  alias-registration contract the task-alias and rule tickets call). Once
+   *  registered, the alias is recognized at the cursor and its mentions
+   *  expand through the kind adapter, and the factory wiring arms the
+   *  once-per-session deprecation warning (via `ctx.ui.notify`, never in the
+   *  prompt). No alias is registered in production wiring in this ticket. */
+  registerAlias(alias: LegacyAlias): void;
   /** Compiled token pattern over all registered kind prefixes: `#` at a token
    *  boundary, kind (case-insensitive), colon, partial (no whitespace), and
    *  the cursor at the end of the token. Group 1 = kind, group 2 = partial. */
@@ -251,13 +262,16 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Build a registry from adapters (+ optional legacy aliases). */
+/** Build a registry from adapters (+ optional legacy aliases). The alias
+ *  table stays mutable through `registerAlias` so legacy syntaxes can be
+ *  registered after construction (the alias tickets' entry point). */
 export function createReferenceRegistry(
   adapters: KindAdapter[],
   aliases: LegacyAlias[] = [],
 ): ReferenceRegistry {
   const kinds = new Map<string, KindAdapter>();
   for (const adapter of adapters) kinds.set(adapter.kind, adapter);
+  const aliasTable: LegacyAlias[] = [...aliases];
   const prefixes = Array.from(kinds.keys()).map(escapeRegExp).join("|");
   // `#` must sit at a token boundary (start of line or after whitespace) so
   // headings and mid-word `#`s never match; the partial runs to the cursor
@@ -265,7 +279,14 @@ export function createReferenceRegistry(
   const tokenPattern = prefixes === ""
     ? new RegExp("(?!)") // no adapters registered: the pattern never matches
     : new RegExp(`(?:^|[ \\t])#(${prefixes}):([^\\s]*)$`, "i");
-  return { kinds, aliases, tokenPattern };
+  return {
+    kinds,
+    aliases: aliasTable,
+    registerAlias(alias) {
+      aliasTable.push(alias);
+    },
+    tokenPattern,
+  };
 }
 
 /** A token extracted at the cursor: the registered kind, the partial after
@@ -298,6 +319,8 @@ export function extractReferenceToken(
   // Legacy alias recognition hook. No alias is registered in this slice, so
   // this loop is dormant; the alias tickets register `@AURA-`/`@rule:` here
   // (plus the once-per-session deprecation warning) without engine surgery.
+  // Group 1 is the token text handed to the kind adapter (see LegacyAlias):
+  // the autocomplete partial here, the same full key on submit.
   for (const alias of registry.aliases) {
     const aliasMatch = textBeforeCursor.match(alias.pattern);
     if (aliasMatch) {
@@ -434,9 +457,10 @@ function globalScanPattern(pattern: RegExp): RegExp {
 /** Every mention occurrence in the prompt, in prompt order: `#kind:` tokens
  *  via the registry's compiled kind pattern, then legacy alias tokens via the
  *  registered alias patterns (whose capture group 1 is the token the kind
- *  adapter resolves). The boundary before a token (line start or one
- *  space/tab) is matched but not part of the token span; alias token shapes
- *  never start with whitespace (same contract as the engine's own tokens). */
+ *  adapter resolves; see LegacyAlias for the group contract). The boundary
+ *  before a token (line start or one space/tab) is matched but not part of
+ *  the token span; alias token shapes never start with whitespace (same
+ *  contract as the engine's own tokens). */
 function collectMentionOccurrences(
   prompt: string,
   registry: ReferenceRegistry,
