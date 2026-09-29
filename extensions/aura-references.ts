@@ -26,6 +26,19 @@
  *    the built-in provider for every non-reference token (including
  *    zero-match partials and the no-credentials state).
  *
+ * Slice 2 adds the stale-while-revalidate refresh:
+ *
+ * 5. Every reference query (`getSuggestions`) returns the cached view
+ *    instantly, never awaiting an Aura fetch, and fires a background refresh
+ *    (`refreshReferenceKind`) that runs the adapter's server-side search
+ *    (`listTasks` with `search` for the typed partial) guarded by the
+ *    request's abort signal and writes the fresh results through to the
+ *    cache, so they surface on the next keystroke (pi-tui re-queries per
+ *    keystroke and drops late results itself). A task outside the local
+ *    cache window becomes findable by title substring one keystroke later.
+ *    Transient failures are swallowed and without Aura credentials the
+ *    refresh gate is off: no refresh is fired at all.
+ *
  * The legacy `@AURA-` behavior is untouched: `aura-tasks.ts` still owns it in
  * parallel on its own trigger character. The alias table below is dormant
  * until the alias tickets register legacy syntaxes through it.
@@ -522,8 +535,8 @@ export function createTaskAdapter(options: {
         if (searchOptions.signal?.aborted) return [];
         return res.items.map(toReferenceItem);
       } catch {
-        // Missing credentials or a failed search: the SWR merge (next slice)
-        // just gets nothing fresh; the session is never disturbed.
+        // Missing credentials or a failed search: the SWR merge gets nothing
+        // fresh and skips the write; the session is never disturbed.
         return [];
       }
     },

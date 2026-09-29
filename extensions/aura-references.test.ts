@@ -944,6 +944,58 @@ console.log("provider SWR: the request abort signal guards the write: ok");
 
 console.log("provider SWR: no refresh without credentials (canRefresh gate): ok");
 
+{
+  // End-to-end demo, first half: rename a task title in Aura and keep typing.
+  // Query 1 answers from the cache with the stale row (instant) while the
+  // background refresh writes the corrected title through; query 2 (the next
+  // keystroke) sees the fresh title.
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+  const { provider, calls } = swrProvider(cache);
+
+  const stale = await suggestAt(provider, "#task:login", 11);
+  assert.equal(stale?.items[0]?.description, "[OPEN] Fix the login bug", "query 1: the stale cached row");
+  await Promise.resolve(); // the refresh is in flight
+  calls[0]!.resolve({
+    items: [{ id: "u1", human_key: "AURA-42", title: "Fix the renamed login bug", status: "OPEN" }],
+    pagination: {},
+  });
+  await new Promise((resolve) => setImmediate(resolve)); // the write-through lands
+
+  const fresh = await suggestAt(provider, "#task:login", 11);
+  assert.equal(fresh?.items[0]?.description, "[OPEN] Fix the renamed login bug", "query 2: the corrected title");
+}
+
+console.log("provider SWR end-to-end: renamed title visible one keystroke later: ok");
+
+{
+  // End-to-end demo, second half: a task outside the local cache window is
+  // findable by title substring. Query 1 zero-matches (defers to the built-in
+  // provider) while the server search finds the task and writes it through;
+  // query 2 offers it as a reference row.
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+  const { provider, calls, current } = swrProvider(cache);
+
+  const deferredFirst = await suggestAt(provider, "#task:unpronounceable", 21);
+  assert.equal(deferredFirst?.items[0]?.value, "file.txt", "query 1: no local match, deferred");
+  await Promise.resolve(); // the refresh is in flight
+  assert.equal(calls[0]?.search, "unpronounceable");
+  calls[0]!.resolve({
+    items: [{ id: "u2", human_key: "AURA-888", title: "The unpronounceable wiki slug", status: "OPEN" }],
+    pagination: {},
+  });
+  await new Promise((resolve) => setImmediate(resolve)); // the write-through lands
+
+  const found = await suggestAt(provider, "#task:unpronounceable", 21);
+  assert.deepEqual(found?.items.map((i) => i.value), ["#task:AURA-888"], "query 2: the server-only match");
+  assert.equal(found?.prefix, "#task:unpronounceable");
+  // And the non-deferral path was taken this time (the row is a reference).
+  assert.equal(current.calls.suggestions, 1, "query 2 answered by the engine, not the built-in provider");
+}
+
+console.log("provider SWR end-to-end: out-of-window task findable by title: ok");
+
 // ---------------------------------------------------------------------------
 // createReferenceAutocompleteProvider (the deferral wiring over the registry)
 // ---------------------------------------------------------------------------
