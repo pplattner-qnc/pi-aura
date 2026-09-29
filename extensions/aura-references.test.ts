@@ -644,6 +644,38 @@ console.log("provider suggestions + deferral: ok");
 console.log("provider failure modes (defer, no throw): ok");
 
 // ---------------------------------------------------------------------------
+// parsePartial decline deferral (the wiki uuid-vs-path discrimination hook)
+// ---------------------------------------------------------------------------
+
+{
+  // parsePartial returning null is the per-kind decline hook the wiki kind
+  // (later ticket) will use to discriminate uuid vs path partials. A declined
+  // partial is not a reference token, so the provider defers to the built-in
+  // provider. The stub's searchLocal returns a row on purpose: the deferral
+  // must come from the decline, not from an empty local search.
+  const current = fakeCurrent();
+  const declining = {
+    ...stubAdapter("wiki"),
+    parsePartial: () => null,
+    searchLocal: () => [{ value: "#wiki:row", label: "#wiki:row" }],
+  };
+  const registry = createReferenceRegistry([
+    createTaskAdapter({ createClient: noopClient }),
+    declining,
+  ]);
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () =>
+    createInMemoryReferenceCache(),
+  );
+  assert.deepEqual(await suggestAt(provider, "#wiki:abc/def", 13), {
+    items: [{ value: "file.txt", label: "file.txt" }],
+    prefix: "f",
+  });
+  assert.equal(current.calls.suggestions, 1, "declined partial deferred to the built-in provider");
+}
+
+console.log("parsePartial decline deferral: ok");
+
+// ---------------------------------------------------------------------------
 // Factory is a function (smoke; the factory itself is pi-runtime verified)
 // ---------------------------------------------------------------------------
 
