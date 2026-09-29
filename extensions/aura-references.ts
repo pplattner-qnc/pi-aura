@@ -39,9 +39,29 @@
  *    Transient failures are swallowed and without Aura credentials the
  *    refresh gate is off: no refresh is fired at all.
  *
+ * Slice 3 adds inline expansion, the per-turn instruction, and the alias
+ * registry API:
+ *
+ * 6. On submit (`input`), every typed `#kind:` mention (and every registered
+ *    legacy-alias mention) resolves cache-first through its kind adapter
+ *    (`resolveFullToken`, then the targeted `getTaskByHumanKey` fallback)
+ *    and expands in place to the uniform tag. Unresolvable references stay
+ *    exactly as typed so the agent can resolve them via the `aura` skill.
+ *    Without Aura credentials no targeted fetch is attempted at all.
+ * 7. The system prompt gains a slim per-turn instruction block
+ *    (`TASK_REF_INSTRUCTION`) documenting the `<task-ref>` shape and
+ *    pointing at the `aura` skill, appended via `before_agent_start` (pi
+ *    rebuilds the base prompt each turn, so the append never accumulates).
+ * 8. The alias registry API exists: `registerAlias` maps a legacy token
+ *    pattern to a kind adapter and `createDeprecationWarningDecision`
+ *    arms the once-per-session deprecation warning (surfaced via
+ *    `ctx.ui.notify`, user-only, never in the prompt). No alias is
+ *    registered yet: the table stays empty until the task-alias and rule
+ *    tickets register `@AURA-` and `@rule:` through it.
+ *
  * The legacy `@AURA-` behavior is untouched: `aura-tasks.ts` still owns it in
- * parallel on its own trigger character. The alias table below is dormant
- * until the alias tickets register legacy syntaxes through it.
+ * parallel on its own trigger character (the interim double instruction
+ * block is accepted until the task-alias ticket).
  *
  * Credentials: the task adapter talks to Aura through the shared AuraClient
  * (`createDefaultAuraClient`, which reads `aura.baseUrl` from settings plus

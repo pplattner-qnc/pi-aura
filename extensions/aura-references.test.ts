@@ -5,13 +5,17 @@
  *   node --experimental-strip-types extensions/aura-references.test.ts
  *
  * Covers the pure seams: `#kind:` token extraction + deferral, the registry
- * (kind prefixes, adapters, dormant alias table), the in-memory reference
- * cache, autocomplete filtering/ranking, the task adapter's warmup + local
- * search, and the provider wiring that defers to the built-in provider for
- * non-reference tokens. The extension factory (which reaches Aura through
- * the dynamic-import seam) is exercised by the pi runtime once credentials
- * are configured, mirroring the `aura-tasks` and `engineering-rules` test
- * files.
+ * (kind prefixes, adapters, the alias registration API), the in-memory
+ * reference cache, autocomplete filtering/ranking, the SWR refresh, the task
+ * adapter's warmup + local search + full-token resolution, the inline
+ * expansion transform (`#kind:` and legacy-alias mentions, tag shapes,
+ * escaping, failure modes), the per-turn instruction constant, and the
+ * once-per-session deprecation-warning decision. The provider wiring that
+ * defers to the built-in provider for non-reference tokens is tested at its
+ * pure wrapper seam. The extension factory (which reaches Aura through the
+ * dynamic-import seam and surfaces the deprecation warning via `ctx.ui.notify`)
+ * is exercised by the pi runtime once credentials are configured, mirroring
+ * the `aura-tasks` and `engineering-rules` test files.
  */
 
 import assert from "node:assert/strict";
