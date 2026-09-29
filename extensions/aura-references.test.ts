@@ -2583,7 +2583,7 @@ console.log("createArtifactAdapter warmup: ok");
   // The typed partial lands in `q`; the query is capped and sorted
   // newest-updated first; the result items map to reference items carrying
   // the metadata extras.
-  const { client, queries } = fakeArtifactClient([[fakeArtifacts(2)]]);
+  const { client, queries } = fakeArtifactClient([fakeArtifacts(2)]);
   const adapter = createArtifactAdapter({ createClient: async () => client });
   const results = await adapter.searchServer("onboard");
   assert.deepEqual(queries, [
@@ -2592,14 +2592,14 @@ console.log("createArtifactAdapter warmup: ok");
   assert.deepEqual(results, fakeArtifacts(2).map(artifactToReferenceItem));
 
   // A custom limit is honored (the SWR seam passes one).
-  const { client: limited, queries: limitedQueries } = fakeArtifactClient([[fakeArtifacts(2)]]);
+  const { client: limited, queries: limitedQueries } = fakeArtifactClient([fakeArtifacts(2)]);
   const limitedAdapter = createArtifactAdapter({ createClient: async () => limited });
   await limitedAdapter.searchServer("x", { limit: 1 });
   assert.equal(limitedQueries[0]?.limit, 1);
 
   // An aborted request: the late in-flight results are dropped ([]).
   const controller = new AbortController();
-  const { client: late } = fakeArtifactClient([[fakeArtifacts(1)]]);
+  const { client: late } = fakeArtifactClient([fakeArtifacts(1)]);
   const lateAdapter = createArtifactAdapter({ createClient: async () => late });
   const pending = lateAdapter.searchServer("x", { signal: controller.signal });
   controller.abort(); // abort while the fetch is in flight
@@ -2630,7 +2630,7 @@ console.log("createArtifactAdapter searchServer: ok");
   // A server-only match (an artifact outside the local cache window) is
   // added by the write-through, so the next query finds it by title
   // substring one keystroke after the refresh lands.
-  const { client } = fakeArtifactClient([[fakeArtifacts(1, 500)]]);
+  const { client } = fakeArtifactClient([fakeArtifacts(1, 500)]);
   const adapter = createArtifactAdapter({ createClient: async () => client });
   const cache = createInMemoryReferenceCache();
   cache.write("artifact", [
@@ -2644,8 +2644,8 @@ console.log("createArtifactAdapter searchServer: ok");
   );
   // The added row carries the metadata extras.
   const added = cache.read("artifact")[1];
-  assert.equal(added?.artifactKind, "REVIEW");
-  assert.equal(added?.version, 2);
+  assert.equal(added?.artifactKind, "GENERIC");
+  assert.equal(added?.version, 1);
 }
 
 console.log("refreshReferenceKind server-only artifact match: ok");

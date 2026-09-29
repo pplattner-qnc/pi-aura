@@ -98,6 +98,21 @@
  * the rules extension's own `@rule:` autocomplete provider in the same
  * atomic landing, so the engine owns both rule syntaxes end-to-end.
  *
+ * The reference-artifact-kind task made `#artifact:` the third kind and
+ * the first metadata-driven one: artifact items carry the Aura artifact
+ * kind and latest version as metadata extras in the sqlite store's
+ * kind-agnostic JSON column, so the expansion attributes read from cached
+ * metadata (the ticket-2 interface contract the wiki kind reuses). Its
+ * slice 1 shipped autocomplete end-to-end: the warmup pages `listArtifacts`
+ * beside the task warmup (bounded at 500, newest first), local search
+ * matches the uuid prefix OR the title substring case-insensitively (an
+ * artifact's key IS its uuid, so the engine's plain key-prefix match needs
+ * no per-kind hook), the SWR refresh passes the typed partial as `q`, and
+ * the rows invert the task shape per the prototype's artifact UX: the
+ * title is the label, the uuid rides the description, and the full uuid
+ * token is the inserted value (the uuid appears in the text box only
+ * after selection).
+ *
  * Credentials: the task adapter talks to Aura through the shared AuraClient
  * (`createDefaultAuraClient`, which reads `aura.baseUrl` from settings plus
  * the Aura PAT from the OS keyring). When credentials are missing, warmup
@@ -998,6 +1013,204 @@ export function createRuleAdapter(options: { getRules: () => Rule[] }): KindAdap
 }
 
 // ---------------------------------------------------------------------------
+// Artifact kind adapter (the first metadata-driven kind)
+// ---------------------------------------------------------------------------
+
+/** The artifact kind prefix typed after `#` (`#artifact:<uuid>`). */
+export const ARTIFACT_KIND = "artifact";
+
+/**
+ * Maximum number of artifacts pulled for the autocomplete cache (the
+ * pagination bound the arch spec leaves to implementation): the same bound
+ * as tasks, 5 pages of 100. The cache plus the per-query server-side search
+ * make any bound non-blocking (an artifact beyond the warmup window is still
+ * found by `#artifact:<partial>` one keystroke after its SWR refresh lands),
+ * so this is coverage, not a correctness limit.
+ */
+export const MAX_ARTIFACTS = 500;
+
+/** Page size for `listArtifacts` (Aura's max is 100, like tasks). */
+export const ARTIFACT_PAGE_SIZE = 100;
+
+/** The subset of an artifact the engine reads (mirrors the shared client's
+ *  Artifact / ArtifactListItem without importing them). */
+export interface ArtifactSummary {
+  id: string;
+  title: string;
+  latest_version: number;
+  kind: string;
+}
+
+/**
+ * The structural subset of the shared AuraClient the artifact adapter needs
+ * (same pattern as TaskAuraClient: structural, no import of the live client,
+ * which only arrives through the dynamic-import seam; tests pass fakes).
+ */
+export interface ArtifactAuraClient {
+  listArtifacts(
+    opts?: Record<string, unknown>,
+  ): Promise<{ items: ArtifactSummary[]; pagination: unknown }>;
+  getArtifact(id: string): Promise<ArtifactSummary>;
+}
+
+/**
+ * An artifact reference item: a ReferenceItem whose extras carry the
+ * metadata-driven expansion attributes. `artifactKind` is the Aura
+ * artifact kind (PLAN, REVIEW, GENERIC; named so it never collides with
+ * the engine's registry `kind`) and `version` is the latest version at
+ * fetch time; both land in the sqlite cache's kind-agnostic metadata JSON
+ * column and are read back from there on cache-first resolution. This is
+ * the metadata-driven item pattern for the wiki kind (the wiki ticket's
+ * interface contract: the same extras mechanism carries space, path, and
+ * version there).
+ */
+export interface ArtifactReferenceItem extends ReferenceItem {
+  artifactKind: string;
+  version: number;
+}
+
+/** Map one artifact to its reference item: `id` and `key` are both the
+ *  uuid (the token key inserted on selection), the title is the row label,
+ *  and the Aura artifact kind + latest version ride as metadata extras. */
+export function artifactToReferenceItem(artifact: ArtifactSummary): ArtifactReferenceItem {
+  return {
+    kind: ARTIFACT_KIND,
+    id: artifact.id,
+    key: artifact.id,
+    title: artifact.title,
+    artifactKind: artifact.kind,
+    version: artifact.latest_version,
+  };
+}
+
+/** Read the artifact metadata extras (the metadata JSON column fields) off
+ *  any item. Null when the item does not carry a complete pair (an older or
+ *  corrupted cache row), so the caller can fall back to the targeted fetch
+ *  instead of expanding with half the attributes. */
+export function artifactItemMetadata(
+  item: ReferenceItem,
+): { artifactKind: string; version: number } | null {
+  const { artifactKind, version } = item as Partial<ArtifactReferenceItem>;
+  if (typeof artifactKind === "string" && typeof version === "number") {
+    return { artifactKind, version };
+  }
+  return null;
+}
+
+/**
+ * The artifact kind adapter: the first metadata-driven kind (the expansion
+ * attributes come from the item's metadata extras, not from the engine's
+ * own item fields). Warmup pages `listArtifacts` into the cache at
+ * session_start; local search matches the uuid prefix OR the title
+ * substring, case-insensitively; the server search passes the typed partial
+ * as `q` through the SWR seam. Rows follow the prototype's artifact UX: the
+ * title is the label (uuids are unreadable), the uuid rides the description,
+ * and selection inserts the full uuid token, so the uuid appears in the
+ * text box only after selection. Aura access goes through the injectable
+ * `createClient` factory, exactly as the task adapter does.
+ */
+export function createArtifactAdapter(options: {
+  createClient: () => Promise<ArtifactAuraClient>;
+}): KindAdapter {
+  const { createClient } = options;
+
+  const formatRow = (item: ReferenceItem): AutocompleteItem => ({
+    // The value doubles as the inserted token: `#artifact:` plus the full
+    // uuid. The label is the TITLE and the uuid appears only in the
+    // description (the prototype's decision: the unreadable uuid hits the
+    // text box only after selection).
+    value: `#${ARTIFACT_KIND}:${item.key}`,
+    label: item.title,
+    description: item.id,
+  });
+
+  return {
+    kind: ARTIFACT_KIND,
+
+    // Artifacts accept any non-space partial after `#artifact:` (uuid
+    // prefixes and title substrings both type).
+    parsePartial(partial) {
+      return partial;
+    },
+
+    searchLocal(items, partial) {
+      // The engine's filter matches key prefix OR title substring,
+      // case-insensitively; an artifact's key IS its uuid, so the plain
+      // key-prefix match is the id-prefix match (no per-kind keyMatch hook
+      // needed, unlike the task kind's numeric-suffix form).
+      return filterReferenceItems(items, partial, MAX_SUGGESTIONS).map(formatRow);
+    },
+
+    async searchServer(partial, searchOptions = {}) {
+      try {
+        const client = await createClient();
+        const res = await client.listArtifacts({
+          q: partial,
+          limit: searchOptions.limit ?? MAX_SUGGESTIONS,
+          sort_by: "updated_at",
+          sort_dir: "desc",
+        });
+        if (searchOptions.signal?.aborted) return [];
+        return res.items.map(artifactToReferenceItem);
+      } catch {
+        // Missing credentials or a failed search: the SWR merge gets nothing
+        // fresh and skips the write; the session is never disturbed.
+        return [];
+      }
+    },
+
+    formatRow,
+
+    formatExpansion(item) {
+      // Slice 2 of this ticket fills the metadata attributes (kind +
+      // version from the cached metadata); until it lands, resolution never
+      // reaches here (resolveFullToken below returns null, so mentions stay
+      // exactly as typed).
+      return `<artifact-ref id="${escapeAttr(item.id)}">${escapeText(item.title)}</artifact-ref>`;
+    },
+
+    async resolveFullToken() {
+      // Slice 2 of this ticket lands the cache-first resolution plus the
+      // targeted getArtifact fallback; until then artifact mentions stay
+      // exactly as typed (the safe passthrough the engine's contract
+      // prescribes for unresolvable references).
+      return null;
+    },
+
+    async warmup(cache, warmupOptions = {}) {
+      try {
+        const client = await createClient();
+        let page = 1;
+        let collected = 0;
+        while (collected < MAX_ARTIFACTS) {
+          if (warmupOptions.signal?.aborted) return;
+          // The default (unfiltered) list is the broadest view; newest first
+          // so the freshest artifacts land in the cache head.
+          const res = await client.listArtifacts({
+            limit: ARTIFACT_PAGE_SIZE,
+            page,
+            sort_by: "updated_at",
+            sort_dir: "desc",
+          });
+          const mapped = res.items.map(artifactToReferenceItem);
+          // Write page by page so partial progress (later page failure or
+          // an abort mid-flight) still lands.
+          cache.write(ARTIFACT_KIND, mapped);
+          collected += mapped.length;
+          if (res.items.length < ARTIFACT_PAGE_SIZE) return;
+          page += 1;
+        }
+      } catch {
+        // Missing credentials (createDefaultAuraClient throws) or a failed
+        // page: warmup is best-effort. Whatever pages landed stay cached; the
+        // session is never disturbed and the provider keeps deferring until
+        // data exists.
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // The `@AURA-<digits>` legacy alias (the first production alias)
 // ---------------------------------------------------------------------------
 
@@ -1178,7 +1391,7 @@ export function createReferenceAutocompleteProvider(
  * imports, so we dynamic-import the client factory here to keep the
  * unit-test entry point runnable with `node --experimental-strip-types`.
  */
-async function createDefaultClient(): Promise<TaskAuraClient> {
+async function createDefaultClient(): Promise<TaskAuraClient & ArtifactAuraClient> {
   const { createDefaultAuraClient } = await import("@pi-aura/shared/aura-client");
   return createDefaultAuraClient();
 }
@@ -1256,7 +1469,12 @@ export default function (pi: ExtensionAPI): void {
   // session_start and swaps in the fresh set).
   let sessionRules: Rule[] = [];
   const ruleAdapter = createRuleAdapter({ getRules: () => sessionRules });
-  const registry = createReferenceRegistry([taskAdapter, ruleAdapter]);
+  // The artifact kind (the first metadata-driven kind): rides the persistent
+  // cache, the SWR refresh, and the TTL-gated warmup exactly as the task
+  // kind does; its items carry the artifact kind + latest version as
+  // metadata extras.
+  const artifactAdapter = createArtifactAdapter({ createClient: createDefaultClient });
+  const registry = createReferenceRegistry([taskAdapter, ruleAdapter, artifactAdapter]);
   // The first production alias: `@AURA-<digits>` keeps working through the
   // engine (legacy-token autocomplete insertion, expansion to the same
   // <task-ref> tag as #task:, once-per-session user-only deprecation
