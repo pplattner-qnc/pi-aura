@@ -1157,6 +1157,79 @@ console.log("expandReferenceMentions: unresolvable + failure modes: ok");
 console.log("expandReferenceMentions: multiple + duplicate + case-insensitive: ok");
 
 // ---------------------------------------------------------------------------
+// Expansion format (criterion 1): <task-ref key status>title</task-ref>,
+// title XML-escaped, attribute values escaped for "", &, <
+// ---------------------------------------------------------------------------
+
+{
+  const adapter = createTaskAdapter({
+    createClient: async () => {
+      throw new Error("no credentials in this test");
+    },
+  });
+
+  // The format: key and status as attributes, title as element text.
+  assert.equal(
+    adapter.formatExpansion({ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }),
+    '<task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>',
+  );
+
+  // A title containing &, < and " is XML-escaped in element text (& and <
+  // escaped; " and > need no escaping there) and never truncated.
+  assert.equal(
+    adapter.formatExpansion({ kind: "task", id: "u2", key: "AURA-7", title: 'Q&A <review> "draft"', status: "OPEN" }),
+    '<task-ref key="AURA-7" status="OPEN">Q&amp;A &lt;review> "draft"</task-ref>',
+  );
+
+  // Key and status attribute values are escaped for ", & and < (> needs no
+  // escaping in an attribute value either).
+  assert.equal(
+    adapter.formatExpansion({ kind: "task", id: "u3", key: 'A"K&<S>', title: "t", status: 'O"S&<T>' }),
+    '<task-ref key="A&quot;K&amp;&lt;S>" status="O&quot;S&amp;&lt;T>">t</task-ref>',
+  );
+
+  // A missing status expands with an empty attribute rather than undefined.
+  assert.equal(
+    adapter.formatExpansion({ kind: "task", id: "u4", key: "AURA-9", title: "t" }),
+    '<task-ref key="AURA-9" status="">t</task-ref>',
+  );
+}
+
+console.log("expansion format + escaping (task-ref tag): ok");
+
+{
+  const registry = expansionRegistry();
+  const { lookup } = lookupOver([
+    { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" },
+  ]);
+  const expansion = '<task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>';
+
+  // A mention adjacent to punctuation keeps the engine token grammar (the
+  // token is the run of non-whitespace after `#kind:`): a trailing comma is
+  // part of the typed token, so it does not resolve and stays exactly as
+  // typed; a `#` after `(` is not a token boundary, so the mention is not a
+  // token at all. (The grammar is kind-agnostic: stripping trailing
+  // punctuation here would mangle future kinds' keys, e.g. wiki paths.)
+  assert.equal(
+    await expandReferenceMentions("fix #task:AURA-42, please", registry, lookup),
+    "fix #task:AURA-42, please",
+  );
+  assert.equal(
+    await expandReferenceMentions("(#task:AURA-42)", registry, lookup),
+    "(#task:AURA-42)",
+  );
+
+  // An expansion that makes the prompt longer than before is used in full:
+  // no truncation (the exact expanded text, longer than the input).
+  const typed = "fix #task:AURA-42";
+  const expanded = await expandReferenceMentions(typed, registry, lookup);
+  assert.equal(expanded, `fix ${expansion}`);
+  assert.ok(expanded.length > typed.length, "the expansion grew the prompt and survived in full");
+}
+
+console.log("expandReferenceMentions: punctuation + no-truncation edges: ok");
+
+// ---------------------------------------------------------------------------
 // createReferenceAutocompleteProvider (the deferral wiring over the registry)
 // ---------------------------------------------------------------------------
 
