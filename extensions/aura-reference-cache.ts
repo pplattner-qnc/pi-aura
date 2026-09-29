@@ -98,6 +98,12 @@ const CREATE_TABLE_SQL = `
 const UPSERT_SQL = `
   INSERT INTO reference_items (base_url, kind, id, item_key, title, status, metadata, fetched_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT (base_url, kind, id) DO UPDATE SET
+    item_key = excluded.item_key,
+    title = excluded.title,
+    status = excluded.status,
+    metadata = excluded.metadata,
+    fetched_at = excluded.fetched_at
 `;
 
 const READ_SQL = `

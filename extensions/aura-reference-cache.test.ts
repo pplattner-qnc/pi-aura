@@ -184,4 +184,48 @@ function clockedOptions(
   });
 }
 
+// ---------------------------------------------------------------------------
+// sqlite store: upsert semantics (last-writer-wins per key, no duplicates)
+// ---------------------------------------------------------------------------
+
+{
+  withTempDb((dbPath) => {
+    const [now, tick] = testClock(1000);
+    const store = createSqliteReferenceCache(clockedOptions(dbPath, now));
+
+    store.write("task", [
+      { kind: "task", id: "t1", key: "AURA-1", title: "First title", status: "OPEN" },
+    ]);
+    tick(500);
+    store.write("task", [
+      { kind: "task", id: "t1", key: "AURA-1", title: "Renamed title", status: "DONE" },
+    ]);
+
+    // One row, the newest values, the newest stamp.
+    assert.deepEqual(store.read("task"), [
+      { kind: "task", id: "t1", key: "AURA-1", title: "Renamed title", status: "DONE", fetchedAt: 1500 },
+    ]);
+    assert.equal(store.fetchedAt("task"), 1500);
+
+    // The same write upserting the same id twice keeps one row.
+    tick(500);
+    store.write("task", [
+      { kind: "task", id: "t1", key: "AURA-1", title: "A", status: "OPEN" },
+      { kind: "task", id: "t1", key: "AURA-1", title: "B", status: "OPEN" },
+    ]);
+    const probe = new DatabaseSync(dbPath);
+    assert.equal(
+      (probe.prepare("SELECT COUNT(*) AS n FROM reference_items").get() as { n: number }).n,
+      1,
+    );
+    probe.close();
+    assert.deepEqual(
+      store.read("task").map((entry) => entry.title),
+      ["B"],
+    );
+
+    console.log("sqlite store: upsert semantics: ok");
+  });
+}
+
 console.log("all aura-reference-cache tests passed");
