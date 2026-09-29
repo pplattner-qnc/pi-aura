@@ -53,16 +53,23 @@
  *    (`TASK_REF_INSTRUCTION`) documenting the `<task-ref>` shape and
  *    pointing at the `aura` skill, appended via `before_agent_start` (pi
  *    rebuilds the base prompt each turn, so the append never accumulates).
- * 8. The alias registry API exists: `registerAlias` maps a legacy token
+ * 8. The alias registry API: `registerAlias` maps a legacy token
  *    pattern to a kind adapter and `createDeprecationWarningDecision`
  *    arms the once-per-session deprecation warning (surfaced via
- *    `ctx.ui.notify`, user-only, never in the prompt). No alias is
- *    registered yet: the table stays empty until the task-alias and rule
- *    tickets register `@AURA-` and `@rule:` through it.
+ *    `ctx.ui.notify`, user-only, never in the prompt).
  *
- * The legacy `@AURA-` behavior is untouched: `aura-tasks.ts` still owns it in
- * parallel on its own trigger character (the interim double instruction
- * block is accepted until the task-alias ticket).
+ * The task-alias ticket (reference-task-alias) made `@AURA-` the first
+ * production alias: registered at factory setup through
+ * `createAuraTaskAlias`, it offers the same task suggestions while typing
+ * `@AURA-<partial>` but inserts the legacy `@AURA-<number>` token on
+ * selection (the user stays in the syntax they typed; the warning teaches
+ * the new one), expands through the task adapter to the same `<task-ref>`
+ * tag as `#task:`, and fires the once-per-session deprecation warning on
+ * the first submitted legacy mention. `aura-tasks.ts` shrank to its
+ * reachability probe in the same landing (atomicity: no state where two
+ * code paths transform the same mention), so this engine's
+ * TASK_REF_INSTRUCTION is the only task-reference block in the system
+ * prompt.
  *
  * The reference-cache-sqlite ticket swaps the production cache backing to
  * the persistent sqlite store (see `createSessionCache` below): `node:sqlite`
@@ -86,7 +93,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // ---------------------------------------------------------------------------
-// Autocomplete types (minimal structural shapes, see aura-tasks.ts)
+// Autocomplete types (minimal structural shapes, see engineering-rules.ts)
 // ---------------------------------------------------------------------------
 // `@earendil-works/pi-tui` exports AutocompleteItem / AutocompleteProvider /
 // AutocompleteSuggestions, but this package only declares
@@ -226,19 +233,26 @@ export function createInMemoryReferenceCache(now: () => number = Date.now): Refe
 // the dormant legacy-alias table, and compiles the `#` token pattern from the
 // registered kind prefixes: registering a kind is data, not engine surgery.
 
-/** One legacy alias: a dormant table entry. Legacy syntax registration
- *  (`@AURA-<n>`, `@rule:<name>`) arrives with the alias tickets; the table is
- *  empty in production wiring until then. The pattern is the full
- *  boundary-anchored token pattern (same shape as the engine's own token
- *  pattern) whose capture group 1 is the token text handed to the kind
- *  adapter: the partial the adapter searches while completing, and the full
- *  token it resolves on submit. Alias patterns therefore capture the full
- *  key minus the trigger char (e.g. `@(AURA-[^\\s]*)` for `@AURA-42`), so
- *  one group serves both uses. */
+/** One legacy alias: a registered legacy token pattern mapped to a kind
+ *  adapter (`@AURA-<digits>` is the first production alias, registered via
+ *  createAuraTaskAlias; `@rule:<name>` arrives with the rule ticket). The
+ *  pattern is the full boundary-anchored token pattern (same shape as the
+ *  engine's own token pattern) whose capture group 1 is the token text
+ *  handed to the kind adapter: the partial the adapter searches while
+ *  completing, and the full key it resolves on submit. Alias patterns
+ *  therefore capture the full key minus the trigger char (the production
+ *  `@AURA-` pattern `(?:^|[ \t])@(AURA-\d+)\b$` captures `AURA-42` for
+ *  `@AURA-42`), so one group serves both uses. */
 export interface LegacyAlias {
   pattern: RegExp;
   /** The kind adapter the alias maps to. */
   kind: string;
+  /** Rank + format cached items as legacy-syntax autocomplete rows; each
+   *  row's value is the legacy token inserted on selection (e.g.
+   *  `@AURA-42`), so the user stays in the syntax they typed while the
+   *  deprecation warning teaches the new one. Falls back to the kind
+   *  adapter's searchLocal (new-syntax rows) when omitted. */
+  searchLocal?: (items: ReferenceItem[], partial: string) => AutocompleteItem[];
 }
 
 /** The common adapter interface every kind implements (arch spec contract for
@@ -275,14 +289,16 @@ export interface KindAdapter {
 export interface ReferenceRegistry {
   /** kind prefix -> adapter. */
   readonly kinds: ReadonlyMap<string, KindAdapter>;
-  /** Legacy aliases, dormant (empty) until the alias tickets register them. */
+  /** Registered legacy aliases (`@AURA-<digits>` today; `@rule:` arrives
+   *  with the rule ticket). */
   readonly aliases: readonly LegacyAlias[];
   /** Register a legacy token pattern mapped to a kind adapter (the arch-spec
-   *  alias-registration contract the task-alias and rule tickets call). Once
+   *  alias-registration contract the rule ticket calls for `@rule:`). Once
    *  registered, the alias is recognized at the cursor and its mentions
    *  expand through the kind adapter, and the factory wiring arms the
    *  once-per-session deprecation warning (via `ctx.ui.notify`, never in the
-   *  prompt). No alias is registered in production wiring in this ticket. */
+   *  prompt). The production wiring registers `@AURA-` through
+   *  `createAuraTaskAlias`. */
   registerAlias(alias: LegacyAlias): void;
   /** Compiled token pattern over all registered kind prefixes: `#` at a token
    *  boundary, kind (case-insensitive), colon, partial (no whitespace), and
@@ -343,12 +359,16 @@ export function createDeprecationWarningDecision(): () => boolean {
 }
 
 /** A token extracted at the cursor: the registered kind, the partial after
- *  `#kind:`, and the raw typed text (without the leading boundary) used as
- *  the completion prefix. */
+ *  `#kind:` (or the alias group 1 token text for a legacy-alias mention),
+ *  the raw typed text (without the leading boundary) used as the
+ *  completion prefix, and the matched alias registration when the token
+ *  came from an alias pattern (the autocomplete provider uses its
+ *  searchLocal hook to insert the legacy token on selection). */
 export interface ExtractedReferenceToken {
   kind: string;
   partial: string;
   raw: string;
+  alias?: LegacyAlias;
 }
 
 /**
@@ -369,11 +389,11 @@ export function extractReferenceToken(
       raw: (match[0] ?? "").replace(/^[ \t]/, ""),
     };
   }
-  // Legacy alias recognition hook. No alias is registered in this slice, so
-  // this loop is dormant; the alias tickets register `@AURA-`/`@rule:` here
-  // (plus the once-per-session deprecation warning) without engine surgery.
-  // Group 1 is the token text handed to the kind adapter (see LegacyAlias):
-  // the autocomplete partial here, the same full key on submit.
+  // Legacy alias recognition: each registered alias pattern gets the same
+  // cursor-anchored treatment as the compiled kind pattern. Group 1 is the
+  // token text handed to the kind adapter (see LegacyAlias): the
+  // autocomplete partial here, the same full key on submit. The matched
+  // registration rides along so the provider can format legacy rows.
   for (const alias of registry.aliases) {
     const aliasMatch = textBeforeCursor.match(alias.pattern);
     if (aliasMatch) {
@@ -381,6 +401,7 @@ export function extractReferenceToken(
         kind: alias.kind,
         partial: aliasMatch[1] ?? "",
         raw: (aliasMatch[0] ?? "").replace(/^[ \t]/, ""),
+        alias,
       };
     }
   }
@@ -536,6 +557,16 @@ function collectMentionOccurrences(
   return occurrences.sort((a, b) => a.start - b.start);
 }
 
+/** Does the prompt contain a legacy-alias mention? The deprecation-warning
+ *  trigger: the input handler consults this (plus the once-per-session
+ *  decision) on every submitted prompt and notifies through `ctx.ui.notify`
+ *  only when both say yes. Pure: the prompt and the registry's alias table
+ *  (the mention's resolvability is irrelevant; an unknown `@AURA-999` warns
+ *  too). */
+export function promptHasLegacyMention(prompt: string, registry: ReferenceRegistry): boolean {
+  return registry.aliases.some((alias) => globalScanPattern(alias.pattern).test(prompt));
+}
+
 /**
  * Expand every typed reference mention in a submitted prompt to its uniform
  * XML tag: each `#kind:` token (and each registered legacy alias token) is
@@ -610,16 +641,17 @@ async function resolveMention(
 
 /** Slim per-turn system-prompt block that teaches the model what the
  *  `<task-ref>` tags mean and where to go to act on a referenced task.
- *  Injected via `before_agent_start` (the same hook `aura-tasks.ts` and
- *  `aura-skill-instruction.ts` use); pi rebuilds the base system prompt each
- *  turn, so appending here re-applies cleanly without accumulating across
- *  the session.
+ *  Injected via `before_agent_start` (the same hook
+ *  `aura-skill-instruction.ts` uses); pi rebuilds the base system prompt
+ *  each turn, so appending here re-applies cleanly without accumulating
+ *  across the session.
  *
  *  Kept deliberately short: the tag is self-describing (labelled attributes
  *  + element text), so this only names the parts and points at the `aura`
- *  skill for anything beyond reading the reference. `aura-tasks.ts` keeps
- *  its own `<aura-task>` block until the task-alias ticket removes it; the
- *  interim double instruction block is accepted. */
+ *  skill for anything beyond reading the reference. This is the only
+ *  task-reference instruction block: the old extension's `<aura-task>`
+ *  block was deleted together with its `@AURA-` handling (task-alias
+ *  ticket). */
 export const TASK_REF_INSTRUCTION = `
 ## Aura task references
 
@@ -666,8 +698,9 @@ export interface TaskSummary {
 export interface TaskListQuery {
   status?: string;
   /** The API takes "false"|"true"|"all"; the shared ListTasksInput still types
-   *  `archived` as boolean, so this structural copy types it unknown (the same
-   *  interface-widening cast aura-tasks.ts makes, without the cast). */
+   *  `archived` as boolean, so this structural copy types it unknown (the
+   *  same interface-widening the deleted `@AURA-` handling in aura-tasks.ts
+   *  made with an index-signature cast, without the cast). */
   archived?: unknown;
   limit?: number;
   page?: number;
@@ -840,16 +873,55 @@ export function createTaskAdapter(options: {
 }
 
 // ---------------------------------------------------------------------------
+// The `@AURA-<digits>` legacy alias (the first production alias)
+// ---------------------------------------------------------------------------
+
+/** Build the `@AURA-<digits>` legacy alias registration: the syntax the old
+ *  aura-tasks extension owned keeps working through the engine, mapped to
+ *  the task kind. Capture group 1 is the full key minus the trigger char
+ *  (`AURA-42`), per the alias capture-group contract, so one group serves
+ *  autocomplete (the partial while typing) and submit (the full key to
+ *  resolve). Autocomplete ranks through the engine's filterReferenceItems:
+ *  the alias partial is the full key shape (`AURA-4` while typing
+ *  `@AURA-4`), which plain key-prefix matching ranks, so no per-kind keyMatch
+ *  adaptation is needed (digits-only partials never arise through the
+ *  alias). Rows reuse the task adapter's formatRow description (status +
+ *  title) with the legacy token as value/label, so selection inserts
+ *  `@AURA-42` (the user stays in the syntax they typed; the deprecation
+ *  warning teaches the new one). */
+export function createAuraTaskAlias(taskAdapter: KindAdapter): LegacyAlias {
+  return {
+    // `@AURA-` at a token boundary (start of line or after whitespace)
+    // followed by at least one digit, cursor at the end of the token. The
+    // boundary keeps a mid-word `@` out; the required digit makes a bare
+    // `@AURA-` a non-mention (no suggestions, no warning); the trailing
+    // word boundary keeps glued letters (`@AURA-42abc`) out, matching the
+    // legacy grammar the old extension pinned; `i` keeps `@aura-42`
+    // working. Scanning (submit) drops the `$` anchor via globalScanPattern.
+    pattern: /(?:^|[ \t])@(AURA-\d+)\b$/i,
+    kind: TASK_KIND,
+    searchLocal: (items, partial) =>
+      filterReferenceItems(items, partial, MAX_SUGGESTIONS).map((item) => {
+        const token = `@${item.key}`;
+        // The row keeps the adapter's description (status + title); only
+        // the inserted token switches to the legacy form.
+        return { ...taskAdapter.formatRow(item), value: token, label: token };
+      }),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Autocomplete provider wiring (the `#` overlay)
 // ---------------------------------------------------------------------------
 
 /**
- * Wrap the built-in provider with the reference engine: a `#` token at a
- * token boundary whose kind is registered serves suggestions instantly from
- * the cache (no Aura fetch is ever awaited here); every non-reference token
- * (headings, mid-word `#`, unregistered kinds, zero-match partials, and the
- * no-credentials or empty-cache state) defers to the built-in provider so
- * file completion and other overlays are never clobbered.
+ * Wrap the built-in provider with the reference engine: a `#kind:` token at a
+ * token boundary whose kind is registered (or a registered legacy-alias token,
+ * e.g. `@AURA-42`) serves suggestions instantly from the cache (no Aura fetch
+ * is ever awaited here); every non-reference token (headings, mid-word `#` or
+ * `@`, unregistered kinds, zero-match partials, and the no-credentials or
+ * empty-cache state) defers to the built-in provider so file completion and
+ * other overlays are never clobbered.
  */
 export function createReferenceAutocompleteProvider(
   current: AutocompleteProvider,
@@ -862,7 +934,14 @@ export function createReferenceAutocompleteProvider(
   // the whole session, so a credential-less session fires no refresh at all.
   const canRefresh = refreshOptions.canRefresh ?? (() => true);
   return {
-    triggerCharacters: ["#"],
+    // `#` for the engine's own `#kind:` tokens; `@` for the registered legacy
+    // aliases (`@AURA-` today, `@rule:` with the rule ticket). Every `@` token
+    // that is not a registered alias defers to the wrapped provider below, so
+    // claiming the trigger character never clobbers pi's own `@` syntaxes
+    // (mentions, files). (`@` is also one of pi-tui's default trigger
+    // characters, so this declaration documents ownership as much as it
+    // changes behavior.)
+    triggerCharacters: ["#", "@"],
     async getSuggestions(lines, cursorLine, cursorCol, options): Promise<AutocompleteSuggestions | null> {
       const line = lines[cursorLine] ?? "";
       const beforeCursor = line.slice(0, cursorCol);
@@ -894,7 +973,12 @@ export function createReferenceAutocompleteProvider(
       if (canRefresh()) {
         void refreshReferenceKind(cache, adapter, partial, { signal: options.signal });
       }
-      const rows = adapter.searchLocal(cache.read(adapter.kind), partial);
+      // A legacy-alias token formats its rows through the alias's searchLocal
+      // hook so selection inserts the legacy token (the user stays in the
+      // syntax they typed); `#kind:` tokens and aliases without the hook use
+      // the kind adapter's rows.
+      const search = token.alias?.searchLocal ?? adapter.searchLocal;
+      const rows = search(cache.read(adapter.kind), partial);
       if (rows.length === 0) {
         // Zero-match partial: defer to the built-in provider.
         return current.getSuggestions(lines, cursorLine, cursorCol, options);
@@ -916,7 +1000,8 @@ export function createReferenceAutocompleteProvider(
 }
 
 // ---------------------------------------------------------------------------
-// Dynamic-import seam (same pattern as aura-tasks.ts loadTasks)
+// Dynamic-import seam (the package's standard seam for @pi-aura/shared:
+// Node's strip-types loader cannot resolve its .js extension specifiers)
 // ---------------------------------------------------------------------------
 
 /**
@@ -997,10 +1082,14 @@ async function createSessionCache(): Promise<{
 
 export default function (pi: ExtensionAPI): void {
   const taskAdapter = createTaskAdapter({ createClient: createDefaultClient });
-  // No legacy alias is registered in production wiring: the alias table is
-  // empty until the task-alias and rule tickets register `@AURA-` / `@rule:`
-  // through the registry's alias API.
   const registry = createReferenceRegistry([taskAdapter]);
+  // The first production alias: `@AURA-<digits>` keeps working through the
+  // engine (legacy-token autocomplete insertion, expansion to the same
+  // <task-ref> tag as #task:, once-per-session user-only deprecation
+  // warning). The old extension's parallel `@AURA-` handling was deleted in
+  // the same landing (atomicity): while this alias is registered, no second
+  // code path may transform the same mention.
+  registry.registerAlias(createAuraTaskAlias(taskAdapter));
   // The session cache lives from session_start on. It starts empty (the
   // provider defers on an empty cache) and is populated by the fire-and-forget
   // warmup. A /reload re-emits session_start and swaps in a fresh cache.
@@ -1087,11 +1176,12 @@ export default function (pi: ExtensionAPI): void {
     const cache = sessionCache;
     if (cache === null) return;
     // Legacy alias deprecation warning: user-only (ctx.ui.notify), at most
-    // once per session, never added to the prompt. Dormant in production
-    // wiring: the alias table is empty until an alias ticket registers.
+    // once per session, never added to the prompt. Fires on the first
+    // submitted prompt containing a legacy mention; the trigger is the
+    // pattern, not resolution (an unknown `@AURA-999` warns too).
     if (
       warnLegacySyntax !== null &&
-      registry.aliases.some((alias) => globalScanPattern(alias.pattern).test(event.text)) &&
+      promptHasLegacyMention(event.text, registry) &&
       warnLegacySyntax()
     ) {
       ctx.ui.notify(
