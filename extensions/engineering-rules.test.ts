@@ -5,10 +5,11 @@
  *   node --experimental-strip-types extensions/engineering-rules.test.ts
  *
  * Covers the pure logic: frontmatter parsing (all three attach modes),
- * glob compilation + matching, the @rule: token extractor, the @rule:/#rule:
- * resolver (raw tokens and expanded <rule-ref> elements), the system-prompt
- * section builders, the display-title loading (frontmatter name falling
- * back to the rule name), and the settings-driven ignore-glob loader
+ * glob compilation + matching, the rule resolver (@rule:/#rule: tokens and
+ * expanded <rule-ref> elements), the system-prompt section builders, the
+ * display-title loading (frontmatter name falling back to the rule name),
+ * the module-surface pin (the @rule: autocomplete provider moved to the
+ * shared reference engine), and the settings-driven ignore-glob loader
  * (global + project union). The extension factory itself is verified by
  * jiti load + the pi runtime once a repo populates `.cursor/rules/`.
  */
@@ -21,7 +22,6 @@ import engineeringRules, {
   buildAlwaysOnSection,
   buildListedRulesSection,
   collectRuleMentionNames,
-  extractRuleToken,
   globToRegExp,
   loadIgnoreGlobs,
   loadRules,
@@ -330,26 +330,42 @@ console.log("loadRules absent dir: ok");
 console.log("buildAlwaysOnSection + buildListedRulesSection: ok");
 
 // ---------------------------------------------------------------------------
-// extractRuleToken (the @ deferral contract)
+// Module surface after the alias migration (no double answers)
 // ---------------------------------------------------------------------------
 
+// The module's runtime export surface: rule loading, frontmatter parsing,
+// glob + settings helpers, the section builders, and the body-injection
+// resolver. The `@rule:` autocomplete provider (extractRuleToken,
+// formatRuleItem, createRuleAutocompleteProvider) is GONE: `@rule:` and
+// `#rule:` autocomplete live in the shared reference engine
+// (extensions/aura-references.ts, createRuleAlias + the rule adapter), so
+// nothing here may regrow a second answer for the same tokens. (AttachMode
+// and Rule are type-only exports and do not appear here.) If this pin
+// fails, something was added back to (or removed from) the module.
 {
-  // @rule: token at start of line
-  assert.equal(extractRuleToken("@rule:track"), "rule:track");
-  // @rule: token after whitespace
-  assert.equal(extractRuleToken("foo @rule:tracker-jira"), "rule:tracker-jira");
-  // @file token (non-rule:) -> null (defer to built-in path provider)
-  assert.equal(extractRuleToken("src/@file.ts"), null);
-  assert.equal(extractRuleToken("@path/to/file"), null);
-  // @ not at token boundary (in email) -> null
-  assert.equal(extractRuleToken("user@example.com"), null);
-  // empty token after @
-  assert.equal(extractRuleToken("foo @"), null);
-  // @rule: with no partial
-  assert.equal(extractRuleToken(" @rule:"), "rule:");
+  const exports = Object.keys(await import("./engineering-rules.ts")).sort();
+  assert.deepEqual(
+    exports,
+    [
+      "buildAlwaysOnSection",
+      "buildListedRulesSection",
+      "collectRuleMentionNames",
+      "default",
+      "globToRegExp",
+      "loadIgnoreGlobs",
+      "loadRules",
+      "matchesAnyGlob",
+      "parseFrontmatter",
+      "parseYamlListBlock",
+      "parseYamlScalar",
+      "parseYamlScalarList",
+      "resolveRuleMentions",
+    ],
+    "the module exports only rule loading, dispatch, sections, and the resolver",
+  );
 }
 
-console.log("extractRuleToken (@ deferral): ok");
+console.log("module surface (provider gone): ok");
 
 // ---------------------------------------------------------------------------
 // collectRuleMentionNames (the resolver's mention scan: raw tokens and

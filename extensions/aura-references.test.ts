@@ -44,6 +44,7 @@ import auraReferences, {
   MAX_SUGGESTIONS,
   ruleToReferenceItem,
   createRuleAdapter,
+  createRuleAlias,
   filterRuleItems,
   type ReferenceItem,
 } from "./aura-references.ts";
@@ -2121,6 +2122,181 @@ console.log("provider rule suggestions + deferral: ok");
 }
 
 console.log("rule expansion + resolver dual matching (the wrinkle): ok");
+
+// ---------------------------------------------------------------------------
+// The production `@rule:` alias (createRuleAlias): recognition at
+// boundaries, legacy-token autocomplete rows, expansion routing, and the
+// warning latch shared with `@AURA-`, all through the real registration
+// ---------------------------------------------------------------------------
+
+/** The production-shaped registry for the rule alias: the task + rule
+ *  adapters and both production aliases (`@AURA-`, `@rule:`), exactly as the
+ *  extension factory registers them. */
+function ruleAliasRegistry(rules: Rule[] = testRules()) {
+  const taskAdapter = createTaskAdapter({ createClient: noopClient });
+  const ruleAdapter = createRuleAdapter({ getRules: () => rules });
+  const registry = createReferenceRegistry([taskAdapter, ruleAdapter]);
+  registry.registerAlias(createAuraTaskAlias(taskAdapter));
+  registry.registerAlias(createRuleAlias(ruleAdapter, () => rules));
+  return registry;
+}
+
+{
+  // Recognition through the real pattern: `@rule:` at a token boundary,
+  // group 1 = the rule name (the alias capture contract: the autocomplete
+  // partial while typing, the full key on submit).
+  const registry = ruleAliasRegistry();
+  assert.equal(registry.aliases.length, 2, "the production wiring registers both aliases");
+  assert.equal(registry.aliases[1]?.kind, "rule", "the rule alias maps to the rule kind");
+
+  // Start of the line, after whitespace, cursor at the end of the token.
+  assert.deepEqual(
+    extractReferenceToken("@rule:tracker-aura", registry),
+    { kind: "rule", partial: "tracker-aura", raw: "@rule:tracker-aura", alias: registry.aliases[1] },
+  );
+  assert.equal(
+    extractReferenceToken("work on @rule:tracker-aura", registry)?.partial,
+    "tracker-aura",
+  );
+  // Uppercase is recognized (the `i` flag); the typed casing rides along.
+  assert.equal(extractReferenceToken("@RULE:Tracker-Aura", registry)?.partial, "Tracker-Aura");
+  // The user is still typing: the partial is the name so far.
+  assert.equal(extractReferenceToken("@rule:track", registry)?.partial, "track");
+  // An empty name: no match (no suggestions, no warning).
+  assert.equal(extractReferenceToken("@rule:", registry), null);
+  // A mid-word `@` is not a token boundary (emails, paths).
+  assert.equal(extractReferenceToken("email@rule:tracker-aura", registry), null);
+  // A token that already ended (whitespace after the name) defers.
+  assert.equal(extractReferenceToken("@rule:tracker-aura ", registry), null);
+  // Trailing punctuation ends the cursor token (the submit scan still
+  // matches the name; see the expansion section).
+  assert.equal(extractReferenceToken("@rule:tracker-aura.", registry), null);
+}
+
+console.log("production @rule: alias recognition: ok");
+
+{
+  // Autocomplete through the real registration: the same rule rows `#rule:`
+  // offers, but selection inserts the LEGACY @rule:<name> token (the user
+  // stays in the syntax they typed; the warning teaches the new one).
+  const registry = ruleAliasRegistry();
+  const current = fakeCurrent();
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () => createInMemoryReferenceCache());
+
+  // Typing @rule:track offers the loaded rules as @rule:<name> rows with
+  // the attach mode as the description.
+  const s = await suggestAt(provider, "@rule:track", 11);
+  assert.deepEqual(s?.items.map((r) => r.value), ["@rule:tracker-aura", "@rule:tracker-jira"]);
+  assert.equal(s?.prefix, "@rule:track", "the typed legacy token is the replaced prefix");
+  assert.equal(s?.items[0]?.label, "@rule:tracker-aura");
+  assert.equal(s?.items[0]?.description, "(manual)", "the row keeps the attach description");
+  // Glob rules keep their patterns in the description.
+  const globs = await suggestAt(provider, "@rule:general", 13);
+  assert.deepEqual(
+    globs?.items.map((r) => r.value),
+    ["@rule:general-markdown-format", "@rule:general-code-quality"],
+  );
+  assert.equal(globs?.items[0]?.description, "(glob: **/*.md)");
+  // Case-insensitive typing offers canonical tokens.
+  assert.deepEqual(
+    (await suggestAt(provider, "@RULE:track", 11))?.items.map((r) => r.value),
+    ["@rule:tracker-aura", "@rule:tracker-jira"],
+  );
+  // The engine owns the alias token: no file completion while completing it.
+  assert.equal(provider.shouldTriggerFileCompletion?.(["@rule:track"], 0, 11), false);
+
+  // Deferral: a bare @rule: (empty name), a zero-match name, and a mid-word
+  // `@` all defer to the built-in provider.
+  const defer = current.calls.suggestions;
+  await suggestAt(provider, "@rule:", 6);
+  await suggestAt(provider, "@rule:zzz", 9);
+  await suggestAt(provider, "email@rule:tracker-aura", 21);
+  assert.equal(current.calls.suggestions, defer + 3, "every non-alias @rule: token deferred");
+
+  // No rules loaded: the alias silently defers; nothing throws.
+  const none = ruleAliasRegistry([]);
+  const noneProvider = createReferenceAutocompleteProvider(current.provider, none, () => createInMemoryReferenceCache());
+  await suggestAt(noneProvider, "@rule:track", 11);
+  assert.equal(current.calls.suggestions, defer + 4);
+}
+
+console.log("production @rule: alias autocomplete: ok");
+
+{
+  // Expansion routing: the alias mention resolves through the rule adapter
+  // (local name match) and renders the same <rule-ref> tag as `#rule:`.
+  const registry = ruleAliasRegistry();
+  const lookup = (kind: string, token: string) => {
+    const adapter = registry.kinds.get(kind);
+    if (!adapter) return Promise.resolve(null);
+    return adapter.resolveFullToken(token, createInMemoryReferenceCache());
+  };
+  const expansion = '<rule-ref name="tracker-aura" attach="manual">Tracker Aura</rule-ref>';
+  const jira = '<rule-ref name="tracker-jira" attach="manual">tracker-jira</rule-ref>';
+
+  // Start, middle, and end of the prompt (the submit scan drops the
+  // cursor anchor, so mentions anywhere in a submitted prompt expand).
+  assert.equal(await expandReferenceMentions("@rule:tracker-aura today", registry, lookup), `${expansion} today`);
+  assert.equal(await expandReferenceMentions("work on @rule:tracker-aura today", registry, lookup), `work on ${expansion} today`);
+  assert.equal(await expandReferenceMentions("work on @rule:tracker-aura", registry, lookup), `work on ${expansion}`);
+  // Start of a later line in a multiline prompt.
+  assert.equal(
+    await expandReferenceMentions("two things:\n@rule:tracker-aura and done", registry, lookup),
+    `two things:\n${expansion} and done`,
+  );
+  // Trailing punctuation: the legacy grammar matches the name up to it.
+  assert.equal(await expandReferenceMentions("see @rule:tracker-aura.", registry, lookup), `see ${expansion}.`);
+  // Uppercase typed name: case-insensitive resolution, canonical output.
+  assert.equal(await expandReferenceMentions("see @RULE:TRACKER-AURA", registry, lookup), `see ${expansion}`);
+  // Both syntaxes side by side expand to the same tag shape; the rule
+  // bodies still inject from both forms (the dual matching).
+  const both = await expandReferenceMentions("@rule:tracker-aura and #rule:tracker-jira", registry, lookup);
+  assert.equal(both, `${expansion} and ${jira}`);
+  const injected = resolveRuleMentions(both, testRules());
+  assert.ok(injected.includes("Use the Aura tracker."));
+  assert.ok(injected.includes("Use Jira."));
+  // Unknown names stay exactly as typed (left for the agent to resolve).
+  assert.equal(await expandReferenceMentions("see @rule:ghost", registry, lookup), "see @rule:ghost");
+  // An empty name is not a mention.
+  assert.equal(await expandReferenceMentions("bare @rule: alone", registry, lookup), "bare @rule: alone");
+}
+
+console.log("production @rule: alias expansion routing: ok");
+
+{
+  // The shared deprecation-warning latch: promptHasLegacyMention fires on
+  // either alias syntax; the once-per-session decision fires exactly once
+  // for the first legacy token of either syntax.
+  const registry = ruleAliasRegistry();
+  assert.equal(promptHasLegacyMention("fix @rule:tracker-aura today", registry), true);
+  assert.equal(promptHasLegacyMention("@RULE:tracker-aura", registry), true);
+  assert.equal(promptHasLegacyMention("@AURA-42", registry), true);
+  assert.equal(promptHasLegacyMention("two things:\n@rule:tracker-aura", registry), true);
+  // Neither new syntax warns, nor does a bare @rule:.
+  assert.equal(promptHasLegacyMention("#rule:tracker-aura is the new syntax", registry), false);
+  assert.equal(promptHasLegacyMention("#task:AURA-42", registry), false);
+  assert.equal(promptHasLegacyMention("bare @rule: alone", registry), false);
+  assert.equal(promptHasLegacyMention("plain prompt", registry), false);
+
+  // The composition: whichever legacy syntax comes first fires the
+  // warning exactly once per session; the other syntax never fires it
+  // again (the latch is shared across aliases).
+  const warn = createDeprecationWarningDecision();
+  const shouldWarn = (prompt: string) => promptHasLegacyMention(prompt, registry) && warn();
+  assert.equal(shouldWarn("@AURA-42 first"), true, "the first @AURA- mention warns");
+  assert.equal(shouldWarn("@rule:tracker-aura second"), false, "the shared latch is consumed");
+  const warn2 = createDeprecationWarningDecision();
+  const shouldWarn2 = (prompt: string) => promptHasLegacyMention(prompt, registry) && warn2();
+  assert.equal(shouldWarn2("@rule:tracker-aura first"), true, "the first @rule: mention warns too");
+  assert.equal(shouldWarn2("@AURA-42 second"), false);
+  // A new-syntax prompt never consumes the latch.
+  const warn3 = createDeprecationWarningDecision();
+  const shouldWarn3 = (prompt: string) => promptHasLegacyMention(prompt, registry) && warn3();
+  assert.equal(shouldWarn3("#rule:tracker-aura is new"), false);
+  assert.equal(shouldWarn3("@AURA-42 later"), true);
+}
+
+console.log("production @rule: alias warning latch (shared with @AURA-): ok");
 
 // ---------------------------------------------------------------------------
 // Factory is a function (smoke; the factory itself is pi-runtime verified)
