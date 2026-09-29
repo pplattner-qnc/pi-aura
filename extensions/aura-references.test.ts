@@ -24,6 +24,7 @@ import auraReferences, {
   extractReferenceToken,
   filterReferenceItems,
   refreshReferenceKind,
+  createDeprecationWarningDecision,
   TASK_REF_INSTRUCTION,
   MAX_SUGGESTIONS,
   type ReferenceItem,
@@ -1464,6 +1465,29 @@ console.log("parsePartial decline deferral: ok");
 }
 
 console.log("alias registry registration + expansion routing: ok");
+
+// ---------------------------------------------------------------------------
+// Once-per-session deprecation-warning decision (user-only: surfaces via
+// ctx.ui.notify in the factory wiring, never in the prompt)
+// ---------------------------------------------------------------------------
+
+{
+  // First call in a session: warn now. Every later call in the same session:
+  // no. Exactly one warning per session no matter how often the decision is
+  // consulted.
+  const warn = createDeprecationWarningDecision();
+  assert.equal(warn(), true, "the first alias mention in a session warns");
+  assert.equal(warn(), false);
+  assert.equal(warn(), false, "exactly once per session");
+
+  // The flag resets per session: a fresh session (a fresh decision, as the
+  // factory builds one per session_start) warns again, once.
+  const nextSession = createDeprecationWarningDecision();
+  assert.equal(nextSession(), true, "a new session re-arms the warning");
+  assert.equal(nextSession(), false);
+}
+
+console.log("once-per-session deprecation-warning decision: ok");
 
 // ---------------------------------------------------------------------------
 // TASK_REF_INSTRUCTION (the per-turn system-prompt block)

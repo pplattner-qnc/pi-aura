@@ -289,6 +289,27 @@ export function createReferenceRegistry(
   };
 }
 
+/**
+ * The once-per-session deprecation-warning decision (the arch-spec alias
+ * contract's second half): a latched decision the factory consults when a
+ * submitted prompt contains a legacy-alias mention. The first call says
+ * "warn now"; every later call in the same session says no, so the user sees
+ * the deprecation warning exactly once per session. The factory builds a
+ * fresh decision per `session_start`, which is what resets the flag per
+ * session (a `/reload` re-emits `session_start` and re-arms it).
+ *
+ * The warning itself is user-only: the wiring surfaces it via `ctx.ui.notify`
+ * and nothing is ever added to the prompt sent to the model.
+ */
+export function createDeprecationWarningDecision(): () => boolean {
+  let warned = false;
+  return () => {
+    if (warned) return false;
+    warned = true;
+    return true;
+  };
+}
+
 /** A token extracted at the cursor: the registered kind, the partial after
  *  `#kind:`, and the raw typed text (without the leading boundary) used as
  *  the completion prefix. */
