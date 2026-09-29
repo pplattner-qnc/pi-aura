@@ -4,7 +4,7 @@ slug: 3-inline-expansion-instruction-aliases
 title: "Inline expansion, system-prompt instruction, dormant alias machinery"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 blocked_by: [1-task-autocomplete-warm-cache]
 ---
