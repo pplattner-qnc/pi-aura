@@ -50,8 +50,9 @@
  *    exactly as typed so the agent can resolve them via the `aura` skill.
  *    Without Aura credentials no targeted fetch is attempted at all.
  * 7. The system prompt gains a slim per-turn instruction block
- *    (`TASK_REF_INSTRUCTION`) documenting the `<task-ref>` shape and
- *    pointing at the `aura` skill, appended via `before_agent_start` (pi
+ *    (REFERENCE_INSTRUCTION; task-ref shape then, task-ref + rule-ref
+ *    shapes since the rule-kind ticket) pointing at the `aura` skill,
+ *    appended via `before_agent_start` (pi
  *    rebuilds the base prompt each turn, so the append never accumulates).
  * 8. The alias registry API: `registerAlias` maps a legacy token
  *    pattern to a kind adapter and `createDeprecationWarningDecision`
@@ -67,9 +68,8 @@
  * tag as `#task:`, and fires the once-per-session deprecation warning on
  * the first submitted legacy mention. `aura-tasks.ts` shrank to its
  * reachability probe in the same landing (atomicity: no state where two
- * code paths transform the same mention), so this engine's
- * TASK_REF_INSTRUCTION is the only task-reference block in the system
- * prompt.
+ * code paths transform the same mention), so this engine's instruction
+ * block is the only task-reference block in the system prompt.
  *
  * The reference-cache-sqlite ticket swaps the production cache backing to
  * the persistent sqlite store (see `createSessionCache` below): `node:sqlite`
@@ -79,10 +79,28 @@
  * across sessions; the in-memory implementation remains the unit-test fake
  * and the silent fallback for a database that cannot be opened.
  *
+ * The reference-rule-kind task made `#rule:` the second kind and the
+ * first local-only one: the rule adapter reuses rule loading from
+ * `engineering-rules.ts` (`loadRules` + the `Rule` type; no frontmatter
+ * parsing is reimplemented), searches the loaded rules by name substring,
+ * expands to `<rule-ref name attach>display-title</rule-ref>`, and marks
+ * itself `local` so the factory's expansion gate exempts it (rules resolve
+ * in a credential-less session; they never touch the cache or Aura).
+ * Because rules are cwd-local they ride engine memory, not the persistent
+ * cache: the factory loads them per session and hands them to the adapter
+ * through an accessor. The engineering-rules `before_agent_start` resolver
+ * still injects mentioned rule bodies, matching raw `#rule:` tokens AND the
+ * expanded `<rule-ref>` elements this engine's input transform leaves in
+ * the prompt (the transform runs before `before_agent_start`). The legacy
+ * `@rule:` autocomplete stays in `engineering-rules.ts` until the second
+ * slice registers `@rule:` as the second production alias and deletes the
+ * old provider in the same atomic landing.
+ *
  * Credentials: the task adapter talks to Aura through the shared AuraClient
  * (`createDefaultAuraClient`, which reads `aura.baseUrl` from settings plus
  * the Aura PAT from the OS keyring). When credentials are missing, warmup
  * no-ops and the provider defers; nothing ever throws into the session.
+ * Rule references never need credentials (local kind).
  *
  * Tests: the pure seams are unit-tested in
  * `extensions/aura-references.test.ts`. Run with:
@@ -91,6 +109,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { loadRules, type Rule } from "./engineering-rules.ts";
 
 // ---------------------------------------------------------------------------
 // Autocomplete types (minimal structural shapes, see engineering-rules.ts)
@@ -260,6 +279,12 @@ export interface LegacyAlias {
 export interface KindAdapter {
   /** Registry key: the kind prefix typed after `#` (e.g. "task"). */
   readonly kind: string;
+  /** Local-only kind (the rule kind is the first): search, resolution, and
+   *  warmup never touch a server or credentials, so the factory's expansion
+   *  gate exempts local kinds (rule mentions resolve in a credential-less
+   *  session) and their items never ride the persistent cache (rule loading
+   *  is cwd-local; persisting rows would cross-contaminate repos). */
+  readonly local?: boolean;
   /** Interpret the partial typed after `#kind:`. Return null to decline so
    *  the provider defers (kinds with restricted token shapes use this). */
   parsePartial(partial: string): string | null;
@@ -636,34 +661,34 @@ async function resolveMention(
 }
 
 // ---------------------------------------------------------------------------
-// Per-turn system-prompt instruction (the <task-ref> block)
+// Per-turn system-prompt instruction (the <task-ref> + <rule-ref> block)
 // ---------------------------------------------------------------------------
 
 /** Slim per-turn system-prompt block that teaches the model what the
- *  `<task-ref>` tags mean and where to go to act on a referenced task.
+ *  reference tags mean and where to go to act on a referenced resource.
  *  Injected via `before_agent_start` (the same hook
  *  `aura-skill-instruction.ts` uses); pi rebuilds the base system prompt
  *  each turn, so appending here re-applies cleanly without accumulating
  *  across the session.
  *
- *  Kept deliberately short: the tag is self-describing (labelled attributes
+ *  Kept deliberately short: the tags are self-describing (labelled attributes
  *  + element text), so this only names the parts and points at the `aura`
- *  skill for anything beyond reading the reference. This is the only
- *  task-reference instruction block: the old extension's `<aura-task>`
- *  block was deleted together with its `@AURA-` handling (task-alias
- *  ticket). */
-export const TASK_REF_INSTRUCTION = `
-## Aura task references
+ *  skill for anything beyond reading a task reference. This is the only
+ *  reference instruction block: the old extension's `<aura-task>` block
+ *  was deleted together with its `@AURA-` handling (task-alias ticket),
+ *  and rule references carry their body in the system prompt already
+ *  (the engineering-rules mention injection). */
+export const REFERENCE_INSTRUCTION = `
+## Inline references
 
-User messages may contain inline Aura task references rendered as tagged elements:
+User messages may contain inline references rendered as tagged elements:
 
   <task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>
+  <rule-ref name="tracker-aura" attach="manual">Tracker Aura</rule-ref>
 
-- \`key\` is the task's human-readable identifier (e.g. \`AURA-42\`).
-- \`status\` is its current Aura workflow status (e.g. \`OPEN\`, \`IN_REVIEW\`, \`DONE\`).
-- The element text is the task title.
+Task references carry only the key, status, and title, never the task body. \`key\` is the task's human-readable identifier (e.g. \`AURA-42\`), \`status\` its current Aura workflow status (e.g. \`OPEN\`, \`IN_REVIEW\`, \`DONE\`), and the element text is the task title. To read the full task, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further task details from the reference alone.
 
-These references carry only the key, status, and title, never the task body. To read the full task, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further task details from the reference alone.
+Rule references carry the rule's \`name\`, how it attaches (\`attach\`: \`manual\`, \`always\`, or \`glob\` with its patterns), and the rule's display title as the element text. The referenced rule's body is injected into the system prompt for this turn; honor it without further action.
 `;
 
 // ---------------------------------------------------------------------------
@@ -868,6 +893,104 @@ export function createTaskAdapter(options: {
         // data exists. Credentials appearing later in the session do not
         // retry: warmup is one-shot at session_start (this slice's contract).
       }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Rule kind adapter (the first local-only kind)
+// ---------------------------------------------------------------------------
+
+/** The rule kind prefix typed after `#` (`#rule:<name>`). */
+export const RULE_KIND = "rule";
+
+/** Map one loaded `Rule` to the engine's reference item. `id` is the
+ *  relPath (stable and unique across subdirectories), `key` the rule name
+ *  (the token key: `#rule:<name>` resolves by it), `title` the display
+ *  title (frontmatter name falling back to the rule name; the element text
+ *  on expansion), and `status` the attach summary (the row description's
+ *  source and the `attach` attribute on expansion). */
+export function ruleToReferenceItem(rule: Rule): ReferenceItem {
+  return {
+    kind: RULE_KIND,
+    id: rule.relPath,
+    key: rule.name,
+    title: rule.displayName ?? rule.name,
+    status: rule.globs.length > 0 ? `glob: ${rule.globs.join(", ")}` : rule.attach,
+  };
+}
+
+/** Filter rule items by rule-name substring (case-insensitive), in loaded
+ *  order, capped at `max`. Rules are matched by name, never by display
+ *  title (the spec's "matching by name substring"), so `#rule:track` finds
+ *  `tracker-aura` while a display-title-only hit does not. */
+export function filterRuleItems(
+  items: ReferenceItem[],
+  partial: string,
+  max: number = MAX_SUGGESTIONS,
+): ReferenceItem[] {
+  const query = partial.toLowerCase();
+  if (query === "") return items.slice(0, max);
+  return items.filter((item) => item.key.toLowerCase().includes(query)).slice(0, max);
+}
+
+/** The rule kind adapter: local-only. Search filters the session's loaded
+ *  rules by name substring; resolution matches by name; expansion emits the
+ *  prototype-pinned `<rule-ref name attach>display-title</rule-ref>` tag.
+ *
+ *  Rules ride engine memory, not the reference cache: they are loaded from
+ *  the session's cwd (`<cwd>/.cursor/rules/`) and persisting rows would
+ *  cross-contaminate repos, so the factory loads them per session (the
+ *  cheap local equivalent of warmup) and hands them over through the
+ *  injected `getRules` accessor. `searchLocal` and `resolveFullToken`
+ *  therefore ignore the cache items they are handed; `searchServer` has
+ *  nothing to ask (returns []) and there is no warmup. */
+export function createRuleAdapter(options: { getRules: () => Rule[] }): KindAdapter {
+  const { getRules } = options;
+
+  const formatRow = (item: ReferenceItem): AutocompleteItem => ({
+    // The value doubles as the inserted token: `#rule:` plus the canonical
+    // rule name, so selection inserts `#rule:<name>` however the user typed
+    // the partial. The description carries the attach mode (with the glob
+    // patterns for glob rules), matching the information the legacy
+    // `@rule:` rows carry.
+    value: `#${RULE_KIND}:${item.key}`,
+    label: `#${RULE_KIND}:${item.key}`,
+    description: `(${item.status ?? "manual"})`,
+  });
+
+  return {
+    kind: RULE_KIND,
+    local: true,
+
+    // Rules accept any non-space partial after `#rule:`.
+    parsePartial(partial) {
+      return partial;
+    },
+
+    searchLocal(_items, partial) {
+      return filterRuleItems(getRules().map(ruleToReferenceItem), partial).map(formatRow);
+    },
+
+    async searchServer() {
+      // Rules are local-only: there is no server to search (the SWR
+      // refresh no-ops on the empty result and writes nothing).
+      return [];
+    },
+
+    formatRow,
+
+    formatExpansion(item) {
+      return `<rule-ref name="${escapeAttr(item.key)}" attach="${escapeAttr(item.status ?? "")}">${escapeText(item.title)}</rule-ref>`;
+    },
+
+    async resolveFullToken(token) {
+      // Local name match, case-insensitive; the passed cache is never
+      // consulted (rules are cwd-local, no cache rows). Null when the name
+      // resolves to nothing, so the mention stays as typed upstream.
+      const lower = token.toLowerCase();
+      const rule = getRules().find((r) => r.name.toLowerCase() === lower);
+      return rule ? ruleToReferenceItem(rule) : null;
     },
   };
 }
@@ -1082,7 +1205,14 @@ async function createSessionCache(): Promise<{
 
 export default function (pi: ExtensionAPI): void {
   const taskAdapter = createTaskAdapter({ createClient: createDefaultClient });
-  const registry = createReferenceRegistry([taskAdapter]);
+  // The rule kind (local-only): the rules ride engine memory, never the
+  // reference cache (they are cwd-local; persisting rows would
+  // cross-contaminate repos). The factory loads them per session and hands
+  // them to the adapter through this accessor (a /reload re-emits
+  // session_start and swaps in the fresh set).
+  let sessionRules: Rule[] = [];
+  const ruleAdapter = createRuleAdapter({ getRules: () => sessionRules });
+  const registry = createReferenceRegistry([taskAdapter, ruleAdapter]);
   // The first production alias: `@AURA-<digits>` keeps working through the
   // engine (legacy-token autocomplete insertion, expansion to the same
   // <task-ref> tag as #task:, once-per-session user-only deprecation
@@ -1132,6 +1262,12 @@ export default function (pi: ExtensionAPI): void {
       }),
     );
 
+    // The session's rules: loaded from the session cwd (the cheap local
+    // equivalent of the task warmup; a repo without `.cursor/rules/` loads
+    // an empty set and the rule kind offers nothing). Synchronous and
+    // local, so it cannot disturb the session.
+    sessionRules = loadRules(ctx.cwd);
+
     // Null first: a /reload re-entering session_start must not keep serving
     // the previous session's cache while the new one is being built (the
     // provider defers on a null cache, exactly like before the first
@@ -1168,10 +1304,11 @@ export default function (pi: ExtensionAPI): void {
   // Inline expansion on submit: every typed `#kind:` mention resolves
   // cache-first via its kind adapter (`resolveFullToken`, then the targeted
   // getTaskByHumanKey fallback) and expands to the uniform tag. Unresolvable
-  // references stay exactly as typed. Without Aura credentials (or before
-  // the one-shot probe resolves) no targeted fetch may be attempted at all:
-  // null is passed as the lookup and the transform leaves every mention as
-  // typed without resolving anything.
+  // references stay exactly as typed. The resolution gate is per kind:
+  // server kinds (tasks) resolve only with Aura credentials (without them,
+  // or before the one-shot probe resolves, no targeted fetch may be attempted
+  // at all, so the mention stays as typed without any lookup), while local
+  // kinds (rules) resolve always: rule mentions expand offline.
   pi.on("input", async (event, ctx) => {
     const cache = sessionCache;
     if (cache === null) return;
@@ -1192,21 +1329,24 @@ export default function (pi: ExtensionAPI): void {
     const text = await expandReferenceMentions(
       event.text,
       registry,
-      clientAvailable
-        ? (kind, token) => {
-            const adapter = registry.kinds.get(kind);
-            return adapter ? adapter.resolveFullToken(token, cache) : Promise.resolve(null);
-          }
-        : null,
+      (kind, token) => {
+        const adapter = registry.kinds.get(kind);
+        if (adapter === undefined) return Promise.resolve(null);
+        // The per-kind gate: local kinds resolve without credentials; server
+        // kinds only once the session's client probe succeeded.
+        if (!adapter.local && !clientAvailable) return Promise.resolve(null);
+        return adapter.resolveFullToken(token, cache);
+      },
     );
     if (text === event.text) return; // unchanged: pass through
     return { action: "transform", text };
   });
 
-  // Teach the model what the `<task-ref>` tags mean and that it must reach
-  // for the `aura` skill to act on a referenced task. Appended every turn
-  // (pi rebuilds the base system prompt each turn, so this never accumulates).
+  // Teach the model what the reference tags mean (and that it must reach
+  // for the `aura` skill to act on a referenced task; rule bodies arrive in
+  // the system prompt already). Appended every turn (pi rebuilds the base
+  // system prompt each turn, so this never accumulates).
   pi.on("before_agent_start", async (event, _ctx) => {
-    return { systemPrompt: event.systemPrompt + "\n" + TASK_REF_INSTRUCTION };
+    return { systemPrompt: event.systemPrompt + "\n" + REFERENCE_INSTRUCTION };
   });
 }

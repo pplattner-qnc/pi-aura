@@ -24,9 +24,14 @@
  *   - Defer to the built-in path provider when the token after `@` doesn't
  *     start with `rule:` (avoid clobbering pi's `@file` path syntax).
  *
- * `before_agent_start` `@rule:` resolver — scans the user's prompt for
- * `@rule:<name>` tokens and appends the corresponding rule body to the
- * system prompt for that turn.
+ * `before_agent_start` rule resolver: scans the user's prompt for rule
+ * mentions and appends the corresponding rule bodies to the system prompt
+ * for that turn. Three mention forms are matched: legacy `@rule:<name>`
+ * tokens, new `#rule:<name>` tokens (the shared reference engine's
+ * syntax), and expanded `<rule-ref name="...">` elements (the reference
+ * engine's input transform rewrites `#rule:` mentions before
+ * `before_agent_start` runs, so the resolver must match both the raw tokens
+ * and the expanded elements).
  *
  * Configurable skip (`aura.cursorRules.ignore`):
  *   - An array of glob patterns matched against the rule path **relative to
@@ -133,8 +138,13 @@ const RULE_TOKEN_PREFIX = "rule:";
 type AttachMode = "always" | "glob" | "manual";
 
 interface Rule {
-  /** Rule name (filename without `.mdc`). */
+  /** Rule name (filename without `.mdc`). The canonical token key for
+   *  `#rule:`/`@rule:` mentions. */
   name: string;
+  /** Display title: the frontmatter `name` when present, falling back to
+   *  the filename-derived name. The reference engine's `<rule-ref>`
+   *  element text. */
+  displayName?: string;
   /** Absolute path to the `.mdc` file. */
   path: string;
   /** Path relative to RULES_DIR (no leading sep), for the system-prompt listing
@@ -389,8 +399,14 @@ export function loadRules(cwd: string): Rule[] {
     // name = filename without ".mdc" (last path segment, extension stripped).
     const lastSeg = relWithExt.split("/").pop() ?? relWithExt;
     const name = lastSeg.endsWith(".mdc") ? lastSeg.slice(0, -4) : lastSeg;
+    // Display title: the frontmatter `name` when it carries one (a
+    // non-empty string), else undefined so readers fall back to the
+    // filename-derived name.
+    const displayName =
+      typeof fm.name === "string" && fm.name.trim() !== "" ? fm.name : undefined;
     rules.push({
       name,
+      displayName,
       path,
       relPath: relWithExt,
       attach,
@@ -503,26 +519,51 @@ function createRuleAutocompleteProvider(
 }
 
 // ---------------------------------------------------------------------------
-// `@rule:` resolver (before_agent_start)
+// `@rule:`/`#rule:`/`<rule-ref>` resolver (before_agent_start)
 // ---------------------------------------------------------------------------
 
-/** Scan the prompt for `@rule:<name>` tokens and append the corresponding
- *  rule bodies to the system prompt for that turn. Returns the text to append
- *  (or empty string if no `@rule:` tokens are present). */
-export function resolveRuleMentions(prompt: string, rules: Rule[]): string {
-  const mentioned = new Set<string>();
-  const re = /@(?:rule:)([a-z0-9-]+)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(prompt)) !== null) {
-    mentioned.add((m[1] ?? "").toLowerCase());
+/** Collect the mentioned rule names from a prompt, lowercased, in
+ *  first-seen order. Three mention forms are matched:
+ *
+ *  - legacy `@rule:<name>` tokens (the original grammar, unchanged),
+ *  - new `#rule:<name>` tokens (the shared reference engine's syntax),
+ *    and
+ *  - expanded `<rule-ref name="...">` elements: the reference engine's
+ *    input transform rewrites `#rule:` mentions to `<rule-ref>` elements
+ *    BEFORE `before_agent_start` runs, so a submitted mention usually
+ *    arrives here already expanded. The raw token form still matters for
+ *    mentions the transform left as typed (unresolvable names).
+ *
+ *  The token grammar stops at non-name characters (letters, digits,
+ *  hyphens), so trailing punctuation is lenient, matching the legacy
+ *  `@rule:` behavior. The same rule through any mix of forms is one
+ *  name. */
+export function collectRuleMentionNames(prompt: string): string[] {
+  const names = new Set<string>();
+  const tokenRe = /[@#]rule:([a-z0-9-]+)/gi;
+  for (const m of prompt.matchAll(tokenRe)) {
+    names.add((m[1] ?? "").toLowerCase());
   }
-  if (mentioned.size === 0) return "";
+  const elementRe = /<rule-ref\b[^>]*\bname="([^"]*)"/gi;
+  for (const m of prompt.matchAll(elementRe)) {
+    names.add((m[1] ?? "").toLowerCase());
+  }
+  return Array.from(names);
+}
+
+/** Scan the prompt for rule mentions (tokens and expanded elements; see
+ *  collectRuleMentionNames) and append the corresponding rule bodies to
+ *  the system prompt for that turn. Returns the text to append (or empty
+ *  string when no mentioned rule resolves). */
+export function resolveRuleMentions(prompt: string, rules: Rule[]): string {
+  const mentioned = collectRuleMentionNames(prompt);
+  if (mentioned.length === 0) return "";
   const byName = new Map(rules.map((r) => [r.name.toLowerCase(), r]));
   const blocks: string[] = [];
   for (const name of mentioned) {
     const rule = byName.get(name);
     if (rule) {
-      blocks.push(`### Rule: ${rule.name} (@rule:${name})\n\n${rule.body.trim()}`);
+      blocks.push(`### Rule: ${rule.name}\n\n${rule.body.trim()}`);
     }
   }
   if (blocks.length === 0) return "";
