@@ -17,7 +17,13 @@
  * local-only kind: name-substring search over the loaded rules, row
  * formatting, rule-ref expansion, local resolution without credentials,
  * and the body-injection coexistence with the input transform: raw
- * `#rule:` tokens and expanded `<rule-ref>` elements). The provider wiring
+ * `#rule:` tokens and expanded `<rule-ref>` elements), and the artifact
+ * kind end-to-end (the first metadata-driven kind: item mapping whose
+ * extras carry the artifact kind and latest version, title-labeled rows
+ * with the uuid in the description and the full uuid token as the value,
+ * uuid-prefix + title-substring local filtering, the listArtifacts warmup
+ * pagination with its q-based server search, and the SWR write-through
+ * for server-only matches and renames). The provider wiring
  * that defers to the built-in
  * provider for non-reference tokens is tested at its
  * pure wrapper seam. The extension factory (which reaches Aura through the
@@ -28,6 +34,11 @@
 
 import assert from "node:assert/strict";
 import auraReferences, {
+  ARTIFACT_KIND,
+  ARTIFACT_PAGE_SIZE,
+  MAX_ARTIFACTS,
+  artifactToReferenceItem,
+  createArtifactAdapter,
   createAuraTaskAlias,
   createInMemoryReferenceCache,
   createReferenceAutocompleteProvider,
@@ -2297,6 +2308,372 @@ console.log("production @rule: alias expansion routing: ok");
 }
 
 console.log("production @rule: alias warning latch (shared with @AURA-): ok");
+
+// ---------------------------------------------------------------------------
+// createArtifactAdapter: item mapping, rows, local filtering, registration
+// ---------------------------------------------------------------------------
+
+interface FakeArtifact {
+  id: string;
+  title: string;
+  latest_version: number;
+  kind: string;
+}
+
+function fakeArtifacts(count: number, offset = 0): FakeArtifact[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `9f3c${String(offset + i + 1).padStart(4, "0")}-1111-4222-8333-444444444444`,
+    title: `Artifact ${offset + i + 1}`,
+    latest_version: (offset + i) % 5 + 1,
+    kind: (["PLAN", "REVIEW", "GENERIC"] as const)[(offset + i) % 3],
+  }));
+}
+
+/** Fake artifact client: one array of pages (page 1 by default, so search
+ *  queries resolve against pages[0]); option to fail on a page. */
+function fakeArtifactClient(pages: FakeArtifact[][], behavior?: { failOnPage?: number }) {
+  const pageCalls: number[] = [];
+  const queries: Array<Record<string, unknown>> = [];
+  return {
+    client: {
+      listArtifacts: async (query?: Record<string, unknown>) => {
+        const page = (query?.page as number | undefined) ?? 1;
+        pageCalls.push(page);
+        queries.push({ ...query });
+        if (behavior?.failOnPage === page) throw new Error("network down");
+        return { items: pages[page - 1] ?? [], pagination: {} };
+      },
+      getArtifact: async () => {
+        throw new Error("not used here");
+      },
+    },
+    pageCalls,
+    queries,
+  };
+}
+
+{
+  const adapter = createArtifactAdapter({
+    createClient: async () => {
+      throw new Error("no credentials in this test");
+    },
+  });
+
+  assert.equal(ARTIFACT_KIND, "artifact");
+  assert.equal(adapter.kind, ARTIFACT_KIND);
+
+  // The partial is free-form: uuid prefixes and title substrings both type.
+  assert.equal(adapter.parsePartial("9f3c"), "9f3c");
+  assert.equal(adapter.parsePartial(""), "");
+  assert.equal(adapter.parsePartial("onboard"), "onboard");
+
+  // Item mapping: id and key are both the uuid (the token key inserted on
+  // selection); the Aura artifact kind and the latest version ride the item
+  // as metadata extras (the sqlite metadata JSON column contract: the
+  // engine's own fields stay kind-agnostic, the extras land in the JSON
+  // column, and the expansion attributes read them back from the cache).
+  const item = artifactToReferenceItem({
+    id: "9f3c2e8a-1111-4222-8333-444444444444",
+    title: "Q3 planning doc",
+    latest_version: 3,
+    kind: "PLAN",
+  });
+  assert.deepEqual(item, {
+    kind: "artifact",
+    id: "9f3c2e8a-1111-4222-8333-444444444444",
+    key: "9f3c2e8a-1111-4222-8333-444444444444",
+    title: "Q3 planning doc",
+    artifactKind: "PLAN",
+    version: 3,
+  });
+
+  // Row shape (the prototype's artifact UX decision): the label is the
+  // TITLE, the uuid appears only in the description, and the inserted value
+  // is the full uuid token, so the unreadable uuid hits the text box only
+  // after selection.
+  const row = adapter.formatRow(item);
+  assert.equal(row.value, "#artifact:9f3c2e8a-1111-4222-8333-444444444444");
+  assert.equal(row.label, "Q3 planning doc");
+  assert.equal(row.description, "9f3c2e8a-1111-4222-8333-444444444444");
+
+  // A title with XML-special characters does not break row formatting (rows
+  // are plain text; escaping matters on expansion, not here).
+  assert.equal(
+    adapter.formatRow(
+      artifactToReferenceItem({ id: "aaaa", title: `Plans & "<roadmap>"`, latest_version: 2, kind: "GENERIC" }),
+    ).label,
+    `Plans & "<roadmap>"`,
+  );
+
+  // Local filtering: id (uuid) prefix OR title substring, case-insensitive.
+  const items = [
+    artifactToReferenceItem({ id: "9f3c0000-1111-4222-8333-444444444444", title: "Onboarding flow review", latest_version: 2, kind: "REVIEW" }),
+    artifactToReferenceItem({ id: "0a1b0000-1111-4222-8333-444444444444", title: "Q3 planning doc", latest_version: 7, kind: "PLAN" }),
+    artifactToReferenceItem({ id: "77e00000-1111-4222-8333-444444444444", title: "Onboarding checklist", latest_version: 1, kind: "GENERIC" }),
+  ];
+
+  // `#artifact:9f3` matches the uuid prefix, in either casing.
+  assert.deepEqual(
+    adapter.searchLocal(items, "9f3").map((r) => r.value),
+    ["#artifact:9f3c0000-1111-4222-8333-444444444444"],
+  );
+  assert.deepEqual(
+    adapter.searchLocal(items, "9F3").map((r) => r.value),
+    ["#artifact:9f3c0000-1111-4222-8333-444444444444"],
+  );
+
+  // `#artifact:onboard` matches the title substring, case-insensitive; two
+  // artifacts with colliding titles are both listed (the uuid in the row
+  // description disambiguates).
+  assert.deepEqual(
+    adapter.searchLocal(items, "onboard").map((r) => r.label),
+    ["Onboarding flow review", "Onboarding checklist"],
+  );
+  assert.deepEqual(
+    adapter.searchLocal(items, "ONBOARD").map((r) => r.label),
+    ["Onboarding flow review", "Onboarding checklist"],
+  );
+
+  // `#artifact:q3` matches by title substring only.
+  assert.deepEqual(
+    adapter.searchLocal(items, "q3 planning").map((r) => r.value),
+    ["#artifact:0a1b0000-1111-4222-8333-444444444444"],
+  );
+
+  // Ranking: uuid-prefix matches come before title-substring matches ("4"
+  // uuid-prefix-matches the first artifact and title-substring-matches the
+  // second).
+  const ranked = [
+    artifactToReferenceItem({ id: "44440000-1111-4222-8333-444444444444", title: "Board review", latest_version: 1, kind: "REVIEW" }),
+    artifactToReferenceItem({ id: "99990000-1111-4222-8333-444444444444", title: "The 4 agreements", latest_version: 1, kind: "GENERIC" }),
+  ];
+  assert.deepEqual(
+    adapter.searchLocal(ranked, "4").map((r) => r.value),
+    ["#artifact:44440000-1111-4222-8333-444444444444", "#artifact:99990000-1111-4222-8333-444444444444"],
+  );
+
+  // Empty partial: the head of the cached order.
+  assert.deepEqual(
+    adapter.searchLocal(items, "").map((r) => r.label),
+    ["Onboarding flow review", "Q3 planning doc", "Onboarding checklist"],
+  );
+
+  // Zero-match partial and empty cache: no rows (the provider defers).
+  assert.deepEqual(adapter.searchLocal(items, "zzz-nothing"), []);
+  assert.deepEqual(adapter.searchLocal([], ""), []);
+
+  // Cap: at most MAX_SUGGESTIONS rows.
+  const many = fakeArtifacts(30).map(artifactToReferenceItem);
+  assert.equal(adapter.searchLocal(many, "").length, MAX_SUGGESTIONS);
+
+  // A cached uuid stored with nonstandard casing still matches
+  // case-insensitively (selection inserts the stored canonical form).
+  const oddCasing = [
+    artifactToReferenceItem({ id: "9F3C0000-1111-4222-8333-444444444444", title: "Odd casing entry", latest_version: 1, kind: "PLAN" }),
+  ];
+  assert.deepEqual(
+    adapter.searchLocal(oddCasing, "9f3c").map((r) => r.value),
+    ["#artifact:9F3C0000-1111-4222-8333-444444444444"],
+  );
+
+  // Registration behind the common interface: the registry's compiled token
+  // pattern recognizes `#artifact:` (the factory registers the same adapter
+  // at session_start).
+  const registry = createReferenceRegistry([adapter]);
+  assert.deepEqual(
+    extractReferenceToken("see #artifact:9f3c", registry),
+    { kind: "artifact", partial: "9f3c", raw: "#artifact:9f3c" },
+  );
+}
+
+console.log("createArtifactAdapter rows + local filtering: ok");
+
+// ---------------------------------------------------------------------------
+// createArtifactAdapter: warmup (listArtifacts pagination into the cache)
+// ---------------------------------------------------------------------------
+
+{
+  // Multi-page pagination: page 1 full (100 items), page 2 partial. Writes
+  // land page by page so partial progress survives, and the cached items
+  // carry the artifact kind and latest version (the metadata extras).
+  const { client, pageCalls, queries } = fakeArtifactClient([
+    fakeArtifacts(100),
+    fakeArtifacts(3, 100),
+  ]);
+  const adapter = createArtifactAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache();
+  await adapter.warmup(cache);
+  assert.equal(cache.read("artifact").length, 103);
+  assert.deepEqual(pageCalls, [1, 2], "stops after a partial page");
+  // The warmup pages the unfiltered list, newest-updated first.
+  assert.deepEqual(queries[0], {
+    limit: ARTIFACT_PAGE_SIZE,
+    page: 1,
+    sort_by: "updated_at",
+    sort_dir: "desc",
+  });
+  assert.equal(cache.read("artifact")[0]?.artifactKind, "PLAN");
+  assert.equal(cache.read("artifact")[0]?.version, 1);
+  assert.equal(cache.fetchedAt("artifact") !== null, true);
+
+  // Cap: at most MAX_ARTIFACTS artifacts are pulled (5 full pages of 100
+  // reach the 500 cap, so a 6th page is never requested).
+  const big = fakeArtifactClient([
+    fakeArtifacts(100, 0),
+    fakeArtifacts(100, 100),
+    fakeArtifacts(100, 200),
+    fakeArtifacts(100, 300),
+    fakeArtifacts(100, 400),
+    fakeArtifacts(100, 500),
+  ]);
+  const capped = createArtifactAdapter({ createClient: async () => big.client });
+  const cappedCache = createInMemoryReferenceCache();
+  await capped.warmup(cappedCache);
+  assert.equal(cappedCache.read("artifact").length, MAX_ARTIFACTS);
+  assert.deepEqual(big.pageCalls, [1, 2, 3, 4, 5], "stops at the cap without a surplus page");
+
+  // Missing credentials: createDefaultAuraClient throws. Warmup no-ops
+  // (resolves, empty cache, nothing thrown into the session).
+  const noCreds = createArtifactAdapter({
+    createClient: async () => {
+      throw new Error("missing PAT");
+    },
+  });
+  const emptyCache = createInMemoryReferenceCache();
+  await noCreds.warmup(emptyCache);
+  assert.deepEqual(emptyCache.read("artifact"), []);
+
+  // Warmup aborted mid-flight: the abort takes effect between pages (an
+  // in-flight page's already-received data still lands), so pagination stops
+  // and nothing throws into the session.
+  const controller = new AbortController();
+  const abortPageCalls: number[] = [];
+  const aborting = {
+    listArtifacts: async (query?: { page?: number }) => {
+      const page = query?.page ?? 1;
+      abortPageCalls.push(page);
+      if (page >= 2) controller.abort();
+      return { items: fakeArtifacts(100, (page - 1) * 100), pagination: {} };
+    },
+    getArtifact: async () => {
+      throw new Error("not used here");
+    },
+  };
+  const abortAdapter = createArtifactAdapter({ createClient: async () => aborting });
+  const abortCache = createInMemoryReferenceCache();
+  await abortAdapter.warmup(abortCache, { signal: controller.signal });
+  assert.deepEqual(abortPageCalls, [1, 2], "pagination stops after the abort");
+  assert.equal(abortCache.read("artifact").length, 200, "landed pages stay cached");
+
+  // A page fetch that rejects: warmup resolves (no throw), earlier pages stay.
+  const failing = fakeArtifactClient([fakeArtifacts(100), fakeArtifacts(100, 100)], { failOnPage: 2 });
+  const failAdapter = createArtifactAdapter({ createClient: async () => failing.client });
+  const failCache = createInMemoryReferenceCache();
+  await failAdapter.warmup(failCache);
+  assert.equal(failCache.read("artifact").length, 100, "page 1 survived the page 2 failure");
+}
+
+console.log("createArtifactAdapter warmup: ok");
+
+// ---------------------------------------------------------------------------
+// createArtifactAdapter: searchServer (the listArtifacts q mapping)
+// ---------------------------------------------------------------------------
+
+{
+  // The typed partial lands in `q`; the query is capped and sorted
+  // newest-updated first; the result items map to reference items carrying
+  // the metadata extras.
+  const { client, queries } = fakeArtifactClient([[fakeArtifacts(2)]]);
+  const adapter = createArtifactAdapter({ createClient: async () => client });
+  const results = await adapter.searchServer("onboard");
+  assert.deepEqual(queries, [
+    { q: "onboard", limit: MAX_SUGGESTIONS, sort_by: "updated_at", sort_dir: "desc" },
+  ]);
+  assert.deepEqual(results, fakeArtifacts(2).map(artifactToReferenceItem));
+
+  // A custom limit is honored (the SWR seam passes one).
+  const { client: limited, queries: limitedQueries } = fakeArtifactClient([[fakeArtifacts(2)]]);
+  const limitedAdapter = createArtifactAdapter({ createClient: async () => limited });
+  await limitedAdapter.searchServer("x", { limit: 1 });
+  assert.equal(limitedQueries[0]?.limit, 1);
+
+  // An aborted request: the late in-flight results are dropped ([]).
+  const controller = new AbortController();
+  const { client: late } = fakeArtifactClient([[fakeArtifacts(1)]]);
+  const lateAdapter = createArtifactAdapter({ createClient: async () => late });
+  const pending = lateAdapter.searchServer("x", { signal: controller.signal });
+  controller.abort(); // abort while the fetch is in flight
+  assert.deepEqual(await pending, [], "late results after an abort are dropped");
+
+  // A failed search (missing credentials, network): [] (nothing fresh for
+  // the SWR merge, nothing thrown into the session).
+  const failingSearch = createArtifactAdapter({
+    createClient: async () => ({
+      listArtifacts: async () => {
+        throw new Error("network down");
+      },
+      getArtifact: async () => {
+        throw new Error("not used here");
+      },
+    }),
+  });
+  assert.deepEqual(await failingSearch.searchServer("x"), []);
+}
+
+console.log("createArtifactAdapter searchServer: ok");
+
+// ---------------------------------------------------------------------------
+// refreshReferenceKind with the artifact adapter (write-through)
+// ---------------------------------------------------------------------------
+
+{
+  // A server-only match (an artifact outside the local cache window) is
+  // added by the write-through, so the next query finds it by title
+  // substring one keystroke after the refresh lands.
+  const { client } = fakeArtifactClient([[fakeArtifacts(1, 500)]]);
+  const adapter = createArtifactAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache();
+  cache.write("artifact", [
+    artifactToReferenceItem({ id: "9f3c0001-1111-4222-8333-444444444444", title: "Onboarding flow review", latest_version: 2, kind: "REVIEW" }),
+  ]);
+  await refreshReferenceKind(cache, adapter, "obscure");
+  assert.deepEqual(
+    cache.read("artifact").map((e) => e.title),
+    ["Onboarding flow review", "Artifact 501"],
+    "server-only match added after the cached item",
+  );
+  // The added row carries the metadata extras.
+  const added = cache.read("artifact")[1];
+  assert.equal(added?.artifactKind, "REVIEW");
+  assert.equal(added?.version, 2);
+}
+
+console.log("refreshReferenceKind server-only artifact match: ok");
+
+{
+  // A cached artifact whose server copy was renamed: the stale title is
+  // served instantly (stale-while-revalidate), and the corrected title
+  // surfaces one keystroke after the refresh lands.
+  const renamed: FakeArtifact = {
+    id: "9f3c0002-1111-4222-8333-444444444444",
+    title: "Renamed planning doc",
+    latest_version: 4,
+    kind: "PLAN",
+  };
+  const { client } = fakeArtifactClient([[renamed]]);
+  const adapter = createArtifactAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache();
+  cache.write("artifact", [
+    artifactToReferenceItem({ id: renamed.id, title: "Old planning doc", latest_version: 3, kind: "PLAN" }),
+  ]);
+  assert.equal(adapter.searchLocal(cache.read("artifact"), "renamed").length, 0, "stale title served first");
+  assert.equal(adapter.searchLocal(cache.read("artifact"), "old planning").length, 1);
+  await refreshReferenceKind(cache, adapter, "renamed");
+  assert.equal(adapter.searchLocal(cache.read("artifact"), "renamed").length, 1, "corrected after the refresh");
+  assert.equal(adapter.searchLocal(cache.read("artifact"), "old planning").length, 0);
+}
+
+console.log("refreshReferenceKind artifact rename correction: ok");
 
 // ---------------------------------------------------------------------------
 // Factory is a function (smoke; the factory itself is pi-runtime verified)
