@@ -538,4 +538,46 @@ function clockedOptions(
   console.log("warmup gate: TTL, empty, unstamped, non-positive TTL decisions: ok");
 }
 
+// ---------------------------------------------------------------------------
+// Warmup gate + store integration (the session-start decision shape)
+// ---------------------------------------------------------------------------
+
+{
+  await withTempDb(async (dbPath) => {
+    let clock = 1_000_000;
+    const warm = createSqliteReferenceCache(clockedOptions(dbPath, () => clock));
+    warm.write("task", [
+      { kind: "task", id: "t1", key: "AURA-1", title: "Warm from session one", status: "OPEN" },
+    ]);
+
+    // The next session consults the persisted cache through the cache
+    // interface, exactly as the wiring does, with its own clock.
+    const next = createSqliteReferenceCache(clockedOptions(dbPath, () => clock));
+    const gate = (ttlMs: number, now: number): boolean =>
+      shouldSkipReferenceWarmup({
+        items: next.read("task"),
+        fetchedAt: next.fetchedAt("task"),
+        ttlMs,
+        now,
+      });
+
+    // Within TTL: skip the warmup (instant session start, no fetch).
+    assert.equal(gate(60_000, clock + 59_999), true);
+    // Expired: fetch.
+    assert.equal(gate(60_000, clock + 60_000), false);
+    // A longer configured TTL keeps the same cache fresh (TTL changing
+    // between sessions re-decides with the new value).
+    assert.equal(gate(600_000, clock + 500_000), true);
+
+    // Expired entries are still served instantly by reads: the TTL never
+    // filters the served view (stale-while-revalidate).
+    clock += 24 * 60 * 60 * 1000; // a day later
+    assert.equal(gate(60_000, clock), false);
+    assert.equal(next.read("task").length, 1);
+    assert.deepEqual(next.read("task").map((entry) => entry.title), ["Warm from session one"]);
+
+    console.log("warmup gate + store integration: skip/fetch + stale reads served: ok");
+  });
+}
+
 console.log("all aura-reference-cache tests passed");
