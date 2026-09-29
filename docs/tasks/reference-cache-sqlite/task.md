@@ -116,3 +116,35 @@ fake.
   pre-gate warmup behavior. The gated loop skips `adapter.warmup` for kinds
   whose persisted cache is within TTL and non-empty; the per-query
   background refresh is untouched and stays always-on.
+
+### Slice 3: 3-write-coalescing-concurrency (landed)
+
+- The coalescing semantics (what a per-keystroke refresh actually writes):
+  one full upsert per item per refresh, wrapped in a single
+  `BEGIN IMMEDIATE` transaction per `write(kind, items)` call. A refresh
+  that returns N items writes those N rows atomically (all rows or no
+  rows: never a torn half of a keystroke refresh); rows outside the
+  refreshed partial are never touched. Cross-session races resolve
+  last-writer-wins per `(base_url, kind, id)` key with no duplicate rows
+  (the primary-key upsert), and stale rows outside any refresh window are
+  served until some later refresh upserts them (stale-while-revalidate).
+- The busy timeout defaults to 500 ms (`busyTimeoutMs` option). It bounds
+  how long a blocked write waits before it is dropped (swallowed, never
+  thrown); because `DatabaseSync` is synchronous, it also bounds the worst
+  case of event-loop blocking a background write can cause, which is why
+  the default is deliberately small. `BEGIN IMMEDIATE` takes the write
+  lock at transaction start, so the busy timeout applies once at
+  acquisition instead of failing mid-batch.
+- Concurrent FIRST opens retry: SQLite does not invoke the busy handler
+  for a `journal_mode` switch, so pi sessions racing the very first
+  creation of the shared file used to see `database is locked` from the
+  WAL pragma and silently fall back to in-memory, dropping all of that
+  session's writes (reproduced: 4 racing writers landed only 50 to 150 of
+  200 items). The factory now retries the open sequence up to 5 times with
+  a linear 25 ms backoff (~250 ms worst case, synchronous via
+  `Atomics.wait`), with `busy_timeout` set before the WAL pragma; only a
+  database that still cannot be opened after the retries falls back to the
+  in-memory cache.
+- Reads under WAL never wait for writers (snapshot isolation): the query
+  path serves the cached view while another session's write transaction
+  is in flight; pinned with a sub-100 ms bound in the tests.

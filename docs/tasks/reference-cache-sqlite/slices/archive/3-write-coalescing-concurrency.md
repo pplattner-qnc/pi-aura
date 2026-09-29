@@ -4,7 +4,7 @@ slug: 3-write-coalescing-concurrency
 title: "Write coalescing and cross-session concurrency"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 blocked_by: [1-sqlite-store-wiring]
 ---
