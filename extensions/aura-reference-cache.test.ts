@@ -27,6 +27,8 @@ import { DatabaseSync } from "node:sqlite";
 import { refreshReferenceKind, type KindAdapter } from "./aura-references.ts";
 import {
   createSqliteReferenceCache,
+  loadReferenceCacheTtlMs,
+  DEFAULT_REFERENCE_CACHE_TTL_MS,
   type SqliteReferenceCacheOptions,
 } from "./aura-reference-cache.ts";
 
@@ -392,6 +394,108 @@ function clockedOptions(
 
     console.log("engine compatibility: SWR write-through + cross-session instant reads: ok");
   });
+}
+
+// ---------------------------------------------------------------------------
+// TTL settings loader (aura.references.cacheTtlMs, project override)
+// ---------------------------------------------------------------------------
+
+{
+  const dir = mkdtempSync(join(tmpdir(), "aura-reference-cache-test-"));
+  const settingsAt = (name: string, content: string): string => {
+    const p = join(dir, name);
+    writeFileSync(p, content, "utf8");
+    return p;
+  };
+  try {
+    const nowhere = join(dir, "does-not-exist.json");
+
+    // Missing files (both levels): the default TTL, on the order of hours.
+    assert.equal(loadReferenceCacheTtlMs({ globalSettingsPath: nowhere, projectSettingsPath: nowhere }), DEFAULT_REFERENCE_CACHE_TTL_MS);
+    assert.ok(DEFAULT_REFERENCE_CACHE_TTL_MS >= 60 * 60 * 1000, "default is at least an hour");
+    assert.ok(DEFAULT_REFERENCE_CACHE_TTL_MS <= 24 * 60 * 60 * 1000, "default is at most a day");
+
+    // Global settings provide the value.
+    const global = settingsAt("global.json", JSON.stringify({
+      aura: { references: { cacheTtlMs: 12_345 } },
+    }));
+    assert.equal(
+      loadReferenceCacheTtlMs({ globalSettingsPath: global, projectSettingsPath: nowhere }),
+      12_345,
+    );
+
+    // The project value wins when present (override, not a union).
+    const project = settingsAt("project.json", JSON.stringify({
+      aura: { references: { cacheTtlMs: 999 } },
+    }));
+    assert.equal(
+      loadReferenceCacheTtlMs({ globalSettingsPath: global, projectSettingsPath: project }),
+      999,
+    );
+
+    // A malformed project file contributes nothing: the global wins.
+    const badProject = settingsAt("bad-project.json", "{ not json !!");
+    assert.equal(
+      loadReferenceCacheTtlMs({ globalSettingsPath: global, projectSettingsPath: badProject }),
+      12_345,
+    );
+
+    // Missing blocks or non-number values at either level contribute
+    // nothing: no aura block, no references block, a string, null, NaN,
+    // and Infinity all fall through to the default.
+    const noAura = settingsAt("no-aura.json", JSON.stringify({ other: 1 }));
+    assert.equal(
+      loadReferenceCacheTtlMs({ globalSettingsPath: noAura, projectSettingsPath: nowhere }),
+      DEFAULT_REFERENCE_CACHE_TTL_MS,
+    );
+    const noReferences = settingsAt("no-refs.json", JSON.stringify({ aura: { baseUrl: "https://x" } }));
+    assert.equal(
+      loadReferenceCacheTtlMs({ globalSettingsPath: noReferences, projectSettingsPath: nowhere }),
+      DEFAULT_REFERENCE_CACHE_TTL_MS,
+    );
+    const nonNumber = settingsAt("non-number.json", JSON.stringify({ aura: { references: { cacheTtlMs: "3600" } } }));
+    assert.equal(
+      loadReferenceCacheTtlMs({ globalSettingsPath: nonNumber, projectSettingsPath: nowhere }),
+      DEFAULT_REFERENCE_CACHE_TTL_MS,
+    );
+    const nullValue = settingsAt("null.json", JSON.stringify({ aura: { references: { cacheTtlMs: null } } }));
+    assert.equal(
+      loadReferenceCacheTtlMs({ globalSettingsPath: nullValue, projectSettingsPath: nowhere }),
+      DEFAULT_REFERENCE_CACHE_TTL_MS,
+    );
+    const nanValue = settingsAt("nan.json", JSON.stringify({ aura: { references: { cacheTtlMs: Number.NaN } } }));
+    assert.equal(
+      loadReferenceCacheTtlMs({ globalSettingsPath: nanValue, projectSettingsPath: nowhere }),
+      DEFAULT_REFERENCE_CACHE_TTL_MS,
+    );
+    const infValue = settingsAt("inf.json", JSON.stringify({ aura: { references: { cacheTtlMs: Number.POSITIVE_INFINITY } } }));
+    assert.equal(
+      loadReferenceCacheTtlMs({ globalSettingsPath: infValue, projectSettingsPath: nowhere }),
+      DEFAULT_REFERENCE_CACHE_TTL_MS,
+    );
+    const malformed = settingsAt("malformed.json", "]]] not json at all");
+    assert.equal(
+      loadReferenceCacheTtlMs({ globalSettingsPath: malformed, projectSettingsPath: nowhere }),
+      DEFAULT_REFERENCE_CACHE_TTL_MS,
+    );
+
+    // Zero and negative values pass through as-is: the gate treats them as
+    // always-expired (a fetch every session), never as skip-everything.
+    const zero = settingsAt("zero.json", JSON.stringify({ aura: { references: { cacheTtlMs: 0 } } }));
+    assert.equal(
+      loadReferenceCacheTtlMs({ globalSettingsPath: zero, projectSettingsPath: nowhere }),
+      0,
+    );
+    const negative = settingsAt("negative.json", JSON.stringify({ aura: { references: { cacheTtlMs: -5_000 } } }));
+    assert.equal(
+      loadReferenceCacheTtlMs({ globalSettingsPath: negative, projectSettingsPath: nowhere }),
+      -5_000,
+    );
+
+    console.log("TTL settings loader: default, override precedence, malformed fallback: ok");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 console.log("all aura-reference-cache tests passed");

@@ -38,6 +38,7 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -70,6 +71,71 @@ export interface SqliteReferenceCacheOptions {
 /** The persistent cache's default location: `~/.pi/agent/aura-reference-cache.db`. */
 export function defaultReferenceCacheDbPath(): string {
   return join(homedir(), ".pi", "agent", "aura-reference-cache.db");
+}
+
+// ---------------------------------------------------------------------------
+// Cache TTL settings (aura.references.cacheTtlMs)
+// ---------------------------------------------------------------------------
+
+/** The default cache TTL: 6 hours. The TTL gates the session-start warmup
+ *  only (reads always serve entries instantly, stale-while-revalidate; the
+ *  per-query refresh is always-on), so a working-session-scale default is
+ *  right: within 6 hours a new session skips the warmup fetch entirely,
+ *  beyond it the warmup refetches. Configurable via
+ *  `aura.references.cacheTtlMs`. */
+export const DEFAULT_REFERENCE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+/** Options for the TTL settings loader (tests inject both paths). */
+export interface ReferenceCacheTtlOptions {
+  /** Global settings file (default: `~/.pi/agent/settings.json`). */
+  globalSettingsPath?: string;
+  /** Project settings file (default: `<cwd>/.pi/settings.json`). The
+   *  project value wins over the global one (override, not a union). */
+  projectSettingsPath?: string;
+}
+
+/** Global settings path, computed lazily so tests can override `HOME`. */
+function globalReferenceSettingsPath(): string {
+  return join(homedir(), ".pi", "agent", "settings.json");
+}
+
+/** Read `aura.references.cacheTtlMs` from one settings file: the value when
+ *  it is a finite number (zero and negative included; the warmup gate treats
+ *  those as always-expired), null when the file, a block, or the key is
+ *  absent or malformed. Never throws. */
+function readCacheTtlMs(settingsPath: string): number | null {
+  if (!existsSync(settingsPath)) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(settingsPath, "utf8"));
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const aura = (parsed as Record<string, unknown>)["aura"];
+  if (typeof aura !== "object" || aura === null) return null;
+  const references = (aura as Record<string, unknown>)["references"];
+  if (typeof references !== "object" || references === null) return null;
+  const ttl = (references as Record<string, unknown>)["cacheTtlMs"];
+  if (typeof ttl !== "number" || !Number.isFinite(ttl)) return null;
+  return ttl;
+}
+
+/** Load the cache TTL: `aura.references.cacheTtlMs` from the project
+ *  settings (`<cwd>/.pi/settings.json`) when present, else the global
+ *  settings (`~/.pi/agent/settings.json`), else
+ *  `DEFAULT_REFERENCE_CACHE_TTL_MS`. Missing files, malformed JSON, missing
+ *  blocks, and non-number values all fall through to the default without
+ *  throwing; a finite configured number (including zero and negative)
+ *  passes through as-is. */
+export function loadReferenceCacheTtlMs(options: ReferenceCacheTtlOptions = {}): number {
+  const projectTtl = readCacheTtlMs(
+    options.projectSettingsPath ?? join(process.cwd(), ".pi", "settings.json"),
+  );
+  if (projectTtl !== null) return projectTtl;
+  const globalTtl = readCacheTtlMs(options.globalSettingsPath ?? globalReferenceSettingsPath());
+  if (globalTtl !== null) return globalTtl;
+  return DEFAULT_REFERENCE_CACHE_TTL_MS;
 }
 
 // ---------------------------------------------------------------------------
