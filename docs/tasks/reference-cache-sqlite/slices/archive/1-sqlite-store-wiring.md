@@ -4,7 +4,7 @@ slug: 1-sqlite-store-wiring
 title: "sqlite store behind the cache interface, wired into production"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: l
 blocked_by: []
 ---
