@@ -223,6 +223,31 @@ The `digest-log` pi tool (`index.ts`) POSTs `agent→page` events to the in-memo
 
 `progressTree.ts` exports a pure `createDwellManager(dwellMs, onExpire?)` (no DOM/Svelte dependency) so the dwell logic is unit-testable in `test/digest-dashboard/progressTree.test.ts`. `Digest.svelte` wires it via a reactive `dwellVersion = $state(0)` counter bumped by `onExpire`; `statusIcon()` is a **pure** render function that reads `dwellVersion` + calls `dwell.displayStatus` (no mutation during render). The dwell **observation** (`dwell.observe()`) runs in a `$effect.pre` (not `$effect`) — `$effect` runs after the DOM update, too late for the first post-transition render; `$effect.pre` runs before it, preserving the 400ms hold on a fast running→done pair. The component test (`DigestTree.test.ts`) uses `vi.useFakeTimers()` and advances time to verify the spinner holds ~400ms then flips to ✓. A node already terminal on first mount (no observed transition) renders the icon immediately — no dwell.
 
+## Pi extension logic tests (`extensions/*.test.ts`)
+
+Extension modules are unit-tested as pure exported functions run with
+`node --experimental-strip-types` + `node:assert/strict`, NOT vitest (the
+same rule as the digest and scripts tests above): each `extensions/<name>.ts`
+gets a sibling `<name>.test.ts` of top-level assert blocks that import the
+module directly, keeping the dynamic-import seams (AuraClient, settings,
+`node:sqlite`) out of the test path. Run a suite with:
+
+```bash
+node --experimental-strip-types extensions/aura-references.test.ts
+node --experimental-strip-types extensions/aura-reference-cache.test.ts
+```
+
+`aura-reference-cache.test.ts` (the persistent sqlite store) exercises the
+real `node:sqlite` store against temp-file databases (WAL pragma, upserts,
+reopen persistence, base-URL keying, the silent in-memory fallback, the TTL
+loader with injectable settings paths, and the warmup-gate decision with an
+injected clock). For true cross-session concurrency it spawns real child
+processes: a small driver written to a temp dir imports the store module by
+absolute path and writes through its API while several children race the
+same WAL file; the parent asserts exit codes, landed rows, and
+`PRAGMA integrity_check`. That driver pattern (spawn + absolute-path import
++ exit-code assertions) is the seam for any future cross-process test.
+
 ## Guided Atlassian PAT provisioning (`extensions/atlassian-provision.ts`)
 
 The guided `/aura secrets edit` walkthrough + the per-token access probes live
