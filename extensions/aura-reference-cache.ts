@@ -130,6 +130,38 @@ interface ReferenceItemRow {
 }
 
 // ---------------------------------------------------------------------------
+// The metadata JSON column (kind-agnostic extras)
+// ---------------------------------------------------------------------------
+
+/** The engine-known fields stored as real columns; every other item field
+ *  (the kind-specific extras: artifact kind and version, wiki space, path,
+ *  and version, arbitrary future metadata) is serialized into the metadata
+ *  JSON column, so the schema stays kind-agnostic without migrations. */
+const METADATA_KEYS = ["kind", "id", "key", "title", "status"] as const;
+
+/** Serialize an item's extras to the metadata JSON column. */
+function itemMetadataJson(item: ReferenceItem): string {
+  const extra: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(item)) {
+    if (!METADATA_KEYS.includes(field as (typeof METADATA_KEYS)[number])) {
+      extra[field] = value;
+    }
+  }
+  return JSON.stringify(extra);
+}
+
+/** Parse a metadata JSON column back to the item's extras. A corrupt or
+ *  non-object payload degrades to no extras (the row still loads). */
+function parseItemMetadata(raw: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The sqlite store
 // ---------------------------------------------------------------------------
 
@@ -171,34 +203,6 @@ export function createSqliteReferenceCache(options: SqliteReferenceCacheOptions)
     return createInMemoryReferenceCache(now);
   }
 
-/** The engine-known fields stored as real columns; every other item field
- *  (the kind-specific extras: artifact kind and version, wiki space, path,
- *  and version, arbitrary future metadata) is serialized into the metadata
- *  JSON column, so the schema stays kind-agnostic without migrations. */
-const METADATA_KEYS = ["kind", "id", "key", "title", "status"] as const;
-
-/** Serialize an item's extras to the metadata JSON column. */
-function itemMetadataJson(item: ReferenceItem): string {
-  const extra: Record<string, unknown> = {};
-  for (const [field, value] of Object.entries(item)) {
-    if (!METADATA_KEYS.includes(field as (typeof METADATA_KEYS)[number])) {
-      extra[field] = value;
-    }
-  }
-  return JSON.stringify(extra);
-}
-
-/** Parse a metadata JSON column back to the item's extras. A corrupt or
- *  non-object payload degrades to no extras (the row still loads). */
-function parseItemMetadata(raw: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
-}
-
   const rowToEntry = (kind: string, row: ReferenceItemRow): CacheEntry => ({
     kind,
     id: row.id,
@@ -212,7 +216,7 @@ function parseItemMetadata(raw: string): Record<string, unknown> {
   return {
     read(kind: string): CacheEntry[] {
       try {
-        const rows = readStmt.all(baseUrl, kind) as ReferenceItemRow[];
+        const rows = readStmt.all(baseUrl, kind) as unknown as ReferenceItemRow[];
         return rows.map((row) => rowToEntry(kind, row));
       } catch {
         // A read that cannot run (schema lost, db damaged) degrades to the

@@ -17,7 +17,8 @@
  *    never hijacks completion.
  * 2. The session-scoped in-memory reference cache behind a small cache
  *    interface (it doubles as the unit-test fake; the persistent sqlite
- *    store is a later ticket implementing the same interface).
+ *    store of the reference-cache-sqlite ticket is the production backing
+ *    and implements the same interface).
  * 3. The task kind adapter: warmup (fire-and-forget `listTasks` pagination at
  *    `session_start`) plus local search (key prefix, key number prefix, and
  *    title substring, case-insensitive).
@@ -62,6 +63,14 @@
  * The legacy `@AURA-` behavior is untouched: `aura-tasks.ts` still owns it in
  * parallel on its own trigger character (the interim double instruction
  * block is accepted until the task-alias ticket).
+ *
+ * The reference-cache-sqlite ticket swaps the production cache backing to
+ * the persistent sqlite store (see `createSessionCache` below): `node:sqlite`
+ * (`DatabaseSync`) in WAL journal mode at `~/.pi/agent/aura-reference-cache.db`,
+ * one table keyed by (base_url, kind, id), shared by all pi sessions as a
+ * plain file. Autocomplete behavior is unchanged except that it persists
+ * across sessions; the in-memory implementation remains the unit-test fake
+ * and the silent fallback for a database that cannot be opened.
  *
  * Credentials: the task adapter talks to Aura through the shared AuraClient
  * (`createDefaultAuraClient`, which reads `aura.baseUrl` from settings plus
@@ -156,8 +165,10 @@ export interface CacheEntry extends ReferenceItem {
 
 /**
  * The small cache interface the engine depends on. The in-memory
- * implementation below is this ticket's production cache and the unit-test
- * fake; the sqlite store is a later ticket implementing the same interface.
+ * implementation below is the unit-test fake; the persistent sqlite store
+ * (`aura-reference-cache.ts`) is the production cache and implements the
+ * same interface, silently falling back to this in-memory implementation
+ * when its database cannot be opened.
  *
  * Reads are by kind; query filtering lives in the engine's
  * `filterReferenceItems` (matching semantics are per-kind adapter knowledge,
@@ -176,7 +187,8 @@ export interface ReferenceCache {
 /**
  * In-memory ReferenceCache: per-kind Maps keyed by item id, so writes merge
  * (upsert) and read order stays stable. `now` is injectable so tests control
- * the fetchedAt stamps.
+ * the fetchedAt stamps. The unit-test fake for the engine, and the
+ * session-scoped fallback when the sqlite store cannot be built.
  */
 export function createInMemoryReferenceCache(now: () => number = Date.now): ReferenceCache {
   const buckets = new Map<string, Map<string, CacheEntry>>();
@@ -919,6 +931,38 @@ async function createDefaultClient(): Promise<TaskAuraClient> {
   return createDefaultAuraClient();
 }
 
+/**
+ * Build the session's reference cache: the persistent sqlite store at
+ * `~/.pi/agent/aura-reference-cache.db` (WAL journal mode, one table keyed
+ * by base URL + kind + id, shared by all pi sessions), so autocomplete is
+ * instant in every session, not just warm ones. The base URL for the keying
+ * comes from the same settings the AuraClient reads (`aura.baseUrl`), so
+ * multi-instance setups never cross-contaminate.
+ *
+ * Dynamic imports on both seams (the settings reader and the store module):
+ * the unit-test entry point stays runnable with
+ * `node --experimental-strip-types`, and a session whose Node build cannot
+ * load the sqlite module degrades to the in-memory cache instead of failing
+ * the extension load. Any failure here falls back to the session-scoped
+ * in-memory cache (which is also the unit-test fake); nothing ever throws
+ * into the session.
+ */
+async function createSessionCache(): Promise<ReferenceCache> {
+  try {
+    const [{ loadAuraClientSettings }, cacheModule] = await Promise.all([
+      import("@pi-aura/shared/settings"),
+      import("./aura-reference-cache.ts"),
+    ]);
+    const baseUrl = loadAuraClientSettings().baseUrl ?? "";
+    return cacheModule.createSqliteReferenceCache({
+      dbPath: cacheModule.defaultReferenceCacheDbPath(),
+      baseUrl,
+    });
+  } catch {
+    return createInMemoryReferenceCache();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Extension factory
 // ---------------------------------------------------------------------------
@@ -971,7 +1015,17 @@ export default function (pi: ExtensionAPI): void {
       }),
     );
 
-    const cache = createInMemoryReferenceCache();
+    // Null first: a /reload re-entering session_start must not keep serving
+    // the previous session's cache while the new one is being built (the
+    // provider defers on a null cache, exactly like before the first
+    // session_start).
+    sessionCache = null;
+    // The production cache is the persistent sqlite store (WAL, shared by
+    // all pi sessions; see createSessionCache); the in-memory cache is the
+    // unit-test fake and the silent fallback when the store cannot be
+    // built. A /reload re-emits session_start and swaps in a fresh session
+    // cache backed by the same file.
+    const cache = await createSessionCache();
     sessionCache = cache;
     warnLegacySyntax = createDeprecationWarningDecision();
 
