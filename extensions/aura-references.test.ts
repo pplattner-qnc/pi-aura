@@ -1490,6 +1490,60 @@ console.log("alias registry registration + expansion routing: ok");
 console.log("once-per-session deprecation-warning decision: ok");
 
 // ---------------------------------------------------------------------------
+// resolveFullToken (the input handler's resolution flow at the adapter
+// interface): cache-first, then the targeted getTaskByHumanKey fallback;
+// unresolvable is null (the mention stays as typed upstream)
+// ---------------------------------------------------------------------------
+
+{
+  // A counting client factory: a cache hit must build no client at all (no
+  // targeted fetch); only the fallback reaches Aura.
+  let clientBuilds = 0;
+  const adapter = createTaskAdapter({
+    createClient: async () => {
+      clientBuilds += 1;
+      return {
+        listTasks: async () => ({ items: [], pagination: {} }),
+        getTaskByHumanKey: async (key: string) => {
+          if (key.toUpperCase() === "AURA-1337") {
+            return { id: "u2", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" };
+          }
+          throw new Error("404 not found");
+        },
+      };
+    },
+  });
+  const cache = createInMemoryReferenceCache(() => 5000);
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+
+  // Cache hit (case-insensitive): resolved from the cache, no client built,
+  // no targeted fetch.
+  assert.deepEqual(
+    await adapter.resolveFullToken("aura-42", cache),
+    { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN", fetchedAt: 5000 },
+  );
+  assert.equal(clientBuilds, 0, "a cache hit builds no client");
+
+  // Cache miss: the targeted getTaskByHumanKey fallback resolves (typed
+  // casing differs; the expansion carries the canonical server key).
+  assert.deepEqual(
+    await adapter.resolveFullToken("aura-1337", cache),
+    { kind: "task", id: "u2", key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" },
+  );
+  assert.equal(clientBuilds, 1, "the fallback built exactly one client");
+
+  // Targeted fetch miss (unknown key): null, so the mention stays as typed.
+  assert.equal(await adapter.resolveFullToken("AURA-999", cache), null);
+
+  // Targeted fetch throws (network failure, missing credentials): null, and
+  // nothing throws into the session.
+  assert.equal(await adapter.resolveFullToken("AURA-404", cache), null);
+  assert.equal(clientBuilds, 3, "each fallback attempt built one client");
+}
+
+console.log("resolveFullToken cache-first + targeted fallback: ok");
+
+// ---------------------------------------------------------------------------
 // TASK_REF_INSTRUCTION (the per-turn system-prompt block)
 // ---------------------------------------------------------------------------
 
