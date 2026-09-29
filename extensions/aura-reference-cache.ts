@@ -171,7 +171,33 @@ export function createSqliteReferenceCache(options: SqliteReferenceCacheOptions)
     return createInMemoryReferenceCache(now);
   }
 
-  const metadataJson = (item: ReferenceItem): string => JSON.stringify({});
+/** The engine-known fields stored as real columns; every other item field
+ *  (the kind-specific extras: artifact kind and version, wiki space, path,
+ *  and version, arbitrary future metadata) is serialized into the metadata
+ *  JSON column, so the schema stays kind-agnostic without migrations. */
+const METADATA_KEYS = ["kind", "id", "key", "title", "status"] as const;
+
+/** Serialize an item's extras to the metadata JSON column. */
+function itemMetadataJson(item: ReferenceItem): string {
+  const extra: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(item)) {
+    if (!METADATA_KEYS.includes(field as (typeof METADATA_KEYS)[number])) {
+      extra[field] = value;
+    }
+  }
+  return JSON.stringify(extra);
+}
+
+/** Parse a metadata JSON column back to the item's extras. A corrupt or
+ *  non-object payload degrades to no extras (the row still loads). */
+function parseItemMetadata(raw: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
 
   const rowToEntry = (kind: string, row: ReferenceItemRow): CacheEntry => ({
     kind,
@@ -179,6 +205,7 @@ export function createSqliteReferenceCache(options: SqliteReferenceCacheOptions)
     key: row.item_key,
     title: row.title,
     ...(row.status !== null ? { status: row.status } : {}),
+    ...parseItemMetadata(row.metadata),
     fetchedAt: row.fetched_at,
   });
 
@@ -192,7 +219,7 @@ export function createSqliteReferenceCache(options: SqliteReferenceCacheOptions)
       const ts = now();
       db.exec("BEGIN IMMEDIATE");
       for (const item of items) {
-        upsert.run(baseUrl, kind, item.id, item.key, item.title, item.status ?? null, metadataJson(item), ts);
+        upsert.run(baseUrl, kind, item.id, item.key, item.title, item.status ?? null, itemMetadataJson(item), ts);
       }
       db.exec("COMMIT");
     },

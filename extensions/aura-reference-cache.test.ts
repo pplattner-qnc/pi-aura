@@ -266,4 +266,46 @@ function clockedOptions(
   });
 }
 
+// ---------------------------------------------------------------------------
+// sqlite store: metadata fidelity + unicode and long values
+// ---------------------------------------------------------------------------
+
+{
+  withTempDb((dbPath) => {
+    const [now] = testClock(1000);
+    const store = createSqliteReferenceCache(clockedOptions(dbPath, now));
+
+    // Kind-specific extras (artifact version, wiki space, arbitrary nested
+    // values from later kinds) roundtrip through the metadata JSON column.
+    const longTitle = "L".repeat(5000);
+    const extraItem = {
+      kind: "artifact",
+      id: "a1",
+      key: "9f2c",
+      title: "Ünïcødé 任務 title",
+      version: 7,
+      space: "eng",
+      nested: { list: [1, "x", null, true], deep: { deeper: { value: -0.5 } } },
+    };
+    store.write("artifact", [extraItem]);
+    store.write("task", [
+      { kind: "task", id: "t1", key: "AURA-1", title: longTitle },
+    ]);
+
+    assert.deepEqual(store.read("artifact"), [
+      { ...extraItem, fetchedAt: 1000 },
+    ]);
+    assert.equal(store.read("task")[0]?.title, longTitle);
+    assert.equal(store.read("task")[0]?.title.length, 5000);
+
+    // Reopen: the extras survive persistence too.
+    const reopened = createSqliteReferenceCache(clockedOptions(dbPath, now));
+    assert.deepEqual(reopened.read("artifact"), [
+      { ...extraItem, fetchedAt: 1000 },
+    ]);
+
+    console.log("sqlite store: metadata fidelity + unicode/long values: ok");
+  });
+}
+
 console.log("all aura-reference-cache tests passed");
