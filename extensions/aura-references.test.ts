@@ -15,8 +15,11 @@
 
 import assert from "node:assert/strict";
 import {
+  createInMemoryReferenceCache,
   createReferenceRegistry,
   extractReferenceToken,
+  filterReferenceItems,
+  type ReferenceItem,
 } from "./aura-references.ts";
 
 // ---------------------------------------------------------------------------
@@ -145,5 +148,156 @@ console.log("extractReferenceToken (# deferral): ok");
 }
 
 console.log("registry dispatch (second kind): ok");
+
+// ---------------------------------------------------------------------------
+// createInMemoryReferenceCache (the cache seam)
+// ---------------------------------------------------------------------------
+
+{
+  // Injectable clock: each write takes the next tick.
+  const ticks = [1000, 2000, 3000];
+  let tick = 0;
+  const cache = createInMemoryReferenceCache(() => ticks[tick++] ?? 9999);
+
+  // Never-written kind: empty read, null fetchedAt.
+  assert.deepEqual(cache.read("task"), []);
+  assert.equal(cache.fetchedAt("task"), null);
+
+  // Write then read: items in order, entries carry fetchedAt.
+  cache.write("task", [
+    { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" },
+    { kind: "task", id: "u2", key: "AURA-7", title: "Write the docs", status: "OPEN" },
+  ]);
+  assert.deepEqual(cache.read("task").map((e) => e.key), ["AURA-42", "AURA-7"]);
+  assert.equal(cache.read("task")[0]?.fetchedAt, 1000);
+  assert.equal(cache.fetchedAt("task"), 1000);
+
+  // Upsert by id: same id replaces in place (order preserved), stamps a new
+  // fetchedAt.
+  cache.write("task", [
+    { kind: "task", id: "u1", key: "AURA-42", title: "Renamed login bug", status: "DONE" },
+  ]);
+  const after = cache.read("task");
+  assert.equal(after.length, 2, "upsert merges, does not append");
+  assert.equal(after[0]?.title, "Renamed login bug");
+  assert.equal(after[0]?.status, "DONE");
+  assert.equal(after[0]?.key, "AURA-42");
+  assert.equal(after[0]?.fetchedAt, 2000);
+  assert.equal(after[1]?.key, "AURA-7", "second entry keeps its position");
+  assert.equal(after[1]?.fetchedAt, 1000, "untouched entry keeps its stamp");
+
+  // Kind isolation: entries of one kind never leak into another.
+  cache.write("doc", [{ kind: "doc", id: "d1", key: "api", title: "API doc" }]);
+  assert.equal(cache.read("task").length, 2);
+  assert.deepEqual(cache.read("doc").map((e) => e.key), ["api"]);
+  assert.equal(cache.fetchedAt("doc"), 3000);
+
+  // Unknown kind reads empty.
+  assert.deepEqual(cache.read("nope"), []);
+
+  // An empty write still counts as a fetch (TTL awareness for the SWR
+  // decision: "fetched, nothing there" differs from "never fetched").
+  const empty = createInMemoryReferenceCache(() => 555);
+  empty.write("task", []);
+  assert.deepEqual(empty.read("task"), []);
+  assert.equal(empty.fetchedAt("task"), 555);
+}
+
+console.log("createInMemoryReferenceCache: ok");
+
+// ---------------------------------------------------------------------------
+// filterReferenceItems (autocomplete filtering + ranking)
+// ---------------------------------------------------------------------------
+
+{
+  const items: ReferenceItem[] = [
+    { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" },
+    { kind: "task", id: "u2", key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" },
+    { kind: "task", id: "u3", key: "AURA-424", title: "Refactor the renderer", status: "DONE" },
+    { kind: "task", id: "u4", key: "AURA-7", title: "Write the docs", status: "OPEN" },
+  ];
+
+  // Empty partial: the head of the cache (cached order preserved).
+  assert.deepEqual(
+    filterReferenceItems(items, "", 20).map((i) => i.key),
+    ["AURA-42", "AURA-1337", "AURA-424", "AURA-7"],
+  );
+
+  // Full-key prefix, case-insensitive (user typed the project part).
+  assert.deepEqual(
+    filterReferenceItems(items, "AUR", 20).map((i) => i.key),
+    ["AURA-42", "AURA-1337", "AURA-424", "AURA-7"],
+  );
+  assert.deepEqual(
+    filterReferenceItems(items, "aura-13", 20).map((i) => i.key),
+    ["AURA-1337"],
+  );
+
+  // Title substring, case-insensitive.
+  assert.deepEqual(
+    filterReferenceItems(items, "LOGIN", 20).map((i) => i.key),
+    ["AURA-42"],
+  );
+  assert.deepEqual(
+    filterReferenceItems(items, "the", 20).map((i) => i.key),
+    ["AURA-42", "AURA-1337", "AURA-424", "AURA-7"],
+    "title substring hits every title containing 'the' (cache order)",
+  );
+  assert.deepEqual(
+    filterReferenceItems(items, "docs", 20).map((i) => i.key),
+    ["AURA-7"],
+  );
+
+  // Ranking: key-prefix matches come before title-substring matches.
+  // "4" key-matches AURA-42 + AURA-424 (via the number hook below) and
+  // title-matches nothing here; with a title hit added it must rank last.
+  const withTitleHit: ReferenceItem[] = [
+    { kind: "task", id: "u9", key: "AURA-9", title: "The 4 rules of refactoring", status: "OPEN" },
+    ...items,
+  ];
+  const numberHook = (item: ReferenceItem, query: string): boolean => {
+    const dash = item.key.indexOf("-");
+    const number = dash === -1 ? item.key : item.key.slice(dash + 1);
+    return number.toLowerCase().startsWith(query);
+  };
+  assert.deepEqual(
+    filterReferenceItems(withTitleHit, "4", 20, numberHook).map((i) => i.key),
+    ["AURA-42", "AURA-424", "AURA-9"],
+  );
+
+  // Cap: at most `max` suggestions, key matches first.
+  assert.deepEqual(
+    filterReferenceItems(items, "", 2).map((i) => i.key),
+    ["AURA-42", "AURA-1337"],
+  );
+  assert.deepEqual(filterReferenceItems(items, "zzz", 20), []);
+
+  // Edge: an item with an empty title still matches by key prefix and shows
+  // up in the empty-partial head (a title substring never matches it).
+  const emptyTitle: ReferenceItem[] = [
+    { kind: "task", id: "u5", key: "AURA-8", title: "", status: "OPEN" },
+  ];
+  assert.deepEqual(filterReferenceItems(emptyTitle, "AURA-8", 20).map((i) => i.key), ["AURA-8"]);
+  assert.deepEqual(filterReferenceItems(emptyTitle, "", 20).map((i) => i.key), ["AURA-8"]);
+  assert.deepEqual(filterReferenceItems(emptyTitle, "docs", 20), []);
+
+  // Edge: unicode title substring matching.
+  const unicode: ReferenceItem[] = [
+    { kind: "task", id: "u6", key: "AURA-5", title: "Überprüfung der Anmeldung", status: "OPEN" },
+  ];
+  assert.deepEqual(filterReferenceItems(unicode, "überprüf", 20).map((i) => i.key), ["AURA-5"]);
+  assert.deepEqual(filterReferenceItems(unicode, "ÜBERPRÜF", 20).map((i) => i.key), ["AURA-5"]);
+
+  // Edge: a cache entry whose key has nonstandard casing still matches
+  // case-insensitively (matching is case-insensitive; the item keeps its
+  // stored casing so selection inserts the canonical form).
+  const oddCasing: ReferenceItem[] = [
+    { kind: "task", id: "u7", key: "aura-42", title: "Odd casing entry", status: "OPEN" },
+  ];
+  assert.deepEqual(filterReferenceItems(oddCasing, "AURA-4", 20).map((i) => i.key), ["aura-42"]);
+  assert.deepEqual(filterReferenceItems(oddCasing, "aura-4", 20).map((i) => i.key), ["aura-42"]);
+}
+
+console.log("filterReferenceItems: ok");
 
 console.log("\nall aura-references tests passed");

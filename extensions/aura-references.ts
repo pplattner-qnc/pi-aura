@@ -294,6 +294,44 @@ export function extractReferenceToken(
 }
 
 // ---------------------------------------------------------------------------
+// Filtering / ranking (pure)
+// ---------------------------------------------------------------------------
+
+/** Maximum suggestions to render in the autocomplete pane at once. */
+export const MAX_SUGGESTIONS = 20;
+
+/**
+ * Rank cached items against the typed partial: key-prefix matches first (the
+ * common case: the user types part of the key), then title-substring matches,
+ * capped at `max` suggestions. Matching is case-insensitive. An empty partial
+ * yields the head of the cached order (the warmup writes tasks newest-first).
+ *
+ * `keyMatch` is the per-kind hook for resource-specific key forms: a task's
+ * human key is matched both as a whole (`AUR`, `AURA-4`) and by its numeric
+ * suffix (`42` finds `AURA-42`), while a wiki path or uuid key will match by
+ * its own rule later. Returning true ranks the item with key-prefix matches.
+ */
+export function filterReferenceItems(
+  items: ReferenceItem[],
+  partial: string,
+  max: number,
+  keyMatch?: (item: ReferenceItem, query: string) => boolean,
+): ReferenceItem[] {
+  const query = partial.toLowerCase();
+  if (query === "") return items.slice(0, max);
+  const keyPrefixHit = (item: ReferenceItem): boolean =>
+    (keyMatch ? keyMatch(item, query) : false) || item.key.toLowerCase().startsWith(query);
+  const titleHit = (item: ReferenceItem): boolean => item.title !== "" && item.title.toLowerCase().includes(query);
+  const keyMatches: ReferenceItem[] = [];
+  const titleMatches: ReferenceItem[] = [];
+  for (const item of items) {
+    if (keyPrefixHit(item)) keyMatches.push(item);
+    else if (titleHit(item)) titleMatches.push(item);
+  }
+  return keyMatches.concat(titleMatches).slice(0, max);
+}
+
+// ---------------------------------------------------------------------------
 // Extension factory
 // ---------------------------------------------------------------------------
 
