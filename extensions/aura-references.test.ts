@@ -20,6 +20,7 @@ import auraReferences, {
   createReferenceAutocompleteProvider,
   createReferenceRegistry,
   createTaskAdapter,
+  expandReferenceMentions,
   extractReferenceToken,
   filterReferenceItems,
   refreshReferenceKind,
@@ -995,6 +996,81 @@ console.log("provider SWR end-to-end: renamed title visible one keystroke later:
 }
 
 console.log("provider SWR end-to-end: out-of-window task findable by title: ok");
+
+// ---------------------------------------------------------------------------
+// expandReferenceMentions (the expansion seam: prompt in, expanded prompt out)
+// ---------------------------------------------------------------------------
+
+/** A lookup over fixed items standing in for the adapter's resolution
+ *  (cache-first + targeted fetch): resolves a task token case-insensitively
+ *  by key, null when unknown. Records every call so tests can assert how
+ *  often each mention was resolved. */
+function lookupOver(items: ReferenceItem[]): {
+  lookup: (kind: string, token: string) => Promise<ReferenceItem | null>;
+  calls: Array<{ kind: string; token: string }>;
+} {
+  const byKey = new Map(items.map((item) => [item.key.toLowerCase(), item]));
+  const calls: Array<{ kind: string; token: string }> = [];
+  return {
+    async lookup(kind, token) {
+      calls.push({ kind, token });
+      return byKey.get(token.toLowerCase()) ?? null;
+    },
+    calls,
+  };
+}
+
+/** The production-shaped registry (task kind only); the injected client
+ *  factory throws so a test can never reach Aura through it. */
+function expansionRegistry() {
+  return createReferenceRegistry([
+    createTaskAdapter({
+      createClient: async () => {
+        throw new Error("no credentials in this test");
+      },
+    }),
+  ]);
+}
+
+{
+  const { lookup, calls } = lookupOver(taskItems());
+  const registry = expansionRegistry();
+  const expansion = '<task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>';
+
+  // Single mention, middle of the prompt: the token is replaced by the kind
+  // adapter's expansion, everything around it is untouched.
+  assert.equal(
+    await expandReferenceMentions("work on #task:AURA-42 today", registry, lookup),
+    `work on ${expansion} today`,
+  );
+
+  // Mention at the start of the prompt.
+  assert.equal(
+    await expandReferenceMentions("#task:AURA-42 is ready", registry, lookup),
+    `${expansion} is ready`,
+  );
+
+  // Mention at the end of the prompt.
+  assert.equal(
+    await expandReferenceMentions("please fix #task:AURA-42", registry, lookup),
+    `please fix ${expansion}`,
+  );
+
+  // Mention at the start of a later line (a submitted prompt is multiline).
+  assert.equal(
+    await expandReferenceMentions("two things:\nfix #task:AURA-42", registry, lookup),
+    `two things:\nfix ${expansion}`,
+  );
+
+  // Fast path: a prompt without references passes through unchanged (the
+  // same string) and resolves nothing.
+  const fresh = lookupOver(taskItems());
+  const plain = "no references in here, just # headings and text";
+  assert.equal(await expandReferenceMentions(plain, registry, fresh.lookup), plain);
+  assert.equal(fresh.calls.length, 0, "the fast path resolved nothing");
+}
+
+console.log("expandReferenceMentions: single mention + fast path: ok");
 
 // ---------------------------------------------------------------------------
 // createReferenceAutocompleteProvider (the deferral wiring over the registry)

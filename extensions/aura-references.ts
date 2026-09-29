@@ -395,6 +395,101 @@ export async function refreshReferenceKind(
 }
 
 // ---------------------------------------------------------------------------
+// Inline expansion (pure): the prompt transform
+// ---------------------------------------------------------------------------
+
+/** Resolve one typed reference mention to an item, or null to leave it as
+ *  typed. Production wiring passes the kind adapter's `resolveFullToken`
+ *  (cache first, then the targeted server lookup). */
+export type ReferenceResolver = (
+  kind: string,
+  token: string,
+) => Promise<ReferenceItem | null>;
+
+/** One mention occurrence found in a submitted prompt: the registry kind it
+ *  routes to, the typed token, and its [start, end) span in the prompt (the
+ *  token only: the boundary whitespace before it is not part of the span). */
+interface MentionOccurrence {
+  kind: string;
+  token: string;
+  start: number;
+  end: number;
+}
+
+/** Recompile an end-anchored token pattern (the registry's `tokenPattern` or
+ *  a registered alias pattern: both match the token ending at the cursor) for
+ *  whole-prompt scanning: the same source without its trailing `$` anchor,
+ *  plus the global and multiline flags, so a mention anywhere in a multiline
+ *  submitted prompt matches. */
+function globalScanPattern(pattern: RegExp): RegExp {
+  const anchored = pattern.source.endsWith("$") && !pattern.source.endsWith("\\$");
+  const source = anchored ? pattern.source.slice(0, -1) : pattern.source;
+  const flags = Array.from(new Set((pattern.flags + "gm").split(""))).join("");
+  return new RegExp(source, flags);
+}
+
+/** Every mention occurrence in the prompt, in prompt order: `#kind:` tokens
+ *  via the registry's compiled kind pattern, then legacy alias tokens via the
+ *  registered alias patterns (whose capture group 1 is the token the kind
+ *  adapter resolves). The boundary before a token (line start or one
+ *  space/tab) is matched but not part of the token span; alias token shapes
+ *  never start with whitespace (same contract as the engine's own tokens). */
+function collectMentionOccurrences(
+  prompt: string,
+  registry: ReferenceRegistry,
+): MentionOccurrence[] {
+  const occurrences: MentionOccurrence[] = [];
+  const scan = (pattern: RegExp, kindOf: (m: RegExpExecArray) => string, tokenOf: (m: RegExpExecArray) => string) => {
+    for (const m of prompt.matchAll(globalScanPattern(pattern))) {
+      const full = m[0];
+      // The leading boundary alternative (`^`, which consumes nothing, or one
+      // space/tab) is matched but is not part of the token.
+      const boundaryLength = full.startsWith(" ") || full.startsWith("\t") ? 1 : 0;
+      const start = (m.index ?? 0) + boundaryLength;
+      occurrences.push({ kind: kindOf(m), token: tokenOf(m), start, end: start + full.length - boundaryLength });
+    }
+  };
+  scan(registry.tokenPattern, (m) => (m[1] ?? "").toLowerCase(), (m) => m[2] ?? "");
+  for (const alias of registry.aliases) {
+    scan(alias.pattern, () => alias.kind, (m) => m[1] ?? "");
+  }
+  return occurrences.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Expand every typed reference mention in a submitted prompt to its uniform
+ * XML tag: each `#kind:` token (and each registered legacy alias token) is
+ * resolved through the injected lookup and rendered by its kind adapter's
+ * `formatExpansion`. Unresolvable references (unknown key, unregistered kind,
+ * null lookup result) are left exactly as typed so the agent can resolve them
+ * via the `aura` skill. A prompt without any mention passes through unchanged
+ * (the same string, nothing resolved).
+ *
+ * Pure: the prompt, the registry, and the injected lookup are the only
+ * inputs; the Aura access lives entirely inside the lookup.
+ */
+export async function expandReferenceMentions(
+  prompt: string,
+  registry: ReferenceRegistry,
+  lookup: ReferenceResolver,
+): Promise<string> {
+  const occurrences = collectMentionOccurrences(prompt, registry);
+  if (occurrences.length === 0) return prompt;
+  let out = "";
+  let pos = 0;
+  for (const o of occurrences) {
+    if (o.start < pos) continue; // overlapping match: the earlier one wins
+    out += prompt.slice(pos, o.start);
+    const adapter = registry.kinds.get(o.kind);
+    const item = adapter ? await lookup(o.kind, o.token) : null;
+    out += adapter && item !== null ? adapter.formatExpansion(item) : prompt.slice(o.start, o.end);
+    pos = o.end;
+  }
+  out += prompt.slice(pos);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Task kind adapter (the first kind)
 // ---------------------------------------------------------------------------
 
