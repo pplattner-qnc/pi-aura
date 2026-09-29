@@ -6,7 +6,7 @@ title: Persistent sqlite cache for reference autocomplete
 map: unified-reference-mentions
 status: ready
 blocked_by: [reference-engine-core]
-slices: []
+slices: [1-sqlite-store-wiring, 2-ttl-warmup-gating, 3-write-coalescing-concurrency]
 ---
 
 ## What to build
