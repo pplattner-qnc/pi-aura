@@ -18,6 +18,8 @@
  * the other extension test files.
  */
 
+import { spawn } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -577,6 +579,80 @@ function clockedOptions(
     assert.deepEqual(next.read("task").map((entry) => entry.title), ["Warm from session one"]);
 
     console.log("warmup gate + store integration: skip/fetch + stale reads served: ok");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Concurrency: busy timeout + swallowed blocked writes
+// ---------------------------------------------------------------------------
+
+{
+  await withTempDb(async (dbPath) => {
+    const [now, tick] = testClock(1000);
+    const store = createSqliteReferenceCache(clockedOptions(dbPath, now, { busyTimeoutMs: 50 }));
+    store.write("task", [
+      { kind: "task", id: "t1", key: "AURA-1", title: "Before the lock", status: "OPEN" },
+    ]);
+
+    // Another connection (another session) holds the write lock.
+    const adversary = new DatabaseSync(dbPath);
+    adversary.exec("BEGIN IMMEDIATE");
+
+    // Reads under WAL never wait for the writer: the pre-lock view returns
+    // immediately (the query path is never blocked by a write in flight).
+    const started = performance.now();
+    assert.deepEqual(
+      store.read("task").map((entry) => entry.title),
+      ["Before the lock"],
+    );
+    assert.ok(performance.now() - started < 100, "read does not wait for the writer");
+
+    // A write while the lock is held waits out its busy timeout, then the
+    // write is dropped: swallowed, no exception escapes the store's API.
+    const writeStarted = performance.now();
+    store.write("task", [
+      { kind: "task", id: "t2", key: "AURA-2", title: "Blocked out", status: "OPEN" },
+    ]);
+    const waited = performance.now() - writeStarted;
+    assert.ok(waited >= 40, `the write waited out its busy timeout (waited ${waited.toFixed(0)}ms)`);
+    assert.ok(waited < 5_000, `the write is bounded, never a hang (waited ${waited.toFixed(0)}ms)`);
+    assert.deepEqual(
+      store.read("task").map((entry) => entry.key),
+      ["AURA-1"],
+      "the dropped write landed nothing",
+    );
+
+    // Once the lock is released, writes land again (last-writer-wins per
+    // key, no duplicate rows).
+    adversary.exec("ROLLBACK");
+    adversary.close();
+    tick(1);
+    store.write("task", [
+      { kind: "task", id: "t2", key: "AURA-2", title: "Lands now", status: "OPEN" },
+    ]);
+    assert.deepEqual(
+      store.read("task").map((entry) => entry.title),
+      ["Before the lock", "Lands now"],
+    );
+
+    // The default busy timeout is configured and bounded too: a blocked
+    // default write waits on the order of the default (500 ms), then drops.
+    const adversary2 = new DatabaseSync(dbPath);
+    adversary2.exec("BEGIN IMMEDIATE");
+    const defaultStore = createSqliteReferenceCache(clockedOptions(dbPath, now));
+    const defaultStarted = performance.now();
+    defaultStore.write("task", [
+      { kind: "task", id: "t3", key: "AURA-3", title: "Default timeout", status: "OPEN" },
+    ]);
+    const defaultWaited = performance.now() - defaultStarted;
+    adversary2.exec("ROLLBACK");
+    adversary2.close();
+    assert.ok(
+      defaultWaited >= 400 && defaultWaited < 5_000,
+      `the default busy timeout bounds the wait (waited ${defaultWaited.toFixed(0)}ms)`,
+    );
+
+    console.log("concurrency: busy timeout, swallowed blocked write, unblocked reads: ok");
   });
 }
 
