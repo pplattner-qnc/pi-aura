@@ -211,21 +211,47 @@ function parseItemMetadata(raw: string): Record<string, unknown> {
 
   return {
     read(kind: string): CacheEntry[] {
-      const rows = readStmt.all(baseUrl, kind) as ReferenceItemRow[];
-      return rows.map((row) => rowToEntry(kind, row));
+      try {
+        const rows = readStmt.all(baseUrl, kind) as ReferenceItemRow[];
+        return rows.map((row) => rowToEntry(kind, row));
+      } catch {
+        // A read that cannot run (schema lost, db damaged) degrades to the
+        // empty view; the provider defers exactly as on a cold cache.
+        return [];
+      }
     },
     write(kind: string, items: ReferenceItem[]): void {
+      // Fire-and-forget side effect: empty writes write nothing and stamp
+      // nothing, and any failure (lock held past the busy timeout, schema
+      // lost, disk gone) is swallowed so nothing ever throws into the
+      // session and getSuggestions is never blocked.
       if (items.length === 0) return;
       const ts = now();
-      db.exec("BEGIN IMMEDIATE");
-      for (const item of items) {
-        upsert.run(baseUrl, kind, item.id, item.key, item.title, item.status ?? null, itemMetadataJson(item), ts);
+      try {
+        // IMMEDIATE takes the write lock up front (the busy timeout applies
+        // here, not mid-batch), so a batch lands atomically: all rows or no
+        // rows, never a torn half of a keystroke refresh.
+        db.exec("BEGIN IMMEDIATE");
+        for (const item of items) {
+          upsert.run(baseUrl, kind, item.id, item.key, item.title, item.status ?? null, itemMetadataJson(item), ts);
+        }
+        db.exec("COMMIT");
+      } catch {
+        try {
+          db.exec("ROLLBACK");
+        } catch {
+          // The transaction was never open (BEGIN itself failed); nothing
+          // to roll back.
+        }
       }
-      db.exec("COMMIT");
     },
     fetchedAt(kind: string): number | null {
-      const row = fetchedAtStmt.get(baseUrl, kind) as { max_fetched_at: number | null } | undefined;
-      return row?.max_fetched_at ?? null;
+      try {
+        const row = fetchedAtStmt.get(baseUrl, kind) as { max_fetched_at: number | null } | undefined;
+        return row?.max_fetched_at ?? null;
+      } catch {
+        return null;
+      }
     },
   };
 }

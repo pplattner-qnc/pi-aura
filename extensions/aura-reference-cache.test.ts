@@ -308,4 +308,41 @@ function clockedOptions(
   });
 }
 
+// ---------------------------------------------------------------------------
+// sqlite store: no-stamp + swallowed mid-session failures
+// ---------------------------------------------------------------------------
+
+{
+  withTempDb((dbPath) => {
+    const [now] = testClock(1000);
+    const store = createSqliteReferenceCache(clockedOptions(dbPath, now));
+
+    // Empty writes write nothing and stamp nothing (the engine's no-stamp
+    // semantics: an empty server result never refreshes a kind's stamp).
+    store.write("task", []);
+    assert.deepEqual(store.read("task"), []);
+    assert.equal(store.fetchedAt("task"), null);
+    store.write("task", [
+      { kind: "task", id: "t1", key: "AURA-1", title: "First", status: "OPEN" },
+    ]);
+    store.write("task", []);
+    assert.equal(store.fetchedAt("task"), 1000);
+    assert.equal(store.read("task").length, 1);
+
+    // A schema lost mid-session (the db damaged or replaced under us): the
+    // store's API never throws; reads degrade to empty, stamps to null.
+    const adversary = new DatabaseSync(dbPath);
+    adversary.exec("DROP TABLE reference_items");
+    adversary.close();
+    assert.deepEqual(store.read("task"), []);
+    assert.equal(store.fetchedAt("task"), null);
+    store.write("task", [
+      { kind: "task", id: "t2", key: "AURA-2", title: "Dropped", status: "OPEN" },
+    ]);
+    assert.deepEqual(store.read("task"), []);
+
+    console.log("sqlite store: no-stamp + swallowed failures: ok");
+  });
+}
+
 console.log("all aura-reference-cache tests passed");
