@@ -4,7 +4,7 @@ slug: 1-aura-alias-atomic-switch
 title: "Atomic switch: the engine owns @AURA-, aura-tasks shrinks to the probe"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 blocked_by: []
 ---
