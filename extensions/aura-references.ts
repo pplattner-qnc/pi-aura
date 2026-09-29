@@ -34,6 +34,11 @@
  * (`createDefaultAuraClient`, which reads `aura.baseUrl` from settings plus
  * the Aura PAT from the OS keyring). When credentials are missing, warmup
  * no-ops and the provider defers; nothing ever throws into the session.
+ *
+ * Tests: the pure seams are unit-tested in
+ * `extensions/aura-references.test.ts`. Run with:
+ *
+ *   node --experimental-strip-types extensions/aura-references.test.ts
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

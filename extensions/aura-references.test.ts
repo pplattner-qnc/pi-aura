@@ -10,7 +10,8 @@
  * search, and the provider wiring that defers to the built-in provider for
  * non-reference tokens. The extension factory (which reaches Aura through
  * the dynamic-import seam) is exercised by the pi runtime once credentials
- * are configured, mirroring the aura-tasks engineering-rules test files.
+ * are configured, mirroring the `aura-tasks` and `engineering-rules` test
+ * files.
  */
 
 import assert from "node:assert/strict";
@@ -620,7 +621,9 @@ async function suggestAt(provider: ReturnType<typeof createReferenceAutocomplete
   // server-cased key.
   assert.equal((await suggestAt(provider, "#task:aura", 9))?.items[0]?.value, "#task:AURA-42");
 
-  // Non- Aura kinds with a matching partial do not leak into task rows.
+  // Only the token's kind is searched: `dashboard` title-matches
+  // "Ship the dashboard"; items of other kinds never leak into task rows
+  // (kind isolation is asserted at the cache seam).
   assert.deepEqual((await suggestAt(provider, "#task:dashboard", 15))?.items.map((i) => i.value), ["#task:AURA-1337"]);
 
   // applyCompletion delegates to the built-in provider (pi owns insertion).
