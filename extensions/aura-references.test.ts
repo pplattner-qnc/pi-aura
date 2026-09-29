@@ -153,6 +153,38 @@ console.log("extractReferenceToken (# deferral): ok");
 console.log("registry dispatch (second kind): ok");
 
 // ---------------------------------------------------------------------------
+// Legacy alias recognition hook (dormant in production wiring; the alias
+// tickets register `@AURA-` / `@rule:` through it)
+// ---------------------------------------------------------------------------
+
+{
+  // A registered alias pattern teaches extractReferenceToken a legacy syntax
+  // without engine surgery: same extraction shape (kind + partial + raw),
+  // dispatching to the alias's kind adapter. No alias is registered in this
+  // slice's production wiring, so the hook is dormant there (the `#`-token
+  // block above asserts the dormant side: `@AURA-42` extracts to null).
+  const aliasRegistry = createReferenceRegistry([stubAdapter("task")], [
+    { pattern: /(?:^|[ \t])@AURA-([^\s]*)$/i, kind: "task" },
+  ]);
+
+  // `@AURA-42` at a token boundary extracts as a task reference with the
+  // typed partial and the raw token (without the leading boundary).
+  assert.deepEqual(
+    extractReferenceToken("see @AURA-42", aliasRegistry),
+    { kind: "task", partial: "42", raw: "@AURA-42" },
+  );
+
+  // A token that already ended defers, same as the engine's own `#` tokens.
+  assert.equal(extractReferenceToken("@AURA-42 ", aliasRegistry), null);
+
+  // Only registered aliases are recognized: `@rule:` (no alias registered)
+  // is not a token in this registry.
+  assert.equal(extractReferenceToken("@rule:name", aliasRegistry), null);
+}
+
+console.log("legacy alias recognition hook: ok");
+
+// ---------------------------------------------------------------------------
 // createInMemoryReferenceCache (the cache seam)
 // ---------------------------------------------------------------------------
 
