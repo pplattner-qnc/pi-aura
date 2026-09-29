@@ -228,6 +228,37 @@ function parseItemMetadata(raw: string): Record<string, unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// Warmup gate (pure decision)
+// ---------------------------------------------------------------------------
+
+/** The inputs of the warmup-gate decision: the kind's cached items, the
+ *  kind's `fetchedAt` stamp, the TTL, and the session-start time (the
+ *  injectable clock: callers pass `Date.now()`, tests pass fixed values). */
+export interface ReferenceWarmupGateInput {
+  items: readonly ReferenceItem[];
+  fetchedAt: number | null;
+  ttlMs: number;
+  now: number;
+}
+
+/** The warmup-gate decision: should the session-start warmup fetch be
+ *  SKIPPED because the persisted cache is fresh enough? True only when the
+ *  cache is non-empty AND stamped AND within the TTL (fresh means strictly
+ *  `now < fetchedAt + ttl`; at and past the boundary the cache is expired).
+ *  Empty caches, unstamped caches (never fresh-by-omission, the engine's
+ *  no-stamp semantics), and non-positive TTLs (always-expired) all fetch.
+ *
+ *  The TTL gates this warmup fetch only: reads always serve entries
+ *  instantly regardless of expiry (stale-while-revalidate), and the
+ *  per-query background refresh is always-on, both unchanged. */
+export function shouldSkipReferenceWarmup(input: ReferenceWarmupGateInput): boolean {
+  if (input.ttlMs <= 0) return false;
+  if (input.fetchedAt === null) return false;
+  if (input.items.length === 0) return false;
+  return input.now < input.fetchedAt + input.ttlMs;
+}
+
+// ---------------------------------------------------------------------------
 // The sqlite store
 // ---------------------------------------------------------------------------
 

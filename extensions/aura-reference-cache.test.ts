@@ -28,6 +28,7 @@ import { refreshReferenceKind, type KindAdapter } from "./aura-references.ts";
 import {
   createSqliteReferenceCache,
   loadReferenceCacheTtlMs,
+  shouldSkipReferenceWarmup,
   DEFAULT_REFERENCE_CACHE_TTL_MS,
   type SqliteReferenceCacheOptions,
 } from "./aura-reference-cache.ts";
@@ -496,6 +497,45 @@ function clockedOptions(
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Warmup gate (pure decision: TTL gates the session-start warmup only)
+// ---------------------------------------------------------------------------
+
+{
+  const items = [
+    { kind: "task", id: "t1", key: "AURA-1", title: "Cached task", status: "OPEN" },
+  ];
+  const fetchedAt = 1_000_000;
+  const ttlMs = 60_000;
+
+  // Fresh and non-empty: skip the warmup fetch entirely.
+  assert.equal(shouldSkipReferenceWarmup({ items, fetchedAt, ttlMs, now: fetchedAt + 1 }), true);
+  assert.equal(shouldSkipReferenceWarmup({ items, fetchedAt, ttlMs, now: fetchedAt + ttlMs - 1 }), true);
+
+  // Expired by one millisecond: fetch. The boundary is expired (fresh
+  // means strictly before fetchedAt + ttl).
+  assert.equal(shouldSkipReferenceWarmup({ items, fetchedAt, ttlMs, now: fetchedAt + ttlMs }), false);
+  assert.equal(shouldSkipReferenceWarmup({ items, fetchedAt, ttlMs, now: fetchedAt + ttlMs + 1 }), false);
+
+  // Empty caches always fetch, however fresh the stamp.
+  assert.equal(shouldSkipReferenceWarmup({ items: [], fetchedAt, ttlMs, now: fetchedAt + 1 }), false);
+  assert.equal(shouldSkipReferenceWarmup({ items: [], fetchedAt: null, ttlMs, now: fetchedAt + 1 }), false);
+
+  // An unstamped cache is never fresh-by-omission, even with items.
+  assert.equal(shouldSkipReferenceWarmup({ items, fetchedAt: null, ttlMs, now: fetchedAt + 1 }), false);
+
+  // Zero and negative TTLs are always-expired, never skip-everything.
+  assert.equal(shouldSkipReferenceWarmup({ items, fetchedAt, ttlMs: 0, now: fetchedAt }), false);
+  assert.equal(shouldSkipReferenceWarmup({ items, fetchedAt, ttlMs: -60_000, now: fetchedAt - 1 }), false);
+
+  // The clock is the injected `now`: the same inputs decide differently
+  // per session start time.
+  assert.equal(shouldSkipReferenceWarmup({ items, fetchedAt: 0, ttlMs: 10_000, now: 9_999 }), true);
+  assert.equal(shouldSkipReferenceWarmup({ items, fetchedAt: 0, ttlMs: 10_000, now: 10_001 }), false);
+
+  console.log("warmup gate: TTL, empty, unstamped, non-positive TTL decisions: ok");
 }
 
 console.log("all aura-reference-cache tests passed");
