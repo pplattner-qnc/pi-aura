@@ -943,6 +943,10 @@ export default function (pi: ExtensionAPI): void {
   let clientAvailable = false;
 
   pi.on("session_start", async (_event, ctx) => {
+    // Re-arm the expansion gate for this session: a /reload into a
+    // credential-less state must not keep the previous session's latch, or
+    // every mention would attempt a doomed (swallowed) targeted fetch.
+    clientAvailable = false;
     // The SWR refresh gate: off until one client build succeeds in this
     // session. Detection is the same createDefaultAuraClient() throw the
     // warmup relies on, probed once here: without credentials (no baseUrl or
@@ -1003,7 +1007,10 @@ export default function (pi: ExtensionAPI): void {
       registry.aliases.some((alias) => globalScanPattern(alias.pattern).test(event.text)) &&
       warnLegacySyntax()
     ) {
-      ctx.ui.notify("Legacy reference syntax is deprecated: use the #<kind>:<key> tokens instead.", "warning");
+      ctx.ui.notify(
+        "Legacy reference syntax is deprecated and will be removed in a future version: use the #<kind>:<key> tokens instead.",
+        "warning",
+      );
     }
     const text = await expandReferenceMentions(
       event.text,
