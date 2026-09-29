@@ -87,3 +87,19 @@ None (can start immediately).
   the session do not retry (until a `/reload` re-emits session_start).
 - `MAX_TASKS` 500 is the interim warmup pagination bound, replaced by
   the persistent cache plus server-side search in the sqlite ticket.
+
+### Slice 2: 2-swr-refresh-server-search (landed)
+
+- The SWR seam as built: `refreshReferenceKind(cache, adapter, partial,
+  { signal })`, with the adapter's `searchServer` (injectable
+  `createClient`) as the controlled fetch; the provider fires it per
+  reference query (including zero-match partials) behind the optional
+  `canRefresh` gate, never awaited in `getSuggestions`.
+- The no-refresh gate latches once per session from a
+  `createDefaultClient()` probe at `session_start` (credentials appearing
+  later do not re-arm until `/reload`); the default for the pure provider
+  is refresh-allowed, so tests and dependents are unaffected.
+- Empty server results write nothing and stamp nothing (a TTL cannot be
+  refreshed by an empty search); the refresh search is a single
+  `listTasks` call capped at `MAX_SUGGESTIONS` 20, `status: "ALL"`,
+  `archived: "all"`, newest-first.

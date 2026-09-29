@@ -4,7 +4,7 @@ slug: 2-swr-refresh-server-search
 title: "Stale-while-revalidate refresh and server-side task search"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 blocked_by: [1-task-autocomplete-warm-cache]
 ---
