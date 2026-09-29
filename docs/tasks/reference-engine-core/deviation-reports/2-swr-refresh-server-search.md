@@ -1,4 +1,4 @@
-## Deviation report — 2-swr-refresh-server-search
+## Deviation report: 2-swr-refresh-server-search
 
 Scope reviewed: `git diff task/reference-engine-core..HEAD` (6 commits, 2
 files: `extensions/aura-references.ts` +97/-3,

@@ -1,4 +1,4 @@
-## Deviation report — 1-task-autocomplete-warm-cache
+## Deviation report: 1-task-autocomplete-warm-cache
 
 Scope reviewed: `git diff 6082e897..HEAD` (7 commits, 3 files:
 `extensions/aura-references.ts`, `extensions/aura-references.test.ts`,
