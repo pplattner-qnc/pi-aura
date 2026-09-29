@@ -4,7 +4,7 @@ slug: 1-artifact-autocomplete
 title: "#artifact: autocomplete end-to-end (warmup, uuid rows, server search)"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 blocked_by: []
 ---
