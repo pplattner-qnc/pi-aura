@@ -4,7 +4,7 @@ slug: 2-ttl-warmup-gating
 title: "TTL from settings, gating the session-start warmup"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 blocked_by: [1-sqlite-store-wiring]
 ---

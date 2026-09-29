@@ -90,3 +90,29 @@ fake.
   damaged file at read/write time: swallowed, reads degrade to empty,
   stamps to null) never throw into the session; a corrupt file is never
   overwritten or destroyed.
+
+### Slice 2: 2-ttl-warmup-gating (landed)
+
+- The default TTL is 6 hours (`DEFAULT_REFERENCE_CACHE_TTL_MS`). The TTL
+  gates only the session-start warmup (reads are always served,
+  stale-while-revalidate; the per-query refresh is always-on), so a
+  working-session-scale default maximizes skipped warmups without
+  materially delaying eventual freshness.
+- `loadReferenceCacheTtlMs({ globalSettingsPath?, projectSettingsPath? })`
+  reads `aura.references.cacheTtlMs` from `~/.pi/agent/settings.json` with a
+  `<cwd>/.pi/settings.json` project override (override precedence, not a
+  union). Missing files, malformed JSON, missing blocks, and non-finite
+  values fall back to the default without throwing; a configured finite
+  number passes through as-is, including zero and negative values.
+- `shouldSkipReferenceWarmup({ items, fetchedAt, ttlMs, now })` is the pure
+  gate: skip only when non-empty, stamped, and strictly
+  `now < fetchedAt + ttl` (at exactly the boundary the cache is expired and
+  fetches). Empty caches, unstamped caches (never fresh-by-omission), and
+  non-positive TTLs (always-expired, never skip-everything) all fetch.
+- The wiring: `createSessionCache()` returns
+  `{ cache, shouldSkipWarmup(kind) }`; the TTL and the gate come from the
+  same dynamic import as the store, and the fallback path (module or
+  settings unavailable) returns an always-fetch gate, exactly the
+  pre-gate warmup behavior. The gated loop skips `adapter.warmup` for kinds
+  whose persisted cache is within TTL and non-empty; the per-query
+  background refresh is untouched and stays always-on.
