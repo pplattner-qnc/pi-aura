@@ -913,6 +913,10 @@ export default function (pi: ExtensionAPI): void {
   // provider defers on an empty cache) and is populated by the fire-and-forget
   // warmup. A /reload re-emits session_start and swaps in a fresh cache.
   let sessionCache: ReferenceCache | null = null;
+  // The once-per-session deprecation-warning decision, built fresh per
+  // session_start (a /reload re-arms it). Null before the first session_start:
+  // no warning is surfaced without a session.
+  let warnLegacySyntax: (() => boolean) | null = null;
   // Latched once per session by the probe below (credentials appearing later
   // do not re-arm until /reload): without Aura credentials no targeted
   // expansion fetch may be attempted at all.
@@ -945,6 +949,7 @@ export default function (pi: ExtensionAPI): void {
 
     const cache = createInMemoryReferenceCache();
     sessionCache = cache;
+    warnLegacySyntax = createDeprecationWarningDecision();
 
     // Fire-and-forget warmup for every registered kind that has one. Missing
     // credentials and fetch failures are swallowed inside the adapter: the
@@ -967,9 +972,19 @@ export default function (pi: ExtensionAPI): void {
   // the one-shot probe resolves) no targeted fetch may be attempted at all:
   // null is passed as the lookup and the transform leaves every mention as
   // typed without resolving anything.
-  pi.on("input", async (event) => {
+  pi.on("input", async (event, ctx) => {
     const cache = sessionCache;
     if (cache === null) return;
+    // Legacy alias deprecation warning: user-only (ctx.ui.notify), at most
+    // once per session, never added to the prompt. Dormant in production
+    // wiring: the alias table is empty until an alias ticket registers.
+    if (
+      warnLegacySyntax !== null &&
+      registry.aliases.some((alias) => globalScanPattern(alias.pattern).test(event.text)) &&
+      warnLegacySyntax()
+    ) {
+      ctx.ui.notify("Legacy reference syntax is deprecated: use the #<kind>:<key> tokens instead.", "warning");
+    }
     const text = await expandReferenceMentions(
       event.text,
       registry,
