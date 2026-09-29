@@ -4,7 +4,7 @@ slug: 1-rule-kind-hash-token
 title: "#rule: kind end-to-end (local search, expansion, body injection)"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 blocked_by: []
 ---
