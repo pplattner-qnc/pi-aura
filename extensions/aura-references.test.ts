@@ -22,6 +22,7 @@ import auraReferences, {
   createTaskAdapter,
   extractReferenceToken,
   filterReferenceItems,
+  refreshReferenceKind,
   MAX_SUGGESTIONS,
   type ReferenceItem,
 } from "./aura-references.ts";
@@ -531,6 +532,469 @@ function fakeClient(pages: FakeTask[][], behavior?: {
 }
 
 console.log("createTaskAdapter warmup: ok");
+
+// ---------------------------------------------------------------------------
+// refreshReferenceKind (SWR orchestration: injected fetch + cache)
+// ---------------------------------------------------------------------------
+
+/** A promise with its resolve/reject exposed, so tests decide when (and how)
+ *  the server answers. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** What one `listTasks` search eventually answers with. */
+type SearchReply = { items: FakeTask[]; pagination: unknown };
+type SearchCall = ReturnType<typeof deferred<SearchReply>> & { search: string | undefined };
+
+/** A controllable AuraClient for the SWR seam: every `listTasks` search is a
+ *  deferred promise the test resolves, rejects, or leaves hanging. Each call
+ *  is recorded with its query (the typed partial lands in `search`). */
+function controllableSearchClient() {
+  const calls: SearchCall[] = [];
+  return {
+    client: {
+      listTasks: (query?: { search?: string }) => {
+        const d = deferred<SearchReply>();
+        calls.push({ ...d, search: query?.search });
+        return d.promise;
+      },
+      getTaskByHumanKey: async () => {
+        throw new Error("not used here");
+      },
+    },
+    calls,
+  };
+}
+
+{
+  // A completed refresh writes through to the cache (the next query sees fresh
+  // data): a cached item with a stale title plus a server result carrying the
+  // corrected title. The server result replaces its cached twin in place
+  // (dedupe by id) and stamps a fresh fetchedAt.
+  let ts = 0;
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache(() => {
+    ts += 1000;
+    return ts;
+  });
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+
+  const refresh = refreshReferenceKind(cache, adapter, "42");
+  // One microtask hop: the refresh starts its search asynchronously (the
+  // adapter awaits its client factory), so the call record exists only after
+  // the hop. Deterministic: the search start was queued before this await.
+  await Promise.resolve();
+  assert.equal(calls.length, 1, "the refresh fired exactly one server search");
+  assert.equal(calls[0]?.search, "42", "the typed partial is the listTasks search");
+  calls[0]!.resolve({
+    items: [{ id: "u1", human_key: "AURA-42", title: "Fix the renamed login bug", status: "OPEN" }],
+    pagination: {},
+  });
+  await refresh;
+
+  const after = cache.read("task");
+  assert.equal(after.length, 1, "the server result replaced the cached twin, not appended");
+  assert.equal(after[0]?.title, "Fix the renamed login bug");
+  assert.equal(after[0]?.fetchedAt, 2000, "the write-through stamped the fresh fetch");
+  assert.equal(cache.fetchedAt("task"), 2000);
+
+  // The refreshed entry is also what the next local search ranks.
+  assert.equal(adapter.searchLocal(cache.read("task"), "renamed").length, 1);
+}
+
+console.log("refreshReferenceKind write-through: ok");
+
+{
+  // A server-only match (a task outside the local cache window) is added to
+  // the cache, so the next query can find it by title substring.
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+
+  const refresh = refreshReferenceKind(cache, adapter, "obscure");
+  await Promise.resolve(); // let the async search start reach listTasks
+  calls[0]!.resolve({
+    items: [{ id: "u2", human_key: "AURA-999", title: "The obscure story point spike", status: "OPEN" }],
+    pagination: {},
+  });
+  await refresh;
+
+  assert.deepEqual(
+    cache.read("task").map((e) => e.key),
+    ["AURA-42", "AURA-999"],
+    "server-only match added after the cached item",
+  );
+}
+
+console.log("refreshReferenceKind server-only match: ok");
+
+{
+  // Merge semantics: a server page carrying one corrected twin and one new
+  // task merges over the cache (upsert by id; cached order preserved for the
+  // kept entries).
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", [
+    { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" },
+    { kind: "task", id: "u2", key: "AURA-7", title: "Write the docs", status: "OPEN" },
+  ]);
+
+  const refresh = refreshReferenceKind(cache, adapter, "42");
+  await Promise.resolve(); // let the async search start reach listTasks
+  calls[0]!.resolve({
+    items: [
+      { id: "u1", human_key: "AURA-42", title: "Fix the renamed login bug", status: "DONE" },
+      { id: "u3", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" },
+    ],
+    pagination: {},
+  });
+  await refresh;
+
+  const after = cache.read("task");
+  assert.deepEqual(
+    after.map((e) => e.key),
+    ["AURA-42", "AURA-7", "AURA-1337"],
+  );
+  assert.equal(after[0]?.title, "Fix the renamed login bug");
+  assert.equal(after[1]?.title, "Write the docs");
+  assert.equal(after[2]?.title, "Ship the dashboard");
+}
+
+console.log("refreshReferenceKind merge over local: ok");
+
+{
+  // Abort guards. A hung fetch that resolves after the request was aborted
+  // must not write (no write after abort), and an already-aborted request
+  // fires no fetch at all: aborted queries stop their work.
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+  const stampBefore = cache.fetchedAt("task");
+
+  // Already aborted before the refresh starts: no server search is fired.
+  const preAborted = new AbortController();
+  preAborted.abort();
+  await refreshReferenceKind(cache, adapter, "42", { signal: preAborted.signal });
+  assert.equal(calls.length, 0, "an already-aborted query fires no fetch");
+
+  // Hung fetch, then abort, then a late resolution: the late results are
+  // dropped, the cache stays exactly as it was.
+  const controller = new AbortController();
+  const hung = refreshReferenceKind(cache, adapter, "42", { signal: controller.signal });
+  await Promise.resolve(); // let the async search start reach listTasks
+  assert.equal(calls.length, 1);
+  controller.abort(); // pi-tui superseded this request mid-flight
+  calls[0]!.resolve({
+    items: [{ id: "u1", human_key: "AURA-42", title: "Fix the late renamed title", status: "OPEN" }],
+    pagination: {},
+  });
+  await hung; // resolves (never throws) without writing
+  const after = cache.read("task");
+  assert.equal(after.length, 1, "no write after abort");
+  assert.equal(after[0]?.title, "Fix the login bug");
+  assert.equal(cache.fetchedAt("task"), stampBefore, "the aborted query left no fresh stamp either");
+}
+
+console.log("refreshReferenceKind abort guards: ok");
+
+{
+  // Rapid successive queries: pi-tui aborts the earlier request when the
+  // later starts, so only the later query's results may land.
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache();
+
+  const earlier = new AbortController();
+  const later = new AbortController();
+  const first = refreshReferenceKind(cache, adapter, "42", { signal: earlier.signal });
+  const second = refreshReferenceKind(cache, adapter, "42", { signal: later.signal });
+  await Promise.resolve(); // let both async searches reach listTasks
+  assert.equal(calls.length, 2, "each query fired its own search");
+
+  earlier.abort(); // the later request superseded the earlier one
+  calls[0]!.resolve({ items: [{ id: "ua", human_key: "AURA-11", title: "Earlier query result", status: "OPEN" }], pagination: {} });
+  calls[1]!.resolve({ items: [{ id: "ub", human_key: "AURA-22", title: "Later query result", status: "OPEN" }], pagination: {} });
+  await Promise.all([first, second]);
+
+  assert.deepEqual(
+    cache.read("task").map((e) => e.key),
+    ["AURA-22"],
+    "only the surviving (later) query wrote through",
+  );
+}
+
+console.log("refreshReferenceKind rapid queries (later aborts earlier): ok");
+
+{
+  // Transient failures are swallowed: the search rejects (a connection reset
+  // mid-search) and the refresh resolves without throwing, leaving the cache
+  // exactly as it was (items and stamp). Cached suggestions still return.
+  let ts = 0;
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache(() => {
+    ts += 1000;
+    return ts;
+  });
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+
+  const refresh = refreshReferenceKind(cache, adapter, "42");
+  await Promise.resolve(); // let the async search start reach listTasks
+  calls[0]!.reject(new Error("connection reset mid-search"));
+  await refresh; // resolves, never throws into the session
+  const after = cache.read("task");
+  assert.equal(after.length, 1);
+  assert.equal(after[0]?.title, "Fix the login bug");
+  assert.equal(cache.fetchedAt("task"), 1000, "the failure left no stamp");
+}
+
+console.log("refreshReferenceKind swallowed search failure: ok");
+
+{
+  // The never-throws contract holds for any adapter: when the injected search
+  // itself rejects (not every kind adapter swallows internally), the refresh
+  // resolves without throwing and leaves the cache as it was.
+  const rejectingAdapter = {
+    ...stubAdapter("task"),
+    searchServer: async () => {
+      throw new Error("the injected fetch exploded");
+    },
+  };
+  const cache = createInMemoryReferenceCache(() => 3000);
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+  await refreshReferenceKind(cache, rejectingAdapter, "42"); // must resolve, not reject
+  assert.deepEqual(cache.read("task").map((e) => e.key), ["AURA-42"]);
+  assert.equal(cache.fetchedAt("task"), 3000);
+}
+
+console.log("refreshReferenceKind never rejects: ok");
+
+{
+  // The server answers with an empty result: local items are kept (and the
+  // cache keeps its stamp, since nothing new was fetched to write).
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache(() => 7000);
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+
+  const refresh = refreshReferenceKind(cache, adapter, "zzz-nothing-matches");
+  await Promise.resolve(); // let the async search start reach listTasks
+  calls[0]!.resolve({ items: [], pagination: {} });
+  await refresh;
+  const after = cache.read("task");
+  assert.deepEqual(after.map((e) => e.key), ["AURA-42"], "local items kept on an empty server result");
+  assert.equal(cache.fetchedAt("task"), 7000, "an empty result wrote nothing (and stamped nothing)");
+}
+
+console.log("refreshReferenceKind empty server result: ok");
+
+{
+  // Edge: server results with unknown extra fields. The adapter maps a task
+  // to its reference fields; extra fields never reach the cache entries.
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache(() => 9000);
+
+  const refresh = refreshReferenceKind(cache, adapter, "42");
+  await Promise.resolve(); // let the async search start reach listTasks
+  calls[0]!.resolve({
+    items: [
+      {
+        id: "u1",
+        human_key: "AURA-42",
+        title: "Fix the login bug",
+        status: "OPEN",
+        assignee: "someone@example.com",
+        priority: "P1",
+        updated_at: "2026-01-01T00:00:00Z",
+        secret_internal_field: { nested: true },
+      },
+    ],
+    pagination: {},
+  });
+  await refresh;
+  assert.deepEqual(cache.read("task"), [
+    { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN", fetchedAt: 9000 },
+  ]);
+}
+
+console.log("refreshReferenceKind unknown extra fields: ok");
+
+// ---------------------------------------------------------------------------
+// Provider + SWR wiring: instant cached answers, background refresh per query
+// ---------------------------------------------------------------------------
+
+/** A provider wired over a controllable-search task adapter: exposes the
+ *  search-call recorder so tests observe the background refreshes. */
+function swrProvider(cache: ReturnType<typeof createInMemoryReferenceCache>) {
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const registry = createReferenceRegistry([adapter]);
+  const current = fakeCurrent();
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache);
+  return { provider, calls, current };
+}
+
+{
+  // Criterion: getSuggestions resolves from the cache without awaiting any
+  // Aura fetch. The injected fetch here hangs forever; the query still
+  // answers from the cache while the refresh is only started in the
+  // background.
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", taskItems());
+  const { provider, calls } = swrProvider(cache);
+
+  const suggestions = await suggestAt(provider, "#task:42", 8);
+  assert.deepEqual(suggestions?.items.map((i) => i.value), ["#task:AURA-42", "#task:AURA-424"]);
+  assert.equal(suggestions?.prefix, "#task:42");
+  await Promise.resolve(); // one hop: the background refresh reaches listTasks
+  assert.equal(calls.length, 1, "the same query fired the background refresh");
+  // The fetch is left hanging forever: the provider never awaited it.
+}
+
+console.log("provider SWR: instant cache answer, background refresh fired: ok");
+
+{
+  // Criterion: every query fires the background refresh carrying the typed
+  // partial, including zero-match partials whose rows defer to the built-in
+  // provider (that is how a task outside the cache window becomes findable).
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", taskItems());
+  const { provider, calls, current } = swrProvider(cache);
+
+  await suggestAt(provider, "#task:", 6); // empty partial: the cache head
+  await suggestAt(provider, "#task:42", 8); // key partial
+  await suggestAt(provider, "#task:login", 11); // title partial
+  const deferBase = current.calls.suggestions;
+  await suggestAt(provider, "#task:zzz", 9); // zero-match: defers, still refreshes
+  await Promise.resolve(); // let the last refresh reach listTasks
+  assert.deepEqual(calls.map((c) => c.search), ["", "42", "login", "zzz"]);
+  assert.equal(current.calls.suggestions, deferBase + 1, "zero-match still defers to the built-in provider");
+
+  // A non-reference token (deferred from the start) fires no refresh.
+  const beforeHeading = calls.length;
+  await suggestAt(provider, "# Heading", 9);
+  assert.equal(calls.length, beforeHeading, "non-reference tokens fire no refresh");
+}
+
+console.log("provider SWR: every reference query refreshes with its partial: ok");
+
+{
+  // The request's own abort signal guards the background write: pi-tui
+  // aborts superseded requests, and a late server answer must never land.
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", taskItems());
+  const { provider, calls } = swrProvider(cache);
+  const controller = new AbortController();
+
+  const suggestions = await provider.getSuggestions(["#task:login"], 0, 11, { signal: controller.signal });
+  assert.equal(suggestions?.items[0]?.value, "#task:AURA-42", "the cache answered instantly");
+  await Promise.resolve(); // the refresh is now in flight
+  assert.equal(calls.length, 1);
+  controller.abort(); // pi-tui superseded this request
+  calls[0]!.resolve({
+    items: [{ id: "late", human_key: "AURA-555", title: "Late server answer", status: "OPEN" }],
+    pagination: {},
+  });
+  await new Promise((resolve) => setImmediate(resolve)); // let the dropped answer settle
+  assert.deepEqual(
+    cache.read("task").map((e) => e.key),
+    ["AURA-42", "AURA-424", "AURA-1337"],
+    "the aborted request's late answer never landed",
+  );
+}
+
+console.log("provider SWR: the request abort signal guards the write: ok");
+
+{
+  // Criterion: without credentials no refresh is fired at all. The factory
+  // latches the no-credentials state (createDefaultAuraClient() throws) and
+  // passes it as the provider's `canRefresh` gate; with the gate off, queries
+  // still answer from the cache but fire no server search.
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", taskItems());
+  const gated = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => gated.client });
+  const registry = createReferenceRegistry([adapter]);
+  const current = fakeCurrent();
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache, {
+    canRefresh: () => false,
+  });
+
+  await suggestAt(provider, "#task:42", 8);
+  await suggestAt(provider, "#task:", 6);
+  await suggestAt(provider, "#task:zzz", 9); // zero-match: defers, and no refresh either
+  await Promise.resolve(); // a fired refresh would have reached listTasks by now
+  assert.equal(gated.calls.length, 0, "no refresh fired without credentials");
+  // The cached answers still come out.
+  const suggestions = await suggestAt(provider, "#task:42", 8);
+  assert.deepEqual(suggestions?.items.map((i) => i.value), ["#task:AURA-42", "#task:AURA-424"]);
+}
+
+console.log("provider SWR: no refresh without credentials (canRefresh gate): ok");
+
+{
+  // End-to-end demo, first half: rename a task title in Aura and keep typing.
+  // Query 1 answers from the cache with the stale row (instant) while the
+  // background refresh writes the corrected title through; query 2 (the next
+  // keystroke) sees the fresh title.
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+  const { provider, calls } = swrProvider(cache);
+
+  const stale = await suggestAt(provider, "#task:login", 11);
+  assert.equal(stale?.items[0]?.description, "[OPEN] Fix the login bug", "query 1: the stale cached row");
+  await Promise.resolve(); // the refresh is in flight
+  calls[0]!.resolve({
+    items: [{ id: "u1", human_key: "AURA-42", title: "Fix the renamed login bug", status: "OPEN" }],
+    pagination: {},
+  });
+  await new Promise((resolve) => setImmediate(resolve)); // the write-through lands
+
+  const fresh = await suggestAt(provider, "#task:login", 11);
+  assert.equal(fresh?.items[0]?.description, "[OPEN] Fix the renamed login bug", "query 2: the corrected title");
+}
+
+console.log("provider SWR end-to-end: renamed title visible one keystroke later: ok");
+
+{
+  // End-to-end demo, second half: a task outside the local cache window is
+  // findable by title substring. Query 1 zero-matches (defers to the built-in
+  // provider) while the server search finds the task and writes it through;
+  // query 2 offers it as a reference row.
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+  const { provider, calls, current } = swrProvider(cache);
+
+  const deferredFirst = await suggestAt(provider, "#task:unpronounceable", 21);
+  assert.equal(deferredFirst?.items[0]?.value, "file.txt", "query 1: no local match, deferred");
+  await Promise.resolve(); // the refresh is in flight
+  assert.equal(calls[0]?.search, "unpronounceable");
+  calls[0]!.resolve({
+    items: [{ id: "u2", human_key: "AURA-888", title: "The unpronounceable wiki slug", status: "OPEN" }],
+    pagination: {},
+  });
+  await new Promise((resolve) => setImmediate(resolve)); // the write-through lands
+
+  const found = await suggestAt(provider, "#task:unpronounceable", 21);
+  assert.deepEqual(found?.items.map((i) => i.value), ["#task:AURA-888"], "query 2: the server-only match");
+  assert.equal(found?.prefix, "#task:unpronounceable");
+  // And the non-deferral path was taken this time (the row is a reference).
+  assert.equal(current.calls.suggestions, 1, "query 2 answered by the engine, not the built-in provider");
+}
+
+console.log("provider SWR end-to-end: out-of-window task findable by title: ok");
 
 // ---------------------------------------------------------------------------
 // createReferenceAutocompleteProvider (the deferral wiring over the registry)

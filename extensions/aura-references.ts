@@ -26,6 +26,19 @@
  *    the built-in provider for every non-reference token (including
  *    zero-match partials and the no-credentials state).
  *
+ * Slice 2 adds the stale-while-revalidate refresh:
+ *
+ * 5. Every reference query (`getSuggestions`) returns the cached view
+ *    instantly, never awaiting an Aura fetch, and fires a background refresh
+ *    (`refreshReferenceKind`) that runs the adapter's server-side search
+ *    (`listTasks` with `search` for the typed partial) guarded by the
+ *    request's abort signal and writes the fresh results through to the
+ *    cache, so they surface on the next keystroke (pi-tui re-queries per
+ *    keystroke and drops late results itself). A task outside the local
+ *    cache window becomes findable by title substring one keystroke later.
+ *    Transient failures are swallowed and without Aura credentials the
+ *    refresh gate is off: no refresh is fired at all.
+ *
  * The legacy `@AURA-` behavior is untouched: `aura-tasks.ts` still owns it in
  * parallel on its own trigger character. The alias table below is dormant
  * until the alias tickets register legacy syntaxes through it.
@@ -337,6 +350,51 @@ export function filterReferenceItems(
 }
 
 // ---------------------------------------------------------------------------
+// Stale-while-revalidate refresh (pure)
+// ---------------------------------------------------------------------------
+
+/**
+ * One background refresh for a query: the adapter's server-side search runs
+ * for the typed partial and the results write through to the cache (upsert by
+ * item id, so a server result replaces its cached twin and a server-only
+ * match is added; the next query filters the merged cache). The caller never
+ * awaits this: the provider returns the cached view first and the refresh
+ * lands afterwards, so fresh results surface on the next keystroke.
+ *
+ * Pure in the arch-spec sense: the Aura access is the injected fetch (the
+ * adapter's `searchServer`, whose `createClient` the caller controls) and the
+ * cache is the injected cache; nothing else is touched. The refresh resolves
+ * rather than rejects: a failed or empty server search (and an aborted
+ * request) leaves the cache, items and stamps, exactly as it was, and nothing
+ * ever throws into the session.
+ */
+export async function refreshReferenceKind(
+  cache: ReferenceCache,
+  adapter: KindAdapter,
+  partial: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<void> {
+  const signal = options.signal;
+  // The request was already superseded (aborted) before the refresh started:
+  // no fetch is fired at all.
+  if (signal?.aborted) return;
+  try {
+    const results = await adapter.searchServer(partial, { signal });
+    // The request was aborted while the fetch was in flight: the late results
+    // are dropped, nothing is written after the abort.
+    if (signal?.aborted) return;
+    // Nothing fresh came back: a failed search returns [] (the adapter
+    // swallows its own errors) or an empty server result. Either way the
+    // cache stays as it is: no write, no fresh stamp.
+    if (results.length === 0) return;
+    cache.write(adapter.kind, results);
+  } catch {
+    // Transient failure (adapter search or cache write): the cached view
+    // stays, and nothing throws into the session.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Task kind adapter (the first kind)
 // ---------------------------------------------------------------------------
 
@@ -477,8 +535,8 @@ export function createTaskAdapter(options: {
         if (searchOptions.signal?.aborted) return [];
         return res.items.map(toReferenceItem);
       } catch {
-        // Missing credentials or a failed search: the SWR merge (next slice)
-        // just gets nothing fresh; the session is never disturbed.
+        // Missing credentials or a failed search: the SWR merge gets nothing
+        // fresh and skips the write; the session is never disturbed.
         return [];
       }
     },
@@ -557,7 +615,12 @@ export function createReferenceAutocompleteProvider(
   current: AutocompleteProvider,
   registry: ReferenceRegistry,
   getCache: () => ReferenceCache | null,
+  refreshOptions: { canRefresh?: () => boolean } = {},
 ): AutocompleteProvider {
+  // The background-refresh gate. Production wiring latches the no-credentials
+  // state (createDefaultAuraClient() throws) and passes a gate that is off for
+  // the whole session, so a credential-less session fires no refresh at all.
+  const canRefresh = refreshOptions.canRefresh ?? (() => true);
   return {
     triggerCharacters: ["#"],
     async getSuggestions(lines, cursorLine, cursorCol, options): Promise<AutocompleteSuggestions | null> {
@@ -580,6 +643,16 @@ export function createReferenceAutocompleteProvider(
       const partial = adapter.parsePartial(token.partial);
       if (partial === null) {
         return current.getSuggestions(lines, cursorLine, cursorCol, options);
+      }
+      // Stale-while-revalidate: the cached rows below go out instantly, and
+      // this same query fires the background refresh (never awaited here)
+      // that writes the fresh server results through to the cache, so they
+      // surface on the next keystroke. The refresh is guarded by this
+      // request's abort signal (pi-tui aborts superseded requests), so an
+      // aborted query stops its work and writes nothing. Without Aura
+      // credentials the gate is off and no refresh is fired at all.
+      if (canRefresh()) {
+        void refreshReferenceKind(cache, adapter, partial, { signal: options.signal });
       }
       const rows = adapter.searchLocal(cache.read(adapter.kind), partial);
       if (rows.length === 0) {
@@ -631,8 +704,26 @@ export default function (pi: ExtensionAPI): void {
   let sessionCache: ReferenceCache | null = null;
 
   pi.on("session_start", async (_event, ctx) => {
+    // The SWR refresh gate: off until one client build succeeds in this
+    // session. Detection is the same createDefaultAuraClient() throw the
+    // warmup relies on, probed once here: without credentials (no baseUrl or
+    // no PAT in the keyring) no refresh is fired at all. Like the warmup,
+    // this is one-shot: credentials appearing later in the session do not
+    // re-arm the gate until a /reload re-emits session_start.
+    let refreshAllowed = false;
+    void createDefaultClient()
+      .then(() => {
+        refreshAllowed = true;
+      })
+      .catch(() => {
+        // No credentials: the gate stays off for the whole session; the
+        // provider defers on the empty cache exactly as in slice 1.
+      });
+
     ctx.ui.addAutocompleteProvider((current) =>
-      createReferenceAutocompleteProvider(current, registry, () => sessionCache),
+      createReferenceAutocompleteProvider(current, registry, () => sessionCache, {
+        canRefresh: () => refreshAllowed,
+      }),
     );
 
     const cache = createInMemoryReferenceCache();
