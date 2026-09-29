@@ -58,3 +58,32 @@ coexist (`#` for the new syntax, `@` for the old).
 ## Blocked by
 
 None (can start immediately).
+
+## Implementation notes
+
+### Slice 1: 1-task-autocomplete-warm-cache (landed)
+
+- Cache contract as built: `read(kind)` returns every cached item for
+  a kind (no query parameter); `write(kind, items)` upserts by id;
+  `fetchedAt(kind)` plus per-entry stamps provide TTL awareness.
+  Query filtering lives entirely in the engine's
+  `filterReferenceItems(items, partial, max, keyMatch?)` with a
+  per-kind `keyMatch` hook. The sqlite ticket (reference-cache-sqlite)
+  must implement this `read(kind)` / `write` / `fetchedAt` shape, not a
+  query-pushdown read (rationale: one unicode-safe matching
+  implementation across cache backends).
+- The task adapter already implements the full `KindAdapter` interface
+  (parsePartial, searchLocal, searchServer, formatRow,
+  formatExpansion, resolveFullToken, warmup). The slice 2/3 methods
+  (`searchServer`, `formatExpansion`, `resolveFullToken`) are present
+  but wired into no code path yet; they get wired and behavior-tested in
+  their own slices.
+- No-credential detection is via `createDefaultAuraClient()` throwing
+  (the `aura-tasks.ts` pattern), not `loadAuraClientSettings`. Slice 2
+  needs an explicit no-refresh gate for the no-credentials state (pick
+  up `loadAuraClientSettings` or latch the no-creds state once
+  detected).
+- Warmup is one-shot at `session_start`; credentials appearing later in
+  the session do not retry (until a `/reload` re-emits session_start).
+- `MAX_TASKS` 500 is the interim warmup pagination bound, replaced by
+  the persistent cache plus server-side search in the sqlite ticket.

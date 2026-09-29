@@ -4,7 +4,7 @@ slug: 1-task-autocomplete-warm-cache
 title: "#task: autocomplete from a warmed session cache"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: l
 blocked_by: []
 ---
