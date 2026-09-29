@@ -5,11 +5,12 @@
  *   node --experimental-strip-types extensions/engineering-rules.test.ts
  *
  * Covers the pure logic: frontmatter parsing (all three attach modes),
- * glob compilation + matching, the @rule: token extractor, the @rule:
- * resolver, the system-prompt section builders, and the settings-driven
- * ignore-glob loader (global + project union). The extension factory itself
- * is verified by jiti load + the pi runtime once a repo populates
- * `.cursor/rules/`.
+ * glob compilation + matching, the @rule: token extractor, the @rule:/#rule:
+ * resolver (raw tokens and expanded <rule-ref> elements), the system-prompt
+ * section builders, the display-title loading (frontmatter name falling
+ * back to the rule name), and the settings-driven ignore-glob loader
+ * (global + project union). The extension factory itself is verified by
+ * jiti load + the pi runtime once a repo populates `.cursor/rules/`.
  */
 
 import assert from "node:assert/strict";
@@ -19,6 +20,7 @@ import { join } from "node:path";
 import engineeringRules, {
   buildAlwaysOnSection,
   buildListedRulesSection,
+  collectRuleMentionNames,
   extractRuleToken,
   globToRegExp,
   loadIgnoreGlobs,
@@ -350,7 +352,55 @@ console.log("buildAlwaysOnSection + buildListedRulesSection: ok");
 console.log("extractRuleToken (@ deferral): ok");
 
 // ---------------------------------------------------------------------------
-// resolveRuleMentions (before_agent_start resolver)
+// collectRuleMentionNames (the resolver's mention scan: raw tokens and
+// expanded elements)
+// ---------------------------------------------------------------------------
+
+{
+  // Legacy @rule: tokens and new #rule: tokens, both grammars.
+  assert.deepEqual(collectRuleMentionNames("please @rule:tracker-jira help"), ["tracker-jira"]);
+  assert.deepEqual(collectRuleMentionNames("please #rule:tracker-jira help"), ["tracker-jira"]);
+  // Case-insensitive, canonicalized to lowercase.
+  assert.deepEqual(collectRuleMentionNames("#RULE:Tracker-Jira"), ["tracker-jira"]);
+  assert.deepEqual(collectRuleMentionNames("@RuLe:Tracker-Jira"), ["tracker-jira"]);
+
+  // Expanded <rule-ref> elements (the reference engine's input transform
+  // rewrites #rule: mentions before before_agent_start runs).
+  assert.deepEqual(
+    collectRuleMentionNames('see <rule-ref name="tracker-aura" attach="manual">Tracker Aura</rule-ref> now'),
+    ["tracker-aura"],
+  );
+  // Attributes in any order.
+  assert.deepEqual(
+    collectRuleMentionNames('<rule-ref attach="glob: **/*.md" name="general-markdown-format">t</rule-ref>'),
+    ["general-markdown-format"],
+  );
+  // An element without a name attribute is not a mention.
+  assert.deepEqual(collectRuleMentionNames('<rule-ref attach="manual">x</rule-ref>'), []);
+
+  // All three forms of the same rule dedupe to one name.
+  assert.deepEqual(
+    collectRuleMentionNames('@rule:tracker-jira and #rule:tracker-jira and <rule-ref name="tracker-jira" attach="manual">t</rule-ref>'),
+    ["tracker-jira"],
+  );
+  // Multiple names, in first-seen order.
+  assert.deepEqual(
+    collectRuleMentionNames("#rule:general-code-quality and #rule:tracker-jira"),
+    ["general-code-quality", "tracker-jira"],
+  );
+  // The token grammar stops at non-name characters, so trailing punctuation
+  // is lenient (the legacy @rule: behavior).
+  assert.deepEqual(collectRuleMentionNames("#rule:tracker-jira."), ["tracker-jira"]);
+  // Empty names match nothing.
+  assert.deepEqual(collectRuleMentionNames("@rule: and #rule:"), []);
+  // No mentions at all.
+  assert.deepEqual(collectRuleMentionNames("plain prompt with # headings and @files"), []);
+}
+
+console.log("collectRuleMentionNames: ok");
+
+// ---------------------------------------------------------------------------
+// resolveRuleMentions (before_agent_start resolver: dual matching)
 // ---------------------------------------------------------------------------
 
 {
@@ -365,26 +415,84 @@ console.log("extractRuleToken (@ deferral): ok");
     },
   ];
 
-  // Single mention
-  const out = resolveRuleMentions("Please @rule:tracker-jira help me", rules);
-  assert.ok(out.includes("Engineering Rules (@mentioned this turn)"), "mention section header");
-  assert.ok(out.includes("Use Jira for tracking."), "mentioned rule body injected");
+  // Legacy @rule: mention (unchanged behavior)
+  const legacy = resolveRuleMentions("Please @rule:tracker-jira help me", rules);
+  assert.ok(legacy.includes("Engineering Rules (@mentioned this turn)"), "mention section header");
+  assert.ok(legacy.includes("Use Jira for tracking."), "mentioned rule body injected");
+
+  // New #rule: token: the same injection.
+  const hash = resolveRuleMentions("Please #rule:tracker-jira help me", rules);
+  assert.ok(hash.includes("Engineering Rules (@mentioned this turn)"));
+  assert.ok(hash.includes("Use Jira for tracking."));
+
+  // Expanded <rule-ref> element: what before_agent_start actually sees once
+  // the reference engine's input transform has rewritten the mention.
+  const element = resolveRuleMentions(
+    'Please <rule-ref name="tracker-jira" attach="manual">Tracker Jira</rule-ref> now',
+    rules,
+  );
+  assert.ok(element.includes("Use Jira for tracking."));
 
   // No mentions -> empty string (no section added)
   assert.equal(resolveRuleMentions("just a normal prompt", rules), "");
 
-  // Unknown rule mention -> empty (no block for unknown name)
+  // Unknown rule mention -> empty (no block for an unknown name, through any
+  // of the three forms; a rule deleted between loading and submit injects
+  // nothing)
   assert.equal(resolveRuleMentions("@rule:nonexistent", rules), "");
+  assert.equal(resolveRuleMentions("#rule:nonexistent", rules), "");
+  assert.equal(resolveRuleMentions('<rule-ref name="nonexistent" attach="manual">n</rule-ref>', rules), "");
 
-  // Multiple mentions deduped + each body injected
-  const multi = resolveRuleMentions("@rule:tracker-jira and @rule:general-code-quality", rules);
+  // Multiple mentions deduped + each body injected once each
+  const multi = resolveRuleMentions("#rule:tracker-jira and #rule:general-code-quality", rules);
   assert.ok(multi.includes("Use Jira for tracking."));
   assert.ok(multi.includes("Be excellent."));
-  // Each mentioned once
-  assert.equal((multi.match(/@rule:tracker-jira/g) || []).length, 1);
+  assert.equal((multi.match(/Use Jira for tracking\./g) || []).length, 1, "each body injected once");
+  // The same rule through two syntaxes: one body block.
+  const both = resolveRuleMentions("@rule:tracker-jira and #rule:tracker-jira", rules);
+  assert.equal((both.match(/Use Jira for tracking\./g) || []).length, 1);
 }
 
 console.log("resolveRuleMentions: ok");
+
+// ---------------------------------------------------------------------------
+// loadRules: the display title (frontmatter name falling back to the rule
+// name), carried for the reference engine's rule-ref element text
+// ---------------------------------------------------------------------------
+
+{
+  const dir = mkdtempSync(join(tmpdir(), "eng-rules-display-"));
+  const home = mkdtempSync(join(tmpdir(), "eng-rules-home5-"));
+  try {
+    const rulesDir = join(dir, ".cursor", "rules");
+    mkdirSync(rulesDir, { recursive: true });
+    // A frontmatter name differing from the filename: the display title wins.
+    writeFileSync(join(rulesDir, "tracker-aura.mdc"),
+      "---\nname: Tracker Aura\nalwaysApply: false\n---\nUse the Aura tracker.\n");
+    // No frontmatter name: the display title falls back to the rule name.
+    writeFileSync(join(rulesDir, "tracker-jira.mdc"),
+      "---\nalwaysApply: false\n---\nUse Jira.\n");
+    // A quoted frontmatter name is unquoted by the scalar parser.
+    writeFileSync(join(rulesDir, "quoted.mdc"),
+      '---\nname: "Quoted Display"\nalwaysApply: false\n---\nBody.\n');
+
+    mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+    withFakeHome(home, () => {
+      const rules = loadRules(dir);
+      const byName = new Map(rules.map((r) => [r.name, r]));
+      assert.equal(byName.get("tracker-aura")?.displayName, "Tracker Aura");
+      assert.equal(byName.get("tracker-jira")?.displayName, undefined);
+      assert.equal(byName.get("quoted")?.displayName, "Quoted Display");
+      // The rule name stays the filename-derived name (the token key).
+      assert.equal(byName.get("tracker-aura")?.name, "tracker-aura");
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+console.log("loadRules display title (frontmatter name): ok");
 
 // ---------------------------------------------------------------------------
 // Factory is a function (smoke)

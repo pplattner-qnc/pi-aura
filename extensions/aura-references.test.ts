@@ -10,10 +10,15 @@
  * adapter's warmup + local search + full-token resolution, the inline
  * expansion transform (`#kind:` and legacy-alias mentions, tag shapes,
  * escaping, failure modes), the per-turn instruction constant, the
- * once-per-session deprecation-warning decision, and the production `@AURA-`
+ * once-per-session deprecation-warning decision, the production `@AURA-`
  * legacy alias end-to-end (recognition at boundaries, legacy-token
  * autocomplete rows, expansion routing through the task adapter, and the
- * deprecation-warning trigger). The provider wiring that defers to the built-in
+ * deprecation-warning trigger), and the rule kind end-to-end (the first
+ * local-only kind: name-substring search over the loaded rules, row
+ * formatting, rule-ref expansion, local resolution without credentials,
+ * and the body-injection coexistence with the input transform: raw
+ * `#rule:` tokens and expanded `<rule-ref>` elements). The provider wiring
+ * that defers to the built-in
  * provider for non-reference tokens is tested at its
  * pure wrapper seam. The extension factory (which reaches Aura through the
  * dynamic-import seam and surfaces the deprecation warning via `ctx.ui.notify`)
@@ -34,10 +39,15 @@ import auraReferences, {
   promptHasLegacyMention,
   refreshReferenceKind,
   createDeprecationWarningDecision,
-  TASK_REF_INSTRUCTION,
+  REFERENCE_INSTRUCTION,
+  RULE_KIND,
   MAX_SUGGESTIONS,
+  ruleToReferenceItem,
+  createRuleAdapter,
+  filterRuleItems,
   type ReferenceItem,
 } from "./aura-references.ts";
+import { resolveRuleMentions, type Rule } from "./engineering-rules.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1784,20 +1794,333 @@ console.log("once-per-session deprecation-warning decision: ok");
 console.log("resolveFullToken cache-first + targeted fallback: ok");
 
 // ---------------------------------------------------------------------------
-// TASK_REF_INSTRUCTION (the per-turn system-prompt block)
+// REFERENCE_INSTRUCTION (the per-turn system-prompt block: task-ref + rule-ref)
 // ---------------------------------------------------------------------------
 
 {
-  assert.ok(TASK_REF_INSTRUCTION.includes("<task-ref"), "shows the task-ref tag shape");
-  assert.ok(TASK_REF_INSTRUCTION.includes("key="), "names the key attribute");
-  assert.ok(TASK_REF_INSTRUCTION.includes("status="), "names the status attribute");
-  assert.ok(/element text is the task title/.test(TASK_REF_INSTRUCTION), "names the title part");
-  assert.ok(TASK_REF_INSTRUCTION.includes("aura"), "points at the aura skill");
-  assert.ok(/SKILL\.md/.test(TASK_REF_INSTRUCTION), "tells the agent how to load the skill");
-  assert.ok(TASK_REF_INSTRUCTION.startsWith("\n## "), "starts with a markdown heading");
+  assert.ok(REFERENCE_INSTRUCTION.includes("<task-ref"), "shows the task-ref tag shape");
+  assert.ok(REFERENCE_INSTRUCTION.includes("<rule-ref"), "shows the rule-ref tag shape");
+  assert.ok(REFERENCE_INSTRUCTION.includes("key="), "names the task key attribute");
+  assert.ok(REFERENCE_INSTRUCTION.includes("status="), "names the task status attribute");
+  assert.ok(REFERENCE_INSTRUCTION.includes("name="), "names the rule name attribute");
+  assert.ok(REFERENCE_INSTRUCTION.includes("attach="), "names the rule attach attribute");
+  assert.ok(/element text is the task title/.test(REFERENCE_INSTRUCTION), "names the task title part");
+  assert.ok(/display title as the element text/.test(REFERENCE_INSTRUCTION), "names the rule display title part");
+  assert.ok(REFERENCE_INSTRUCTION.includes("aura"), "points at the aura skill for task references");
+  assert.ok(/SKILL\.md/.test(REFERENCE_INSTRUCTION), "tells the agent how to load the skill");
+  assert.ok(
+    /body is injected into the system prompt for this turn/.test(REFERENCE_INSTRUCTION),
+    "documents the rule body injection",
+  );
+  assert.ok(REFERENCE_INSTRUCTION.startsWith("\n## "), "starts with a markdown heading");
 }
 
-console.log("TASK_REF_INSTRUCTION: ok");
+console.log("REFERENCE_INSTRUCTION: ok");
+
+// ---------------------------------------------------------------------------
+// The rule kind (the first local-only kind): ruleToReferenceItem +
+// filterRuleItems (name-substring search over the loaded rules)
+// ---------------------------------------------------------------------------
+
+/** Rule fixtures: manual, glob, and always attach modes, a frontmatter
+ *  display name differing from the filename (tracker-aura), hyphens and
+ *  digits (api-v2-logging), and a title that no name substring reaches. */
+function testRules(): Rule[] {
+  return [
+    { name: "tracker-aura", displayName: "Tracker Aura", path: "/x", relPath: "tracker-aura.mdc", attach: "manual", globs: [], body: "Use the Aura tracker.", full: "" },
+    { name: "tracker-jira", path: "/x", relPath: "tracker-jira.mdc", attach: "manual", globs: [], body: "Use Jira.", full: "" },
+    { name: "general-markdown-format", displayName: "Markdown Format", path: "/x", relPath: "general-markdown-format.mdc", attach: "glob", globs: ["**/*.md"], body: "Format markdown.", full: "" },
+    { name: "general-code-quality", path: "/x", relPath: "general-code-quality.mdc", attach: "always", globs: [], body: "Be excellent.", full: "" },
+    { name: "api-v2-logging", path: "/x", relPath: "api-v2-logging.mdc", attach: "manual", globs: [], body: "Log v2 APIs.", full: "" },
+  ];
+}
+
+{
+  // The mapping: kind rule, id = the relPath (stable and unique across
+  // subdirectories), key = the rule name (the token key), title = the
+  // display title (frontmatter name falling back to the rule name),
+  // status = the attach summary (the row description source).
+  const items = testRules().map(ruleToReferenceItem);
+  assert.deepEqual(
+    items[0],
+    { kind: "rule", id: "tracker-aura.mdc", key: "tracker-aura", title: "Tracker Aura", status: "manual" },
+  );
+  assert.deepEqual(
+    items[1],
+    { kind: "rule", id: "tracker-jira.mdc", key: "tracker-jira", title: "tracker-jira", status: "manual" },
+    "no frontmatter name: the display title falls back to the rule name",
+  );
+  assert.equal(items[2]?.status, "glob: **/*.md", "glob rules carry their patterns");
+  assert.equal(items[2]?.title, "Markdown Format");
+  assert.equal(items[3]?.status, "always");
+  assert.equal(items[4]?.key, "api-v2-logging", "names with hyphens and digits map through");
+
+  // Filtering: rule-name substring, case-insensitive, loaded order, capped.
+  const keys = (partial: string, max?: number) =>
+    filterRuleItems(items, partial, max).map((i) => i.key);
+  assert.deepEqual(
+    keys(""),
+    ["tracker-aura", "tracker-jira", "general-markdown-format", "general-code-quality", "api-v2-logging"],
+    "an empty partial lists all loaded rules",
+  );
+  assert.deepEqual(keys("track"), ["tracker-aura", "tracker-jira"], "name substring");
+  assert.deepEqual(keys("TRACK"), ["tracker-aura", "tracker-jira"], "case-insensitive");
+  assert.deepEqual(keys("v2"), ["api-v2-logging"], "digits");
+  assert.deepEqual(keys("jira"), ["tracker-jira"]);
+  assert.deepEqual(keys("zzz"), []);
+  assert.deepEqual(keys("", 2), ["tracker-aura", "tracker-jira"], "the cap applies");
+
+  // Display titles are never searched (name substring only): a title hit
+  // with no name hit yields nothing.
+  const exotic: ReferenceItem[] = [
+    { kind: "rule", id: "z.mdc", key: "z-rule", title: "Exotic Zebra", status: "manual" },
+  ];
+  assert.deepEqual(filterRuleItems(exotic, "zebra"), []);
+  assert.deepEqual(filterRuleItems(exotic, "z-rul"), exotic);
+
+  // Duplicate names across subdirectories: both match (distinct ids).
+  const dupRules: Rule[] = [
+    { name: "tracker-aura", path: "/a", relPath: "a/tracker-aura.mdc", attach: "manual", globs: [], body: "A body.", full: "" },
+    { name: "tracker-aura", path: "/b", relPath: "b/tracker-aura.mdc", attach: "glob", globs: ["**/*.ts"], body: "B body.", full: "" },
+  ];
+  assert.deepEqual(
+    filterRuleItems(dupRules.map(ruleToReferenceItem), "tracker").map((i) => i.id),
+    ["a/tracker-aura.mdc", "b/tracker-aura.mdc"],
+    "both duplicates match",
+  );
+}
+
+console.log("ruleToReferenceItem + filterRuleItems: ok");
+
+// ---------------------------------------------------------------------------
+// createRuleAdapter: rows, expansion (all local, no cache rows)
+// ---------------------------------------------------------------------------
+
+{
+  const adapter = createRuleAdapter({ getRules: () => testRules() });
+  assert.equal(adapter.kind, "rule");
+  assert.equal(RULE_KIND, "rule");
+  assert.equal(adapter.local, true, "the rule kind is the local-only kind");
+  assert.equal(adapter.parsePartial("track"), "track");
+
+  // Rows: `#rule:<name>` with the attach mode as the description, matching
+  // the information the legacy `@rule:` rows carry.
+  assert.deepEqual(
+    adapter.formatRow({ kind: "rule", id: "x", key: "tracker-aura", title: "Tracker Aura", status: "manual" }),
+    { value: "#rule:tracker-aura", label: "#rule:tracker-aura", description: "(manual)" },
+  );
+  assert.equal(
+    adapter.formatRow({ kind: "rule", id: "x", key: "general-markdown-format", title: "Markdown Format", status: "glob: **/*.md" }).description,
+    "(glob: **/*.md)",
+  );
+  assert.equal(
+    adapter.formatRow({ kind: "rule", id: "x", key: "k", title: "t", status: "always" }).description,
+    "(always)",
+  );
+  assert.equal(
+    adapter.formatRow({ kind: "rule", id: "x", key: "k", title: "t" }).description,
+    "(manual)",
+    "a statusless item falls back to manual",
+  );
+
+  // Local search over the loaded rules; the cache items are never consulted.
+  assert.deepEqual(
+    adapter.searchLocal([{ kind: "task", id: "u1", key: "AURA-42", title: "cache rows are ignored", status: "OPEN" }], "track").map((r) => r.value),
+    ["#rule:tracker-aura", "#rule:tracker-jira"],
+  );
+  const all = adapter.searchLocal([], "");
+  assert.deepEqual(
+    all.map((r) => r.value),
+    ["#rule:tracker-aura", "#rule:tracker-jira", "#rule:general-markdown-format", "#rule:general-code-quality", "#rule:api-v2-logging"],
+  );
+  assert.equal(all[0]?.description, "(manual)");
+  assert.equal(all[2]?.description, "(glob: **/*.md)");
+  assert.deepEqual(adapter.searchLocal([], "zzz"), [], "a zero-match partial offers nothing (the provider defers)");
+
+  // No rules loaded (the no-`.cursor/rules` failure mode): nothing offered.
+  const empty = createRuleAdapter({ getRules: () => [] });
+  assert.deepEqual(empty.searchLocal([], ""), []);
+
+  // Expansion: the prototype-pinned rule-ref shape, display title as the
+  // element text.
+  assert.equal(
+    adapter.formatExpansion({ kind: "rule", id: "x", key: "tracker-aura", title: "Tracker Aura", status: "manual" }),
+    '<rule-ref name="tracker-aura" attach="manual">Tracker Aura</rule-ref>',
+  );
+  assert.equal(
+    adapter.formatExpansion({ kind: "rule", id: "x", key: "general-markdown-format", title: "Markdown Format", status: "glob: **/*.md" }),
+    '<rule-ref name="general-markdown-format" attach="glob: **/*.md">Markdown Format</rule-ref>',
+  );
+  // Attribute values and element text are XML-escaped.
+  assert.equal(
+    adapter.formatExpansion({ kind: "rule", id: "x", key: 'q&<r>"', title: 'Q&A <r> "t"', status: "manual" }),
+    '<rule-ref name="q&amp;&lt;r>&quot;" attach="manual">Q&amp;A &lt;r> "t"</rule-ref>',
+  );
+  // A statusless item expands with an empty attach attribute.
+  assert.equal(
+    adapter.formatExpansion({ kind: "rule", id: "x", key: "k", title: "t" }),
+    '<rule-ref name="k" attach="">t</rule-ref>',
+  );
+}
+
+console.log("createRuleAdapter rows + expansion: ok");
+
+// ---------------------------------------------------------------------------
+// createRuleAdapter: resolveFullToken (local name match; the cache is never
+// consulted; unresolvable is null so the mention stays as typed)
+// ---------------------------------------------------------------------------
+
+{
+  const adapter = createRuleAdapter({ getRules: () => testRules() });
+  const cache = createInMemoryReferenceCache();
+
+  assert.deepEqual(
+    await adapter.resolveFullToken("tracker-aura", cache),
+    { kind: "rule", id: "tracker-aura.mdc", key: "tracker-aura", title: "Tracker Aura", status: "manual" },
+  );
+  assert.equal(
+    (await adapter.resolveFullToken("TRACKER-AURA", cache))?.key,
+    "tracker-aura",
+    "case-insensitive match, canonical name out",
+  );
+  assert.equal(await adapter.resolveFullToken("nope", cache), null, "unknown names are unresolvable (left as typed)");
+  assert.equal(await adapter.resolveFullToken("", cache), null);
+
+  // Duplicate names: the first loaded rule wins.
+  const dupAdapter = createRuleAdapter({
+    getRules: () => [
+      { name: "tracker-aura", path: "/a", relPath: "a/tracker-aura.mdc", attach: "manual", globs: [], body: "A body.", full: "" },
+      { name: "tracker-aura", path: "/b", relPath: "b/tracker-aura.mdc", attach: "manual", globs: [], body: "B body.", full: "" },
+    ],
+  });
+  assert.equal((await dupAdapter.resolveFullToken("tracker-aura", cache))?.id, "a/tracker-aura.mdc");
+
+  // A rule deleted between loading and submit: unresolvable.
+  const rules = [...testRules()];
+  const shrinking = createRuleAdapter({ getRules: () => rules });
+  rules.length = 0;
+  assert.equal(await shrinking.resolveFullToken("tracker-aura", cache), null);
+
+  // Cache rows never answer rule resolution: a rule-shaped item sitting in
+  // the cache is not returned (rules are local-only; no cache reads).
+  const poisoned = createInMemoryReferenceCache();
+  poisoned.write("rule", [{ kind: "rule", id: "ghost.mdc", key: "ghost-rule", title: "Ghost", status: "manual" }]);
+  const local = createRuleAdapter({ getRules: () => [] });
+  assert.equal(await local.resolveFullToken("ghost-rule", poisoned), null);
+}
+
+console.log("createRuleAdapter resolveFullToken: ok");
+
+// ---------------------------------------------------------------------------
+// Provider wiring for the rule kind: `#rule:` suggestions through the real
+// registry, deferral when there is nothing to offer
+// ---------------------------------------------------------------------------
+
+{
+  const current = fakeCurrent();
+  const registry = createReferenceRegistry([
+    createTaskAdapter({ createClient: noopClient }),
+    createRuleAdapter({ getRules: () => testRules() }),
+  ]);
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () => createInMemoryReferenceCache());
+
+  // Empty partial: all loaded rules, canonical tokens, in loaded order.
+  const all = await suggestAt(provider, "#rule:", 6);
+  assert.deepEqual(
+    all?.items.map((r) => r.value),
+    ["#rule:tracker-aura", "#rule:tracker-jira", "#rule:general-markdown-format", "#rule:general-code-quality", "#rule:api-v2-logging"],
+  );
+  assert.equal(all?.prefix, "#rule:");
+  // Substring matching + a case-insensitive kind prefix (canonical insertion).
+  assert.deepEqual(
+    (await suggestAt(provider, "#rule:track", 11))?.items.map((r) => r.value),
+    ["#rule:tracker-aura", "#rule:tracker-jira"],
+  );
+  assert.deepEqual(
+    (await suggestAt(provider, "#RULE:track", 11))?.items.map((r) => r.value),
+    ["#rule:tracker-aura", "#rule:tracker-jira"],
+  );
+  // The engine owns the token: no file completion while completing it.
+  assert.equal(provider.shouldTriggerFileCompletion?.(["#rule:track"], 0, 11), false);
+  // A zero-match partial defers to the built-in provider.
+  const defer = current.calls.suggestions;
+  await suggestAt(provider, "#rule:zzz", 10);
+  assert.equal(current.calls.suggestions, defer + 1);
+  // No rules loaded: defers too.
+  const none = createReferenceAutocompleteProvider(
+    current.provider,
+    createReferenceRegistry([createRuleAdapter({ getRules: () => [] })]),
+    () => createInMemoryReferenceCache(),
+  );
+  await suggestAt(none, "#rule:track", 11);
+  assert.equal(current.calls.suggestions, defer + 2);
+}
+
+console.log("provider rule suggestions + deferral: ok");
+
+// ---------------------------------------------------------------------------
+// Rule expansion end-to-end + the input-transform coexistence wrinkle: the
+// engineering-rules resolver must match raw #rule: tokens AND the expanded
+// <rule-ref> elements (the engine rewrites mentions before before_agent_start)
+// ---------------------------------------------------------------------------
+
+{
+  const ruleAdapter = createRuleAdapter({ getRules: () => testRules() });
+  const registry = createReferenceRegistry([
+    createTaskAdapter({ createClient: noopClient }),
+    ruleAdapter,
+  ]);
+  // The factory's per-kind lookup wiring, verbatim: local kinds resolve
+  // without credentials; server kinds only when the client probe succeeded
+  // (false here: a credential-less session).
+  const clientAvailable = false;
+  const lookup = (kind: string, token: string) => {
+    const adapter = registry.kinds.get(kind);
+    if (!adapter || (!adapter.local && !clientAvailable)) return Promise.resolve(null);
+    return adapter.resolveFullToken(token, createInMemoryReferenceCache());
+  };
+
+  const expansion = '<rule-ref name="tracker-aura" attach="manual">Tracker Aura</rule-ref>';
+
+  // A resolvable mention expands in place: start, middle, and end of the prompt.
+  assert.equal(await expandReferenceMentions("#rule:tracker-aura today", registry, lookup), `${expansion} today`);
+  assert.equal(await expandReferenceMentions("work on #rule:tracker-aura today", registry, lookup), `work on ${expansion} today`);
+  assert.equal(await expandReferenceMentions("work on #rule:tracker-aura", registry, lookup), `work on ${expansion}`);
+  // An uppercase typed name: case-insensitive resolution, canonical output.
+  assert.equal(await expandReferenceMentions("see #rule:TRACKER-AURA", registry, lookup), `see ${expansion}`);
+  // Unknown names stay exactly as typed.
+  assert.equal(await expandReferenceMentions("see #rule:ghost", registry, lookup), "see #rule:ghost");
+  // An empty partial stays as typed.
+  assert.equal(await expandReferenceMentions("open #rule: for me", registry, lookup), "open #rule: for me");
+  // Duplicate mentions: one resolution, every occurrence expands.
+  assert.equal(
+    await expandReferenceMentions("#rule:tracker-aura twice #rule:tracker-aura", registry, lookup),
+    `${expansion} twice ${expansion}`,
+  );
+  // The rule kind resolves in a credential-less session (local-only), while
+  // a task mention in the same session stays as typed (the server gate).
+  assert.equal(
+    await expandReferenceMentions("#rule:tracker-aura and #task:AURA-42", registry, lookup),
+    `${expansion} and #task:AURA-42`,
+  );
+
+  // THE WRINKLE: the expanded prompt carries <rule-ref> elements by the
+  // time before_agent_start runs, so the engineering-rules resolver must
+  // inject the rule body from the element form...
+  const expanded = await expandReferenceMentions("work on #rule:tracker-aura today", registry, lookup);
+  assert.ok(
+    resolveRuleMentions(expanded, testRules()).includes("Use the Aura tracker."),
+    "the body injects from the expanded element",
+  );
+  // ...and from the raw token when the mention was left as typed.
+  assert.ok(resolveRuleMentions("work on #rule:tracker-aura today", testRules()).includes("Use the Aura tracker."));
+  // Two different rules: both bodies injected once each.
+  const two = resolveRuleMentions("#rule:tracker-aura and #rule:tracker-jira", testRules());
+  assert.ok(two.includes("Use the Aura tracker."));
+  assert.ok(two.includes("Use Jira."));
+}
+
+console.log("rule expansion + resolver dual matching (the wrinkle): ok");
 
 // ---------------------------------------------------------------------------
 // Factory is a function (smoke; the factory itself is pi-runtime verified)
