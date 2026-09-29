@@ -6,7 +6,7 @@ title: Reference engine core with #task: mentions end-to-end
 map: unified-reference-mentions
 status: ready
 blocked_by: []
-slices: []
+slices: [1-task-autocomplete-warm-cache, 2-swr-refresh-server-search, 3-inline-expansion-instruction-aliases]
 ---
 
 ## What to build
