@@ -21,6 +21,8 @@ dist/**
 /deviation-*/
 /land-*/
 /ui-note-*/
+# Per-task workflow scratch (uncertainty notes, chain outputs under .work/).
+.work/
 
 # docs/tasks/state.yaml is TRACKED: the task/slice pointers and the
 # schema_version stamp persist across clones so setup-workflow is idempotent.
