@@ -4,7 +4,7 @@ slug: 2-rule-alias-atomic-switch
 title: "@rule: alias through the engine; engineering-rules loses its autocomplete"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 blocked_by: [1-rule-kind-hash-token]
 ---

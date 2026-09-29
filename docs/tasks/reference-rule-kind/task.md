@@ -100,3 +100,49 @@ to implementation. Rules keep working offline without Aura credentials.
   display-title loading). All extension suites, root vitest 236, shared
   202, both typechecks green; the `atlassian-provision.test.ts` red is
   pre-existing and out of scope.
+
+### Slice 2: 2-rule-alias-atomic-switch (landed)
+
+- The registration: `createRuleAlias(ruleAdapter, getRules)` builds the
+  alias and the extension factory registers it right after
+  `createAuraTaskAlias`, in the SAME landing that deletes the rules
+  extension's own `@rule:` autocomplete provider (atomic: with the alias
+  registered, the old provider would double-answer the same tokens; the
+  commit before the switch is red tests only).
+- The pattern pins the legacy grammar: `(?:^|[ \t])@rule:([a-z0-9-]+)$`
+  with the `i` flag. Token boundary before `@`; the name charset is the
+  legacy resolver's (letters, digits, hyphens), because one pattern
+  serves both autocomplete (the partial while typing) and submit (the
+  full key) per the alias capture-group contract; an empty name is a
+  non-mention (no suggestions, no warning). Scanning on submit drops the
+  `$` anchor through the engine's `globalScanPattern`, so trailing
+  punctuation stays lenient exactly as the legacy resolver was.
+- The alias rows reuse the rule adapter's `formatRow` for the
+  description (the attach mode) and swap value/label to the legacy
+  `@rule:<name>` token, so selection keeps the user in the syntax they
+  typed while the deprecation warning teaches `#rule:`. Like the
+  adapter, the alias's `searchLocal` hook filters the loaded rules via
+  the shared `getRules` accessor and ignores the cache items (rules
+  never ride the reference cache).
+- The warning latch is shared across aliases unchanged:
+  `promptHasLegacyMention` iterates every registered alias pattern, and
+  the one `createDeprecationWarningDecision` per session means the first
+  legacy token of either `@AURA-` or `@rule:` syntax fires the warning
+  exactly once (user-only, via `ctx.ui.notify`, never in the prompt).
+- `engineering-rules.ts` after the shrink: rule loading
+  (`loadRules`), frontmatter parsing, glob/settings helpers, the
+  always-on and on-demand system-prompt sections, and the
+  body-injection resolver (`collectRuleMentionNames` +
+  `resolveRuleMentions`). Deleted: `extractRuleToken`, `formatRuleItem`,
+  `createRuleAutocompleteProvider`, the structural autocomplete types,
+  `RULE_TOKEN_PREFIX`, and the `session_start` provider registration.
+  `engineering-rules.test.ts` pins the module surface so nothing
+  regrows into it. The on-demand section prose now teaches `#rule:<name>`
+  (legacy form noted).
+- Tests: 4 new sections in `aura-references.test.ts` (recognition through
+  the real pattern, legacy autocomplete rows, expansion routing
+  including both syntaxes side by side and the dual body injection, the
+  shared warning latch across both aliases); `engineering-rules.test.ts`
+  swaps the extractor section for the module-surface pin. All extension
+  suites, root vitest 236, shared 202, both typechecks green; the
+  `atlassian-provision.test.ts` red is pre-existing and out of scope.
