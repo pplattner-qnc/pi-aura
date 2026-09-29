@@ -19,7 +19,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -225,6 +225,44 @@ function clockedOptions(
     );
 
     console.log("sqlite store: upsert semantics: ok");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// sqlite store: silent in-memory fallback (never throw into the session)
+// ---------------------------------------------------------------------------
+
+{
+  // An unopenable path (a directory): the store still works in-session,
+  // backed by the in-memory cache.
+  withTempDb((dbPath) => {
+    const dir = dbPath + ".d";
+    mkdtempSync(dir); // a directory where the db file should be
+    const [now] = testClock(1000);
+    const store = createSqliteReferenceCache(clockedOptions(dir, now));
+    store.write("task", [
+      { kind: "task", id: "t1", key: "AURA-1", title: "Fallback", status: "OPEN" },
+    ]);
+    assert.deepEqual(store.read("task"), [
+      { kind: "task", id: "t1", key: "AURA-1", title: "Fallback", status: "OPEN", fetchedAt: 1000 },
+    ]);
+    assert.equal(store.fetchedAt("task"), 1000);
+    console.log("sqlite store: in-memory fallback (unopenable path): ok");
+  });
+
+  // A corrupt file: the store falls back without destroying the file (the
+  // user's data on disk is never touched, let alone deleted or re-created).
+  withTempDb((dbPath) => {
+    const garbage = "this is not a sqlite database at all, just text";
+    writeFileSync(dbPath, garbage, "utf8");
+    const [now] = testClock(1000);
+    const store = createSqliteReferenceCache(clockedOptions(dbPath, now));
+    store.write("task", [
+      { kind: "task", id: "t1", key: "AURA-1", title: "Fallback", status: "OPEN" },
+    ]);
+    assert.equal(store.read("task").length, 1);
+    assert.equal(readFileSync(dbPath, "utf8"), garbage);
+    console.log("sqlite store: in-memory fallback (corrupt file untouched): ok");
   });
 }
 
