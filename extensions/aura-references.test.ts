@@ -1829,7 +1829,7 @@ console.log("resolveFullToken cache-first + targeted fallback: ok");
   assert.ok(/display title as the element text/.test(REFERENCE_INSTRUCTION), "names the rule display title part");
   assert.ok(/artifact title as the element text/.test(REFERENCE_INSTRUCTION), "names the artifact title part");
   assert.ok(/`PLAN`/.test(REFERENCE_INSTRUCTION), "names the artifact kind values");
-  assert.ok(/version the reference resolved to/.test(REFERENCE_INSTRUCTION), "names the artifact version semantics");
+  assert.ok(/`version` the reference resolved to/.test(REFERENCE_INSTRUCTION), "names the artifact version semantics");
   assert.ok(REFERENCE_INSTRUCTION.includes("aura"), "points at the aura skill for task references");
   assert.ok(
     /To read the full artifact[^]*use the `aura` skill/.test(REFERENCE_INSTRUCTION),

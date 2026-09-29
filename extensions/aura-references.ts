@@ -111,7 +111,14 @@
  * the rows invert the task shape per the prototype's artifact UX: the
  * title is the label, the uuid rides the description, and the full uuid
  * token is the inserted value (the uuid appears in the text box only
- * after selection).
+ * after selection). Its slice 2 shipped expansion: on submit a
+ * `#artifact:<uuid>` mention expands to
+ * `<artifact-ref id kind version>title</artifact-ref>`, resolving
+ * cache-first only through cached rows with complete metadata (a
+ * metadata-less row falls back to the fetch instead of expanding with
+ * half the attributes), then via the targeted `getArtifact`, with
+ * unresolvable references left as typed; the per-turn instruction block
+ * grew the artifact-ref shape.
  *
  * Credentials: the task adapter talks to Aura through the shared AuraClient
  * (`createDefaultAuraClient`, which reads `aura.baseUrl` from settings plus
@@ -690,11 +697,13 @@ async function resolveMention(
  *
  *  Kept deliberately short: the tags are self-describing (labelled attributes
  *  + element text), so this only names the parts and points at the `aura`
- *  skill for anything beyond reading a task reference. This is the only
+ *  skill for anything beyond reading a reference. This is the only
  *  reference instruction block: the old extension's `<aura-task>` block
  *  was deleted together with its `@AURA-` handling (task-alias ticket),
  *  and rule references carry their body in the system prompt already
- *  (the engineering-rules mention injection). */
+ *  (the engineering-rules mention injection). The artifact kind grew the
+ *  block to three tag shapes (artifact attributes are metadata-driven:
+ *  id, kind, and the version the reference resolved to). */
 export const REFERENCE_INSTRUCTION = `
 ## Inline references
 
@@ -702,10 +711,13 @@ User messages may contain inline references rendered as tagged elements:
 
   <task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>
   <rule-ref name="tracker-aura" attach="manual">Tracker Aura</rule-ref>
+  <artifact-ref id="9f3c2e8a-1111-4222-8333-444444444444" kind="PLAN" version="3">Q3 planning doc</artifact-ref>
 
 Task references carry only the key, status, and title, never the task body. \`key\` is the task's human-readable identifier (e.g. \`AURA-42\`), \`status\` its current Aura workflow status (e.g. \`OPEN\`, \`IN_REVIEW\`, \`DONE\`), and the element text is the task title. To read the full task, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further task details from the reference alone.
 
 Rule references carry the rule's \`name\`, how it attaches (\`attach\`: \`manual\`, \`always\`, or \`glob\` with its patterns), and the rule's display title as the element text. The referenced rule's body is injected into the system prompt for this turn; honor it without further action.
+
+Artifact references carry the artifact's \`id\` (its uuid), its \`kind\` (\`PLAN\`, \`REVIEW\`, or \`GENERIC\`), the \`version\` the reference resolved to (the latest version at resolution time), and the artifact title as the element text; never the body. To read the full artifact, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further artifact details from the reference alone.
 `;
 
 // ---------------------------------------------------------------------------
@@ -1162,19 +1174,34 @@ export function createArtifactAdapter(options: {
     formatRow,
 
     formatExpansion(item) {
-      // Slice 2 of this ticket fills the metadata attributes (kind +
-      // version from the cached metadata); until it lands, resolution never
-      // reaches here (resolveFullToken below returns null, so mentions stay
-      // exactly as typed).
-      return `<artifact-ref id="${escapeAttr(item.id)}">${escapeText(item.title)}</artifact-ref>`;
+      // The metadata-driven expansion: the artifact kind and latest version
+      // come from the item's metadata extras (cached metadata when the
+      // resolution was cache-first, the targeted fetch otherwise); an item
+      // without them (only reachable through a hand-built item) expands
+      // with empty attributes rather than throwing.
+      const meta = artifactItemMetadata(item);
+      return `<artifact-ref id="${escapeAttr(item.id)}" kind="${escapeAttr(meta?.artifactKind ?? "")}" version="${escapeAttr(String(meta?.version ?? ""))}">${escapeText(item.title)}</artifact-ref>`;
     },
 
-    async resolveFullToken() {
-      // Slice 2 of this ticket lands the cache-first resolution plus the
-      // targeted getArtifact fallback; until then artifact mentions stay
-      // exactly as typed (the safe passthrough the engine's contract
-      // prescribes for unresolvable references).
-      return null;
+    async resolveFullToken(token, cache) {
+      // Resolve cache-first: a cached uuid whose row carries the complete
+      // metadata (artifact kind + latest version, the sqlite JSON column
+      // fields) resolves without any fetch. A cached row WITHOUT the
+      // metadata (an older or corrupted entry) must not expand with half
+      // the attributes, so it falls through with the cache miss.
+      const lower = token.toLowerCase();
+      const hit = cache.read(ARTIFACT_KIND).find((item) => item.id.toLowerCase() === lower);
+      if (hit && artifactItemMetadata(hit) !== null) return hit;
+      // ...then via the targeted by-id lookup (uuids match
+      // case-insensitively; the server is the authority on casing).
+      try {
+        const client = await createClient();
+        return artifactToReferenceItem(await client.getArtifact(token));
+      } catch {
+        // Missing credentials, 404/403, or network: leave the reference as
+        // typed so the agent can resolve it via the `aura` skill.
+        return null;
+      }
     },
 
     async warmup(cache, warmupOptions = {}) {
