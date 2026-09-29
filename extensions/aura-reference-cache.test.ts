@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+import { refreshReferenceKind, type KindAdapter } from "./aura-references.ts";
 import {
   createSqliteReferenceCache,
   type SqliteReferenceCacheOptions,
@@ -34,11 +35,11 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Run `fn` with a fresh temp dir's db path; the dir is removed afterwards
- *  even when an assertion throws. */
-function withTempDb(fn: (dbPath: string) => void): void {
+ *  even when an assertion throws. The callback may be async. */
+async function withTempDb(fn: (dbPath: string) => void | Promise<void>): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "aura-reference-cache-test-"));
   try {
-    fn(join(dir, "cache.db"));
+    await fn(join(dir, "cache.db"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -65,7 +66,7 @@ function clockedOptions(
 // ---------------------------------------------------------------------------
 
 {
-  withTempDb((dbPath) => {
+  await withTempDb((dbPath) => {
     const [now, tick] = testClock(1000);
     const store = createSqliteReferenceCache(clockedOptions(dbPath, now));
 
@@ -113,7 +114,7 @@ function clockedOptions(
 // ---------------------------------------------------------------------------
 
 {
-  withTempDb((dbPath) => {
+  await withTempDb((dbPath) => {
     const [now] = testClock(1700);
     const first = createSqliteReferenceCache(clockedOptions(dbPath, now));
     first.write("task", [
@@ -147,7 +148,7 @@ function clockedOptions(
 // ---------------------------------------------------------------------------
 
 {
-  withTempDb((dbPath) => {
+  await withTempDb((dbPath) => {
     const [now] = testClock(1000);
     const prod = createSqliteReferenceCache({ dbPath, baseUrl: "https://aura.example/api", now });
     const staging = createSqliteReferenceCache({ dbPath, baseUrl: "https://staging.example/api", now });
@@ -189,7 +190,7 @@ function clockedOptions(
 // ---------------------------------------------------------------------------
 
 {
-  withTempDb((dbPath) => {
+  await withTempDb((dbPath) => {
     const [now, tick] = testClock(1000);
     const store = createSqliteReferenceCache(clockedOptions(dbPath, now));
 
@@ -235,7 +236,7 @@ function clockedOptions(
 {
   // An unopenable path (a directory): the store still works in-session,
   // backed by the in-memory cache.
-  withTempDb((dbPath) => {
+  await withTempDb((dbPath) => {
     const dir = dbPath + ".d";
     mkdtempSync(dir); // a directory where the db file should be
     const [now] = testClock(1000);
@@ -252,7 +253,7 @@ function clockedOptions(
 
   // A corrupt file: the store falls back without destroying the file (the
   // user's data on disk is never touched, let alone deleted or re-created).
-  withTempDb((dbPath) => {
+  await withTempDb((dbPath) => {
     const garbage = "this is not a sqlite database at all, just text";
     writeFileSync(dbPath, garbage, "utf8");
     const [now] = testClock(1000);
@@ -271,7 +272,7 @@ function clockedOptions(
 // ---------------------------------------------------------------------------
 
 {
-  withTempDb((dbPath) => {
+  await withTempDb((dbPath) => {
     const [now] = testClock(1000);
     const store = createSqliteReferenceCache(clockedOptions(dbPath, now));
 
@@ -313,7 +314,7 @@ function clockedOptions(
 // ---------------------------------------------------------------------------
 
 {
-  withTempDb((dbPath) => {
+  await withTempDb((dbPath) => {
     const [now] = testClock(1000);
     const store = createSqliteReferenceCache(clockedOptions(dbPath, now));
 
@@ -342,6 +343,54 @@ function clockedOptions(
     assert.deepEqual(store.read("task"), []);
 
     console.log("sqlite store: no-stamp + swallowed failures: ok");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Engine compatibility: the SWR refresh writes through the sqlite store
+// ---------------------------------------------------------------------------
+
+{
+  await withTempDb(async (dbPath) => {
+    const [now, tick] = testClock(1000);
+    const store = createSqliteReferenceCache(clockedOptions(dbPath, now));
+
+    // A minimal kind adapter whose server search returns fresh items (the
+    // engine's searchServer seam; the real adapters live in the engine).
+    const adapter: KindAdapter = {
+      kind: "task",
+      parsePartial: (partial) => partial,
+      searchLocal: () => [],
+      searchServer: async () => [
+        { kind: "task", id: "t1", key: "AURA-1", title: "Renamed by the refresh", status: "OPEN" },
+        { kind: "task", id: "t2", key: "AURA-2", title: "Fresh from the server", status: "OPEN" },
+      ],
+      formatRow: (item) => ({ value: `#task:${item.key}`, label: `#task:${item.key}`, description: item.title }),
+      formatExpansion: (item) => `<task-ref key="${item.key}">${item.title}</task-ref>`,
+      resolveFullToken: async () => null,
+    };
+
+    // The store sits behind the engine unchanged: the refresh writes its
+    // results through, upserting over the cached row and adding the new one.
+    store.write("task", [
+      { kind: "task", id: "t1", key: "AURA-1", title: "Old title", status: "OPEN" },
+    ]);
+    tick(500);
+    await refreshReferenceKind(store, adapter, "aur");
+
+    assert.deepEqual(store.read("task"), [
+      { kind: "task", id: "t1", key: "AURA-1", title: "Renamed by the refresh", status: "OPEN", fetchedAt: 1500 },
+      { kind: "task", id: "t2", key: "AURA-2", title: "Fresh from the server", status: "OPEN", fetchedAt: 1500 },
+    ]);
+    assert.equal(store.fetchedAt("task"), 1500);
+
+    // The persisted rows survive into the next session (the demo: warm one
+    // session, open a fresh one, suggestions are instant on the first
+    // keystroke, before any fetch lands).
+    const next = createSqliteReferenceCache(clockedOptions(dbPath, now));
+    assert.equal(next.read("task").length, 2);
+
+    console.log("engine compatibility: SWR write-through + cross-session instant reads: ok");
   });
 }
 
