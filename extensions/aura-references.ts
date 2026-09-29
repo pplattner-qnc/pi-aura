@@ -626,6 +626,13 @@ export function createReferenceAutocompleteProvider(
       if (partial === null) {
         return current.getSuggestions(lines, cursorLine, cursorCol, options);
       }
+      // Stale-while-revalidate: the cached rows below go out instantly, and
+      // this same query fires the background refresh (never awaited here)
+      // that writes the fresh server results through to the cache, so they
+      // surface on the next keystroke. The refresh is guarded by this
+      // request's abort signal (pi-tui aborts superseded requests), so an
+      // aborted query stops its work and writes nothing.
+      void refreshReferenceKind(cache, adapter, partial, { signal: options.signal });
       const rows = adapter.searchLocal(cache.read(adapter.kind), partial);
       if (rows.length === 0) {
         // Zero-match partial: defer to the built-in provider.

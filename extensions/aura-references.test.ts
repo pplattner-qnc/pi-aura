@@ -832,6 +832,92 @@ console.log("refreshReferenceKind empty server result: ok");
 console.log("refreshReferenceKind unknown extra fields: ok");
 
 // ---------------------------------------------------------------------------
+// Provider + SWR wiring: instant cached answers, background refresh per query
+// ---------------------------------------------------------------------------
+
+/** A provider wired over a controllable-search task adapter: exposes the
+ *  search-call recorder so tests observe the background refreshes. */
+function swrProvider(cache: ReturnType<typeof createInMemoryReferenceCache>) {
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const registry = createReferenceRegistry([adapter]);
+  const current = fakeCurrent();
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache);
+  return { provider, calls, current };
+}
+
+{
+  // Criterion: getSuggestions resolves from the cache without awaiting any
+  // Aura fetch. The injected fetch here hangs forever; the query still
+  // answers from the cache while the refresh is only started in the
+  // background.
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", taskItems());
+  const { provider, calls } = swrProvider(cache);
+
+  const suggestions = await suggestAt(provider, "#task:42", 8);
+  assert.deepEqual(suggestions?.items.map((i) => i.value), ["#task:AURA-42", "#task:AURA-424"]);
+  assert.equal(suggestions?.prefix, "#task:42");
+  await Promise.resolve(); // one hop: the background refresh reaches listTasks
+  assert.equal(calls.length, 1, "the same query fired the background refresh");
+  // The fetch is left hanging forever: the provider never awaited it.
+}
+
+console.log("provider SWR: instant cache answer, background refresh fired: ok");
+
+{
+  // Criterion: every query fires the background refresh carrying the typed
+  // partial, including zero-match partials whose rows defer to the built-in
+  // provider (that is how a task outside the cache window becomes findable).
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", taskItems());
+  const { provider, calls, current } = swrProvider(cache);
+
+  await suggestAt(provider, "#task:", 6); // empty partial: the cache head
+  await suggestAt(provider, "#task:42", 8); // key partial
+  await suggestAt(provider, "#task:login", 11); // title partial
+  const deferBase = current.calls.suggestions;
+  await suggestAt(provider, "#task:zzz", 9); // zero-match: defers, still refreshes
+  await Promise.resolve(); // let the last refresh reach listTasks
+  assert.deepEqual(calls.map((c) => c.search), ["", "42", "login", "zzz"]);
+  assert.equal(current.calls.suggestions, deferBase + 1, "zero-match still defers to the built-in provider");
+
+  // A non-reference token (deferred from the start) fires no refresh.
+  const beforeHeading = calls.length;
+  await suggestAt(provider, "# Heading", 9);
+  assert.equal(calls.length, beforeHeading, "non-reference tokens fire no refresh");
+}
+
+console.log("provider SWR: every reference query refreshes with its partial: ok");
+
+{
+  // The request's own abort signal guards the background write: pi-tui
+  // aborts superseded requests, and a late server answer must never land.
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", taskItems());
+  const { provider, calls } = swrProvider(cache);
+  const controller = new AbortController();
+
+  const suggestions = await provider.getSuggestions(["#task:login"], 0, 11, { signal: controller.signal });
+  assert.equal(suggestions?.items[0]?.value, "#task:AURA-42", "the cache answered instantly");
+  await Promise.resolve(); // the refresh is now in flight
+  assert.equal(calls.length, 1);
+  controller.abort(); // pi-tui superseded this request
+  calls[0]!.resolve({
+    items: [{ id: "late", human_key: "AURA-555", title: "Late server answer", status: "OPEN" }],
+    pagination: {},
+  });
+  await new Promise((resolve) => setImmediate(resolve)); // let the dropped answer settle
+  assert.deepEqual(
+    cache.read("task").map((e) => e.key),
+    ["AURA-42", "AURA-424", "AURA-1337"],
+    "the aborted request's late answer never landed",
+  );
+}
+
+console.log("provider SWR: the request abort signal guards the write: ok");
+
+// ---------------------------------------------------------------------------
 // createReferenceAutocompleteProvider (the deferral wiring over the registry)
 // ---------------------------------------------------------------------------
 
