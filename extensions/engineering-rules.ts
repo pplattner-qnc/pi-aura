@@ -2,12 +2,11 @@
  * Engineering Rules Extension
  *
  * Reads the repo's `.mdc` Cursor rule files from `<cwd>/.cursor/rules/`
- * (recursively) and dispatches each by its frontmatter attach mode, provides
- * a universal `@mention` overlay for all loaded rules, and lists the
- * non-auto-loaded rules in the system prompt every turn.
+ * (recursively) and dispatches each by its frontmatter attach mode, and
+ * lists the non-auto-loaded rules in the system prompt every turn.
  *
  * Syncing the `.mdc` files into a repo's `.cursor/rules/` is a per-repo
- * concern — this package ships no rules of its own. The extension reads
+ * concern: this package ships no rules of its own. The extension reads
  * whatever the repo (its cwd) has deposited there. Until a repo populates
  * `.cursor/rules/`, the extension no-ops (no rules are injected).
  *
@@ -15,14 +14,17 @@
  *   - `alwaysApply: true`  → append the rule body to the system prompt every turn.
  *   - `globs:` + `alwaysApply: false` → list (path + globs) in the system
  *     prompt every turn; the agent `read`s the rule on demand.
- *   - neither (manual) → list in the system prompt + `@mention`-able.
+ *   - neither (manual) → list in the system prompt + mention-able.
  *
- * Universal `@mention` overlay (all loaded rules):
- *   - `ctx.ui.addAutocompleteProvider` with `triggerCharacters: ["@", ...]`.
- *   - When the text after `@` starts with `rule:`, offer the loaded rules;
- *     selecting one inserts `@rule:<name>`.
- *   - Defer to the built-in path provider when the token after `@` doesn't
- *     start with `rule:` (avoid clobbering pi's `@file` path syntax).
+ * Autocomplete and inline expansion for rule mentions live in the shared
+ * reference engine (`extensions/aura-references.ts`): typing `#rule:` or
+ * the legacy `@rule:` opens the engine's provider over the same loaded
+ * rules, and on submit the mention expands to a `<rule-ref>` element.
+ * This file's own `@rule:` autocomplete provider was deleted when the
+ * engine registered the `@rule:` alias (atomic landing: the alias and the
+ * old provider would double-answer the same tokens). What stays here:
+ * rule loading, frontmatter dispatch, and the always-on/glob system-prompt
+ * sections below.
  *
  * `before_agent_start` rule resolver: scans the user's prompt for rule
  * mentions and appends the corresponding rule bodies to the system prompt
@@ -41,68 +43,18 @@
  *     CWDs) and `<cwd>/.pi/settings.json` (project-local); the two lists are
  *     unioned, so a rule matching either is skipped.
  *   - Lives under the `aura` settings block (this package's namespace); the
- *     setting is repo-controlled, not package-controlled — there is no
+ *     setting is repo-controlled, not package-controlled: there is no
  *     package-wide ignore list and no drift manifest.
  *
  * Rules are resources, NOT pi skills (no `/skill:<rule>`). One concern per
- * extension — this file owns rule dispatch + `@mention`; it does not touch
- * the aura-skill reminder (that's `aura-skill-instruction.ts`).
+ * extension: this file owns rule loading + dispatch + body injection; it
+ * does not touch the aura-skill reminder (that's `aura-skill-instruction.ts`).
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-// ---------------------------------------------------------------------------
-// Autocomplete types (minimal structural shapes)
-// ---------------------------------------------------------------------------
-// `@earendil-works/pi-tui` exports AutocompleteItem / AutocompleteProvider /
-// AutocompleteSuggestions, but this package only declares
-// `@earendil-works/pi-coding-agent` as a peer dep — importing from `pi-tui`
-// directly would be an undeclared transitive dep. The shapes are structurally
-// typed here (matching pi-tui's interface) so the extension compiles against
-// the declared peer dep only. `addAutocompleteProvider` is structurally typed
-// by `ExtensionAPI`, so a compatible provider shape is accepted.
-
-interface AutocompleteItem {
-  value: string;
-  label: string;
-  description?: string;
-}
-
-interface AutocompleteSuggestions {
-  items: AutocompleteItem[];
-  prefix: string;
-}
-
-interface GetSuggestionsOptions {
-  signal: AbortSignal;
-  force?: boolean;
-}
-
-interface AutocompleteProvider {
-  /** Characters that should naturally trigger this provider at token boundaries. */
-  triggerCharacters?: string[];
-  getSuggestions(
-    lines: string[],
-    cursorLine: number,
-    cursorCol: number,
-    options: GetSuggestionsOptions,
-  ): Promise<AutocompleteSuggestions | null>;
-  applyCompletion(
-    lines: string[],
-    cursorLine: number,
-    cursorCol: number,
-    item: AutocompleteItem,
-    prefix: string,
-  ): { lines: string[]; cursorLine: number; cursorCol: number };
-  shouldTriggerFileCompletion?(
-    lines: string[],
-    cursorLine: number,
-    cursorCol: number,
-  ): boolean;
-}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -127,9 +79,6 @@ const PROJECT_SETTINGS_REL = join(".pi", "settings.json");
 const SETTINGS_BLOCK = "aura";
 const SETTINGS_KEY = "cursorRules";
 const IGNORE_FIELD = "ignore";
-
-/** The `@mention` token prefix. */
-const RULE_TOKEN_PREFIX = "rule:";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -444,78 +393,7 @@ export function buildListedRulesSection(rules: Rule[]): string {
     const globsStr = r.globs.length > 0 ? ` (globs: ${r.globs.join(", ")})` : "";
     return `- ${RULES_DIR}/${r.relPath}${globsStr}`;
   }).join("\n");
-  return `\n\n## Engineering Rules (on-demand)\n\nThe following house rules are available but not auto-loaded. Use the \`read\` tool to load a rule when its topic is relevant, or mention it with \`@rule:<name>\` to inject its body for this turn.\n\n${lines}\n`;
-}
-
-// ---------------------------------------------------------------------------
-// Autocomplete provider (universal `@mention` overlay)
-// ---------------------------------------------------------------------------
-
-/** Extract the `@rule:<token>` text after the cursor, or `null` if the `@`
- *  token isn't a `rule:` token (so we defer to the built-in path provider). */
-export function extractRuleToken(textBeforeCursor: string): string | null {
-  // Match `@rule:<chars>` where the token starts with `rule:`. We require the
-  // `@` to be at a token boundary (start or after whitespace) so we don't
-  // hijack `@` inside emails/paths.
-  const match = textBeforeCursor.match(/(?:^|[ \t])@(rule:[^\s@]*)$/);
-  return match ? (match[1] ?? "") : null;
-}
-
-function formatRuleItem(rule: Rule): AutocompleteItem {
-  return {
-    value: `@${RULE_TOKEN_PREFIX}${rule.name}`,
-    label: `@rule:${rule.name}`,
-    description: rule.globs.length > 0
-      ? `(glob: ${rule.globs.join(", ")})`
-      : "(manual)",
-  };
-}
-
-function createRuleAutocompleteProvider(
-  current: AutocompleteProvider,
-  getRules: () => Rule[],
-): AutocompleteProvider {
-  return {
-    triggerCharacters: ["@"],
-    async getSuggestions(lines, cursorLine, cursorCol, options): Promise<AutocompleteSuggestions | null> {
-      const line = lines[cursorLine] ?? "";
-      const beforeCursor = line.slice(0, cursorCol);
-      const token = extractRuleToken(beforeCursor);
-      if (token === null) {
-        // Not a `@rule:` token — defer to the built-in path provider (don't
-        // clobber pi's `@file` path syntax).
-        return current.getSuggestions(lines, cursorLine, cursorCol, options);
-      }
-      const rules = getRules();
-      if (rules.length === 0) {
-        return current.getSuggestions(lines, cursorLine, cursorCol, options);
-      }
-      // token is `rule:<partial-name>`; the prefix we replace is `@rule:<partial>`.
-      const afterAt = token; // e.g. "rule:track"
-      const partial = afterAt.slice(RULE_TOKEN_PREFIX.length); // e.g. "track"
-      const matches = partial
-        ? rules.filter((r) => r.name.toLowerCase().includes(partial.toLowerCase()))
-        : rules;
-      if (matches.length === 0) {
-        return current.getSuggestions(lines, cursorLine, cursorCol, options);
-      }
-      return {
-        items: matches.map(formatRuleItem),
-        prefix: `@${afterAt}`,
-      };
-    },
-    applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
-      return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
-    },
-    shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
-      // Defer to the built-in provider's decision unless we're actively
-      // completing a `@rule:` token.
-      const line = lines[cursorLine] ?? "";
-      const beforeCursor = line.slice(0, cursorCol);
-      if (extractRuleToken(beforeCursor) !== null) return false;
-      return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
-    },
-  };
+  return `\n\n## Engineering Rules (on-demand)\n\nThe following house rules are available but not auto-loaded. Use the \`read\` tool to load a rule when its topic is relevant, or mention it with \`#rule:<name>\` (legacy \`@rule:<name>\`) to inject its body for this turn.\n\n${lines}\n`;
 }
 
 // ---------------------------------------------------------------------------
@@ -580,16 +458,13 @@ export default function (pi: ExtensionAPI): void {
   let rules: Rule[] = [];
 
   pi.on("session_start", async (_event, ctx) => {
+    // Rules are loaded once at session start (the files don't change during a
+    // session) and reloaded on /reload (which re-emits session_start). A repo
+    // without `.cursor/rules/` loads an empty set: no sections, no body
+    // injection, and nothing offered through the engine's rule kind either
+    // (it loads the same directory). Do not notify: the empty state is
+    // expected until the repo syncs its rules.
     rules = loadRules(ctx.cwd);
-    if (rules.length === 0) {
-      // No rules in <cwd>/.cursor/rules/ — the extension no-ops. Do not
-      // notify: this is the expected state until the repo syncs its rules.
-      return;
-    }
-    // Register the universal `@mention` overlay for all rules.
-    ctx.ui.addAutocompleteProvider((current) =>
-      createRuleAutocompleteProvider(current, () => rules),
-    );
   });
 
   pi.on("before_agent_start", async (event, _ctx) => {

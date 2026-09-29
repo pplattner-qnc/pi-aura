@@ -2,11 +2,11 @@
  * Aura References Extension (shared reference engine)
  *
  * One syntax family for referencing resources in a pi prompt: `#task:AURA-42`
- * today, with `#rule:`, `#artifact:`, and `#wiki:` joining later via new kind
- * adapters. The engine level (token extraction, autocomplete provider, cache,
- * registry) is kind-agnostic: kinds are small adapters behind a common
+ * and `#rule:<name>` today, with `#artifact:` and `#wiki:` joining later
+ * via new kind adapters. The engine level (token extraction, autocomplete
+ * provider, cache, registry) is kind-agnostic: kinds are small adapters behind a common
  * interface, and the registry is data (kind prefixes, adapters, and the
- * dormant legacy-alias table), so adding a kind is a new adapter plus a
+ * legacy-alias table), so adding a kind is a new adapter plus a
  * registration, never engine surgery.
  *
  * Slice 1 of the reference-engine-core task ships:
@@ -88,13 +88,15 @@
  * in a credential-less session; they never touch the cache or Aura).
  * Because rules are cwd-local they ride engine memory, not the persistent
  * cache: the factory loads them per session and hands them to the adapter
- * through an accessor. The engineering-rules `before_agent_start` resolver
- * still injects mentioned rule bodies, matching raw `#rule:` tokens AND the
- * expanded `<rule-ref>` elements this engine's input transform leaves in
- * the prompt (the transform runs before `before_agent_start`). The legacy
- * `@rule:` autocomplete stays in `engineering-rules.ts` until the second
- * slice registers `@rule:` as the second production alias and deletes the
- * old provider in the same atomic landing.
+ * through an accessor. The engineering-rules `before_agent_start`
+ * resolver still injects mentioned rule bodies, matching raw `#rule:` and
+ * legacy `@rule:` tokens AND the expanded `<rule-ref>` elements this
+ * engine's input transform leaves in the prompt (the transform runs
+ * before `before_agent_start`). The ticket's second slice registered
+ * `@rule:` as the second production alias (`createRuleAlias`, sharing the
+ * once-per-session deprecation warning latch with `@AURA-`) and deleted
+ * the rules extension's own `@rule:` autocomplete provider in the same
+ * atomic landing, so the engine owns both rule syntaxes end-to-end.
  *
  * Credentials: the task adapter talks to Aura through the shared AuraClient
  * (`createDefaultAuraClient`, which reads `aura.baseUrl` from settings plus
@@ -253,8 +255,8 @@ export function createInMemoryReferenceCache(now: () => number = Date.now): Refe
 // registered kind prefixes: registering a kind is data, not engine surgery.
 
 /** One legacy alias: a registered legacy token pattern mapped to a kind
- *  adapter (`@AURA-<digits>` is the first production alias, registered via
- *  createAuraTaskAlias; `@rule:<name>` arrives with the rule ticket). The
+ *  adapter (`@AURA-<digits>` and `@rule:<name>` are the production aliases,
+ *  registered via createAuraTaskAlias and createRuleAlias). The
  *  pattern is the full boundary-anchored token pattern (same shape as the
  *  engine's own token pattern) whose capture group 1 is the token text
  *  handed to the kind adapter: the partial the adapter searches while
@@ -314,8 +316,8 @@ export interface KindAdapter {
 export interface ReferenceRegistry {
   /** kind prefix -> adapter. */
   readonly kinds: ReadonlyMap<string, KindAdapter>;
-  /** Registered legacy aliases (`@AURA-<digits>` today; `@rule:` arrives
-   *  with the rule ticket). */
+  /** Registered legacy aliases (`@AURA-<digits>` and `@rule:<name>`, the
+   *  two production aliases). */
   readonly aliases: readonly LegacyAlias[];
   /** Register a legacy token pattern mapped to a kind adapter (the arch-spec
    *  alias-registration contract the rule ticket calls for `@rule:`). Once
@@ -1034,6 +1036,48 @@ export function createAuraTaskAlias(taskAdapter: KindAdapter): LegacyAlias {
 }
 
 // ---------------------------------------------------------------------------
+// The `@rule:<name>` legacy alias (the second production alias)
+// ---------------------------------------------------------------------------
+
+/** Build the `@rule:<name>` legacy alias registration: the rules
+ *  extension's original `@rule:` syntax keeps working through the engine,
+ *  mapped to the rule kind. The pattern pins the legacy grammar the old
+ *  provider had: `@rule:` at a token boundary (start of line or after
+ *  whitespace) followed by a rule name (letters, digits, hyphens), cursor at
+ *  the end of the token, case-insensitive. Capture group 1 is the rule
+ *  name, per the alias capture contract: the partial while typing, the full
+ *  key on submit. An empty name is a non-mention (no suggestions, no
+ *  warning); the name charset makes a bare `@rule:` with glued punctuation
+ *  end the token. Scanning on submit drops the `$` anchor via
+ *  `globalScanPattern`, so a name followed by trailing punctuation still
+ *  expands (the legacy resolver grammar is equally lenient).
+ *
+ *  Autocomplete ranks through the rule adapter's local filter
+ *  (`filterRuleItems` over the loaded rules) and reuses the adapter's
+ *  `formatRow` for the description (the attach mode), swapping value/label
+ *  to the legacy `@rule:<name>` token so selection keeps the user in the
+ *  syntax they typed (the once-per-session deprecation warning teaches the
+ *  new `#rule:` one). Rules never ride the reference cache, so the hook
+ *  ignores the cache items it is handed and filters the loaded rules
+ *  directly. */
+export function createRuleAlias(
+  ruleAdapter: KindAdapter,
+  getRules: () => Rule[],
+): LegacyAlias {
+  return {
+    pattern: /(?:^|[ \t])@rule:([a-z0-9-]+)$/i,
+    kind: RULE_KIND,
+    searchLocal: (_items, partial) =>
+      filterRuleItems(getRules().map(ruleToReferenceItem), partial).map((item) => {
+        const token = `@rule:${item.key}`;
+        // The row keeps the adapter's description (the attach mode); only
+        // the inserted token switches to the legacy form.
+        return { ...ruleAdapter.formatRow(item), value: token, label: token };
+      }),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Autocomplete provider wiring (the `#` overlay)
 // ---------------------------------------------------------------------------
 
@@ -1058,7 +1102,7 @@ export function createReferenceAutocompleteProvider(
   const canRefresh = refreshOptions.canRefresh ?? (() => true);
   return {
     // `#` for the engine's own `#kind:` tokens; `@` for the registered legacy
-    // aliases (`@AURA-` today, `@rule:` with the rule ticket). Every `@` token
+    // aliases (`@AURA-` and `@rule:`). Every `@` token
     // that is not a registered alias defers to the wrapped provider below, so
     // claiming the trigger character never clobbers pi's own `@` syntaxes
     // (mentions, files). (`@` is also one of pi-tui's default trigger
@@ -1220,6 +1264,14 @@ export default function (pi: ExtensionAPI): void {
   // the same landing (atomicity): while this alias is registered, no second
   // code path may transform the same mention.
   registry.registerAlias(createAuraTaskAlias(taskAdapter));
+  // The second production alias: `@rule:<name>` keeps working through the
+  // engine, mapped to the rule kind (legacy-token autocomplete insertion,
+  // expansion to the same <rule-ref> tag as #rule:, the shared
+  // once-per-session deprecation warning). Registered in the SAME landing
+  // that deletes the rules extension's own `@rule:` autocomplete provider
+  // (atomicity, the alias ticket's hard requirement): while the alias is
+  // registered, the old provider would double-answer the same tokens.
+  registry.registerAlias(createRuleAlias(ruleAdapter, () => sessionRules));
   // The session cache lives from session_start on. It starts empty (the
   // provider defers on an empty cache) and is populated by the fire-and-forget
   // warmup. A /reload re-emits session_start and swaps in a fresh cache.
