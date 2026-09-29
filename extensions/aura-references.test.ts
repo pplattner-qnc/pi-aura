@@ -14,8 +14,9 @@
  */
 
 import assert from "node:assert/strict";
-import {
+import auraReferences, {
   createInMemoryReferenceCache,
+  createReferenceAutocompleteProvider,
   createReferenceRegistry,
   createTaskAdapter,
   extractReferenceToken,
@@ -497,5 +498,156 @@ function fakeClient(pages: FakeTask[][], behavior?: {
 }
 
 console.log("createTaskAdapter warmup: ok");
+
+// ---------------------------------------------------------------------------
+// createReferenceAutocompleteProvider (the deferral wiring over the registry)
+// ---------------------------------------------------------------------------
+
+/** A fake built-in provider with call counters, always returning a fixed
+ *  suggestion so deferral is observable. */
+function fakeCurrent(suggestions = { items: [{ value: "file.txt", label: "file.txt" }], prefix: "f" }) {
+  const calls = { suggestions: 0, fileCompletion: 0, applyCompletion: 0 };
+  return {
+    calls,
+    provider: {
+      triggerCharacters: ["@"],
+      getSuggestions: async () => {
+        calls.suggestions += 1;
+        return suggestions;
+      },
+      applyCompletion: (lines: string[], cursorLine: number, cursorCol: number) => {
+        calls.applyCompletion += 1;
+        return { lines, cursorLine, cursorCol };
+      },
+      shouldTriggerFileCompletion: () => {
+        calls.fileCompletion += 1;
+        return true;
+      },
+    },
+  };
+}
+
+const noopClient = async () => {
+  throw new Error("no credentials");
+};
+
+function taskItems(): ReferenceItem[] {
+  return [
+    { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" },
+    { kind: "task", id: "u3", key: "AURA-424", title: "Refactor the renderer", status: "DONE" },
+    { kind: "task", id: "u2", key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" },
+  ];
+}
+
+function wiredProvider(cache: ReturnType<typeof createInMemoryReferenceCache> | null) {
+  const current = fakeCurrent();
+  const adapter = createTaskAdapter({ createClient: noopClient });
+  const registry = createReferenceRegistry([adapter]);
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache);
+  return { current, provider, registry };
+}
+
+async function suggestAt(provider: ReturnType<typeof createReferenceAutocompleteProvider>["provider"], line: string, col: number) {
+  return provider.getSuggestions([line], 0, col, { signal: new AbortController().signal });
+}
+
+{
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", taskItems());
+  const { current, provider } = wiredProvider(cache);
+  const defer = current.calls.suggestions;
+
+  // Non-reference tokens defer: a heading, a mid-word #, an unregistered
+  // kind, a token that already ended.
+  assert.deepEqual(await suggestAt(provider, "# Heading", 9), { items: [{ value: "file.txt", label: "file.txt" }], prefix: "f" });
+  assert.equal(current.calls.suggestions, defer + 1);
+  await suggestAt(provider, "foo#task:", 9);
+  await suggestAt(provider, "#rule:tracker-aura", 18);
+  await suggestAt(provider, "#task:42 ", 9);
+  assert.equal(current.calls.suggestions, defer + 4, "every non-reference token deferred");
+
+  // Zero-match partial defers to the built-in provider.
+  await suggestAt(provider, "#task:zzz", 9);
+  assert.equal(current.calls.suggestions, defer + 5);
+
+  // `#task:` with an empty partial shows the head of the cache.
+  const head = await suggestAt(provider, "#task:", 6);
+  assert.deepEqual(head?.items.map((i) => i.value), ["#task:AURA-42", "#task:AURA-424", "#task:AURA-1337"]);
+  assert.equal(head?.prefix, "#task:");
+
+  // `#task:42` matches by number prefix; `#task:login` by title substring;
+  // `#TASK:` matches case-insensitively and the completion prefix keeps the
+  // typed casing (only the typed token is replaced).
+  assert.deepEqual((await suggestAt(provider, "#task:42", 8))?.items.map((i) => i.value), ["#task:AURA-42", "#task:AURA-424"]);
+  assert.deepEqual((await suggestAt(provider, "#task:login", 11))?.items.map((i) => i.value), ["#task:AURA-42"]);
+  const upper = await suggestAt(provider, "#TASK:", 6);
+  assert.deepEqual(upper?.items.map((i) => i.value), ["#task:AURA-42", "#task:AURA-424", "#task:AURA-1337"]);
+  assert.equal(upper?.prefix, "#TASK:");
+
+  // Canonical key casing on selection: a lowercase partial still inserts the
+  // server-cased key.
+  assert.equal((await suggestAt(provider, "#task:aura", 9))?.items[0]?.value, "#task:AURA-42");
+
+  // Non- Aura kinds with a matching partial do not leak into task rows.
+  assert.deepEqual((await suggestAt(provider, "#task:dashboard", 15))?.items.map((i) => i.value), ["#task:AURA-1337"]);
+
+  // applyCompletion delegates to the built-in provider (pi owns insertion).
+  provider.applyCompletion(["#task:"], 0, 6, { value: "#task:AURA-42", label: "#task:AURA-42" }, "#task:");
+  assert.equal(current.calls.applyCompletion, 1);
+
+  // shouldTriggerFileCompletion: we own reference tokens (no file completion),
+  // otherwise the built-in decision applies.
+  assert.equal(provider.shouldTriggerFileCompletion?.(["#task:"], 0, 6), false);
+  assert.equal(current.calls.fileCompletion, 0, "no deferral on a reference token");
+  assert.equal(provider.shouldTriggerFileCompletion?.(["plain text"], 0, 10), true);
+  assert.equal(current.calls.fileCompletion, 1, "deferred to the built-in decision");
+
+  // A line-based check: a token at the start of a later line works (the
+  // provider is handed one line at a time).
+  const multi = await provider.getSuggestions(["hello", "#task:log"], 1, 9, { signal: new AbortController().signal });
+  assert.deepEqual(multi?.items.map((i) => i.value), ["#task:AURA-42"]);
+}
+
+console.log("provider suggestions + deferral: ok");
+
+// ---------------------------------------------------------------------------
+// Failure modes: no credentials, empty cache, current without hooks
+// ---------------------------------------------------------------------------
+
+{
+  // No credentials (null cache): the provider defers, nothing throws.
+  const missing = wiredProvider(null);
+  const deferred = await suggestAt(missing.provider, "#task:", 6);
+  assert.deepEqual(deferred?.items[0]?.value, "file.txt");
+  assert.equal(missing.current.calls.suggestions, 1);
+
+  // Empty cache (credentials ok, warmup returned nothing yet): defers too.
+  const empty = wiredProvider(createInMemoryReferenceCache());
+  assert.deepEqual((await suggestAt(empty.provider, "#task:", 6))?.items[0]?.value, "file.txt");
+
+  // A built-in provider without shouldTriggerFileCompletion: our hook falls
+  // back to true (do not block file completion on non-reference tokens).
+  const bare = fakeCurrent();
+  const bareProvider = { ...bare.provider } as Record<string, unknown>;
+  delete bareProvider.shouldTriggerFileCompletion;
+  const adapter = createTaskAdapter({ createClient: noopClient });
+  const registry = createReferenceRegistry([adapter]);
+  const overlay = createReferenceAutocompleteProvider(
+    bareProvider as unknown as Parameters<typeof createReferenceAutocompleteProvider>[0],
+    registry,
+    () => createInMemoryReferenceCache(),
+  );
+  assert.equal(overlay.shouldTriggerFileCompletion?.(["plain"], 0, 5), true);
+  assert.equal(overlay.shouldTriggerFileCompletion?.(["#task:"], 0, 6), false);
+}
+
+console.log("provider failure modes (defer, no throw): ok");
+
+// ---------------------------------------------------------------------------
+// Factory is a function (smoke; the factory itself is pi-runtime verified)
+// ---------------------------------------------------------------------------
+
+assert.equal(typeof auraReferences, "function", "default export is a factory function");
+console.log("factory: ok");
 
 console.log("\nall aura-references tests passed");

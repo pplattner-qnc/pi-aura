@@ -537,12 +537,113 @@ export function createTaskAdapter(options: {
 }
 
 // ---------------------------------------------------------------------------
+// Autocomplete provider wiring (the `#` overlay)
+// ---------------------------------------------------------------------------
+
+/**
+ * Wrap the built-in provider with the reference engine: a `#` token at a
+ * token boundary whose kind is registered serves suggestions instantly from
+ * the cache (no Aura fetch is ever awaited here); every non-reference token
+ * (headings, mid-word `#`, unregistered kinds, zero-match partials, and the
+ * no-credentials or empty-cache state) defers to the built-in provider so
+ * file completion and other overlays are never clobbered.
+ */
+export function createReferenceAutocompleteProvider(
+  current: AutocompleteProvider,
+  registry: ReferenceRegistry,
+  getCache: () => ReferenceCache | null,
+): AutocompleteProvider {
+  return {
+    triggerCharacters: ["#"],
+    async getSuggestions(lines, cursorLine, cursorCol, options): Promise<AutocompleteSuggestions | null> {
+      const line = lines[cursorLine] ?? "";
+      const beforeCursor = line.slice(0, cursorCol);
+      const token = extractReferenceToken(beforeCursor, registry);
+      if (token === null) {
+        // Not a reference token: defer (don't clobber pi's built-in syntaxes).
+        return current.getSuggestions(lines, cursorLine, cursorCol, options);
+      }
+      const adapter = registry.kinds.get(token.kind);
+      if (!adapter) {
+        return current.getSuggestions(lines, cursorLine, cursorCol, options);
+      }
+      const cache = getCache();
+      if (cache === null) {
+        // Missing credentials state: defer for the whole session.
+        return current.getSuggestions(lines, cursorLine, cursorCol, options);
+      }
+      const partial = adapter.parsePartial(token.partial);
+      if (partial === null) {
+        return current.getSuggestions(lines, cursorLine, cursorCol, options);
+      }
+      const rows = adapter.searchLocal(cache.read(adapter.kind), partial);
+      if (rows.length === 0) {
+        // Zero-match partial: defer to the built-in provider.
+        return current.getSuggestions(lines, cursorLine, cursorCol, options);
+      }
+      return { items: rows, prefix: token.raw };
+    },
+    applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+      return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+    },
+    shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
+      // Defer to the built-in provider's decision unless we're actively
+      // completing a reference token.
+      const line = lines[cursorLine] ?? "";
+      const beforeCursor = line.slice(0, cursorCol);
+      if (extractReferenceToken(beforeCursor, registry) !== null) return false;
+      return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic-import seam (same pattern as aura-tasks.ts loadTasks)
+// ---------------------------------------------------------------------------
+
+/**
+ * Create the shared Aura client. Dynamic import: `@pi-aura/shared/aura-client`
+ * uses .js extension specifiers internally, which Node's experimental
+ * strip-types loader cannot resolve. Pi's extension runtime handles static
+ * imports, so we dynamic-import the client factory here to keep the
+ * unit-test entry point runnable with `node --experimental-strip-types`.
+ */
+async function createDefaultClient(): Promise<TaskAuraClient> {
+  const { createDefaultAuraClient } = await import("@pi-aura/shared/aura-client");
+  return createDefaultAuraClient();
+}
+
+// ---------------------------------------------------------------------------
 // Extension factory
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI): void {
+  const taskAdapter = createTaskAdapter({ createClient: createDefaultClient });
+  const registry = createReferenceRegistry([taskAdapter]);
+  // The session cache lives from session_start on. It starts empty (the
+  // provider defers on an empty cache) and is populated by the fire-and-forget
+  // warmup. A /reload re-emits session_start and swaps in a fresh cache.
+  let sessionCache: ReferenceCache | null = null;
+
   pi.on("session_start", async (_event, ctx) => {
-    // Registered per slice; wiring lands with the provider in this slice.
-    void ctx;
+    ctx.ui.addAutocompleteProvider((current) =>
+      createReferenceAutocompleteProvider(current, registry, () => sessionCache),
+    );
+
+    const cache = createInMemoryReferenceCache();
+    sessionCache = cache;
+
+    // Fire-and-forget warmup for every registered kind that has one. Missing
+    // credentials and fetch failures are swallowed inside the adapter: the
+    // cache stays empty and the provider keeps deferring (no crash, no
+    // retry) for the rest of the session.
+    for (const adapter of registry.kinds.values()) {
+      void Promise.resolve()
+        .then(() => adapter.warmup?.(cache))
+        .catch(() => {
+          // warmup already swallows its own failures; this guard keeps a
+          // session-start handler from ever rejecting into the session.
+        });
+    }
   });
 }
