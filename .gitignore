@@ -14,12 +14,13 @@ dist/**
 .agents/
 
 # Subagent per-slice scratch outputs (tdd/verify/deviation/land/ui-noter results)
-# — these are workflow artifacts, not repo content.
-tdd-*/
-verify-*/
-deviation-*/
-land-*/
-ui-note-*/
+# at the repo root: these are workflow artifacts, not repo content. Anchored
+# so they never match docs/tasks/**/ paths (e.g. deviation-reports/).
+/tdd-*/
+/verify-*/
+/deviation-*/
+/land-*/
+/ui-note-*/
 
 # docs/tasks/state.yaml is TRACKED: the task/slice pointers and the
 # schema_version stamp persist across clones so setup-workflow is idempotent.
