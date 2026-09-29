@@ -1,7 +1,7 @@
 ---
 kind: map
 slug: unified-reference-mentions
-title: Unified in-chat resource references (#task:, #rule:, #artifact:, #wiki:)
+title: "Unified in-chat resource references (#task:, #rule:, #artifact:, #wiki:)"
 status: active
 tasks:
   - slug: pi-autocomplete-async-constraints
@@ -16,7 +16,7 @@ tasks:
   - slug: reference-cache-sqlite
     blocked_by:
       - reference-engine-core
-    done: false
+    done: true
   - slug: reference-task-alias
     blocked_by:
       - reference-engine-core
