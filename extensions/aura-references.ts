@@ -332,6 +332,211 @@ export function filterReferenceItems(
 }
 
 // ---------------------------------------------------------------------------
+// Task kind adapter (the first kind)
+// ---------------------------------------------------------------------------
+
+/** The task kind prefix typed after `#` (`#task:AURA-42`). */
+export const TASK_KIND = "task";
+
+/**
+ * Maximum number of tasks pulled for the autocomplete cache. Aura caps a page
+ * at 100; we page up to this many so a member of many tasks still gets broad
+ * coverage without an unbounded fetch. Newest-first by `updated_at desc` so
+ * the freshest tasks land in the cache head.
+ */
+export const MAX_TASKS = 500;
+
+/** Page size for `listTasks` (Aura's max is 100). */
+export const PAGE_SIZE = 100;
+
+/** The subset of a task the engine reads (mirrors the shared client's Task
+ *  without importing it). */
+export interface TaskSummary {
+  id: string;
+  human_key: string;
+  title: string;
+  status: string;
+}
+
+/** Query options for the structural listTasks (mirrors the shared client's
+ *  ListTasksInput loosely; the real client satisfies this structurally). */
+export interface TaskListQuery {
+  status?: string;
+  /** The API takes "false"|"true"|"all"; the shared ListTasksInput still types
+   *  `archived` as boolean, so this structural copy types it unknown (the same
+   *  interface-widening cast aura-tasks.ts makes, without the cast). */
+  archived?: unknown;
+  limit?: number;
+  page?: number;
+  sort_by?: string;
+  sort_dir?: string;
+  search?: string;
+  [k: string]: unknown;
+}
+
+/**
+ * The structural subset of the shared AuraClient the task adapter needs.
+ * Deliberately structural (no import of `@pi-aura/shared/aura-client`): the
+ * client is only imported live inside the extension factory via the
+ * dynamic-import seam, which keeps `node --experimental-strip-types` runnable.
+ */
+export interface TaskAuraClient {
+  listTasks(opts?: TaskListQuery): Promise<{ items: TaskSummary[]; pagination: unknown }>;
+  getTaskByHumanKey(key: string): Promise<TaskSummary>;
+}
+
+/** Escape a string for use as an XML attribute value: `"` -> `&quot;`,
+ *  `&` -> `&amp;`, `<` -> `&lt;`. (The entities are spelled via
+ *  concatenation so no tooling in the chain can unescape them.) */
+function escapeAttr(value: string): string {
+  const AMP = "&";
+  return value
+    .replace(/&/g, AMP + "amp;")
+    .replace(/</g, AMP + "lt;")
+    .replace(/"/g, AMP + "quot;");
+}
+
+/** Escape a string for use as XML element text: `&` -> `&amp;`,
+ *  `<` -> `&lt;`. */
+function escapeText(value: string): string {
+  const AMP = "&";
+  return value
+    .replace(/&/g, AMP + "amp;")
+    .replace(/</g, AMP + "lt;");
+}
+
+/** The numeric suffix of a task key (`AURA-42` -> `42`), so `42` and `424`
+ *  both find AURA-42-family keys (partial numbers work; user story 9). */
+function taskKeyNumber(key: string): string {
+  const dash = key.indexOf("-");
+  return dash === -1 ? key : key.slice(dash + 1);
+}
+
+/**
+ * The task kind adapter: warmup (`listTasks` pagination into the cache) plus
+ * local search (key prefix, key number prefix, and title substring,
+ * case-insensitive). Aura access goes through the injectable `createClient`
+ * factory: production wiring passes the dynamic-imported
+ * `createDefaultAuraClient`, tests pass fakes.
+ */
+export function createTaskAdapter(options: {
+  createClient: () => Promise<TaskAuraClient>;
+}): KindAdapter {
+  const { createClient } = options;
+
+  const toReferenceItem = (task: TaskSummary): ReferenceItem => ({
+    kind: TASK_KIND,
+    id: task.id,
+    key: task.human_key,
+    title: task.title,
+    status: task.status,
+  });
+
+  const formatRow = (item: ReferenceItem): AutocompleteItem => ({
+    // The value doubles as the inserted token: `#task:` plus the canonical
+    // (server-cased) human key, so selection inserts `#task:AURA-42` however
+    // the user typed the partial.
+    value: `#${TASK_KIND}:${item.key}`,
+    label: `#${TASK_KIND}:${item.key}`,
+    description: (item.status ? `[${item.status}] ${item.title}` : item.title).trim(),
+  });
+
+  return {
+    kind: TASK_KIND,
+
+    // Tasks accept any non-space partial after `#task:`.
+    parsePartial(partial) {
+      return partial;
+    },
+
+    searchLocal(items, partial) {
+      return filterReferenceItems(
+        items,
+        partial,
+        MAX_SUGGESTIONS,
+        (item, query) => taskKeyNumber(item.key).toLowerCase().startsWith(query),
+      ).map(formatRow);
+    },
+
+    async searchServer(partial, searchOptions = {}) {
+      try {
+        const client = await createClient();
+        const res = await client.listTasks({
+          search: partial,
+          status: "ALL",
+          archived: "all",
+          limit: searchOptions.limit ?? MAX_SUGGESTIONS,
+          sort_by: "updated_at",
+          sort_dir: "desc",
+        });
+        if (searchOptions.signal?.aborted) return [];
+        return res.items.map(toReferenceItem);
+      } catch {
+        // Missing credentials or a failed search: the SWR merge (next slice)
+        // just gets nothing fresh; the session is never disturbed.
+        return [];
+      }
+    },
+
+    formatRow,
+
+    formatExpansion(item) {
+      return `<task-ref key="${escapeAttr(item.key)}" status="${escapeAttr(item.status ?? "")}">${escapeText(item.title)}</task-ref>`;
+    },
+
+    async resolveFullToken(token, cache) {
+      // Resolve cache-first...
+      const lower = token.toLowerCase();
+      const hit = cache.read(TASK_KIND).find((item) => item.key.toLowerCase() === lower);
+      if (hit) return hit;
+      // ...then via the targeted by-key lookup (matches case-insensitively).
+      try {
+        const client = await createClient();
+        return toReferenceItem(await client.getTaskByHumanKey(token));
+      } catch {
+        // Missing credentials, 404/403, or network: leave the reference as
+        // typed so the agent can resolve it via the `aura` skill.
+        return null;
+      }
+    },
+
+    async warmup(cache, warmupOptions = {}) {
+      try {
+        const client = await createClient();
+        let page = 1;
+        let collected = 0;
+        while (collected < MAX_TASKS) {
+          if (warmupOptions.signal?.aborted) return;
+          // `status: "ALL"` spans open + archived statuses; `archived: "all"`
+          // also surfaces archived tasks (see TaskListQuery on the typing).
+          const res = await client.listTasks({
+            status: "ALL",
+            archived: "all",
+            limit: PAGE_SIZE,
+            page,
+            sort_by: "updated_at",
+            sort_dir: "desc",
+          });
+          const mapped = res.items.map(toReferenceItem);
+          // Write page by page so partial progress (later page failure or an
+          // abort mid-flight) still lands.
+          cache.write(TASK_KIND, mapped);
+          collected += mapped.length;
+          if (res.items.length < PAGE_SIZE) return;
+          page += 1;
+        }
+      } catch {
+        // Missing credentials (createDefaultAuraClient throws) or a failed
+        // page: warmup is best-effort. Whatever pages landed stay cached; the
+        // session is never disturbed and the provider keeps deferring until
+        // data exists. Credentials appearing later in the session do not
+        // retry: warmup is one-shot at session_start (this slice's contract).
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Extension factory
 // ---------------------------------------------------------------------------
 
