@@ -20,7 +20,7 @@ tasks:
   - slug: reference-task-alias
     blocked_by:
       - reference-engine-core
-    done: false
+    done: true
   - slug: reference-rule-kind
     blocked_by:
       - reference-engine-core
