@@ -23,7 +23,11 @@
  * with the uuid in the description and the full uuid token as the value,
  * uuid-prefix + title-substring local filtering, the listArtifacts warmup
  * pagination with its q-based server search, and the SWR write-through
- * for server-only matches and renames). The provider wiring
+ * for server-only matches and renames), the artifact-ref expansion (the
+ * metadata-driven id/kind/version attributes, cache-first resolution gated
+ * on complete cached metadata with the targeted getArtifact fallback,
+ * unknown mentions left as typed, and the escaping), and the instruction
+ * block's artifact-ref shape. The provider wiring
  * that defers to the built-in
  * provider for non-reference tokens is tested at its
  * pure wrapper seam. The extension factory (which reaches Aura through the
@@ -1806,19 +1810,31 @@ console.log("once-per-session deprecation-warning decision: ok");
 console.log("resolveFullToken cache-first + targeted fallback: ok");
 
 // ---------------------------------------------------------------------------
-// REFERENCE_INSTRUCTION (the per-turn system-prompt block: task-ref + rule-ref)
+// REFERENCE_INSTRUCTION (the per-turn system-prompt block: task-ref +
+// rule-ref + artifact-ref)
 // ---------------------------------------------------------------------------
 
 {
   assert.ok(REFERENCE_INSTRUCTION.includes("<task-ref"), "shows the task-ref tag shape");
   assert.ok(REFERENCE_INSTRUCTION.includes("<rule-ref"), "shows the rule-ref tag shape");
+  assert.ok(REFERENCE_INSTRUCTION.includes("<artifact-ref"), "shows the artifact-ref tag shape");
   assert.ok(REFERENCE_INSTRUCTION.includes("key="), "names the task key attribute");
   assert.ok(REFERENCE_INSTRUCTION.includes("status="), "names the task status attribute");
   assert.ok(REFERENCE_INSTRUCTION.includes("name="), "names the rule name attribute");
   assert.ok(REFERENCE_INSTRUCTION.includes("attach="), "names the rule attach attribute");
+  assert.ok(REFERENCE_INSTRUCTION.includes("id="), "names the artifact id attribute");
+  assert.ok(REFERENCE_INSTRUCTION.includes("kind="), "names the artifact kind attribute");
+  assert.ok(REFERENCE_INSTRUCTION.includes("version="), "names the artifact version attribute");
   assert.ok(/element text is the task title/.test(REFERENCE_INSTRUCTION), "names the task title part");
   assert.ok(/display title as the element text/.test(REFERENCE_INSTRUCTION), "names the rule display title part");
+  assert.ok(/artifact title as the element text/.test(REFERENCE_INSTRUCTION), "names the artifact title part");
+  assert.ok(/`PLAN`/.test(REFERENCE_INSTRUCTION), "names the artifact kind values");
+  assert.ok(/version the reference resolved to/.test(REFERENCE_INSTRUCTION), "names the artifact version semantics");
   assert.ok(REFERENCE_INSTRUCTION.includes("aura"), "points at the aura skill for task references");
+  assert.ok(
+    /To read the full artifact[^]*use the `aura` skill/.test(REFERENCE_INSTRUCTION),
+    "points at the aura skill for artifact references",
+  );
   assert.ok(/SKILL\.md/.test(REFERENCE_INSTRUCTION), "tells the agent how to load the skill");
   assert.ok(
     /body is injected into the system prompt for this turn/.test(REFERENCE_INSTRUCTION),
@@ -2674,6 +2690,210 @@ console.log("refreshReferenceKind server-only artifact match: ok");
 }
 
 console.log("refreshReferenceKind artifact rename correction: ok");
+
+// ---------------------------------------------------------------------------
+// createArtifactAdapter: formatExpansion (the artifact-ref tag)
+// ---------------------------------------------------------------------------
+
+{
+  const adapter = createArtifactAdapter({
+    createClient: async () => {
+      throw new Error("no credentials in this test");
+    },
+  });
+
+  // The expansion shape: <artifact-ref id kind version>title</artifact-ref>,
+  // with the kind and version read from the item's metadata extras.
+  assert.equal(
+    adapter.formatExpansion(
+      artifactToReferenceItem({ id: "9f3c2e8a-1111-4222-8333-444444444444", title: "Q3 planning doc", latest_version: 3, kind: "PLAN" }),
+    ),
+    '<artifact-ref id="9f3c2e8a-1111-4222-8333-444444444444" kind="PLAN" version="3">Q3 planning doc</artifact-ref>',
+  );
+
+  // Escaping: the title is XML-escaped as element text and the attribute
+  // values carry entity escaping (a title with &, <, " survives intact).
+  assert.equal(
+    adapter.formatExpansion(
+      artifactToReferenceItem({ id: 'a"b&c', title: `Plans & "<roadmap>"`, latest_version: 2, kind: "GENERIC" }),
+    ),
+    '<artifact-ref id="a&quot;b&amp;c" kind="GENERIC" version="2">Plans &amp; "&lt;roadmap>"</artifact-ref>',
+  );
+}
+
+console.log("createArtifactAdapter formatExpansion: ok");
+
+// ---------------------------------------------------------------------------
+// createArtifactAdapter: resolveFullToken (cache-first with the metadata
+// gate, then the targeted getArtifact fallback; unresolvable is null)
+// ---------------------------------------------------------------------------
+
+{
+  // A counting client factory: a cache hit with complete metadata must
+  // build no client at all (no targeted fetch); only the fallbacks reach
+  // Aura.
+  let clientBuilds = 0;
+  const adapter = createArtifactAdapter({
+    createClient: async () => {
+      clientBuilds += 1;
+      return {
+        listArtifacts: async () => ({ items: [], pagination: {} }),
+        getArtifact: async (id: string) => {
+          if (id === "77e00001-1111-4222-8333-444444444444") {
+            return { id, title: "Server-known artifact", latest_version: 9, kind: "REVIEW" };
+          }
+          if (id === "0a1b0001-1111-4222-8333-444444444444") {
+            return { id, title: "Refreshed metadata row", latest_version: 5, kind: "PLAN" };
+          }
+          throw new Error("404 not found");
+        },
+      };
+    },
+  });
+  const cache = createInMemoryReferenceCache(() => 5000);
+  cache.write("artifact", [
+    artifactToReferenceItem({ id: "9f3c0001-1111-4222-8333-444444444444", title: "Q3 planning doc", latest_version: 3, kind: "PLAN" }),
+    // A metadata-less cached row (an older or corrupted entry): present in
+    // the cache but incomplete, so resolution must not stop at it.
+    { kind: "artifact", id: "0a1b0001-1111-4222-8333-444444444444", key: "0a1b0001-1111-4222-8333-444444444444", title: "Metadata-less row" },
+  ]);
+
+  // Cache hit (case-insensitive uuid): resolved from the cached metadata,
+  // no client built, no targeted fetch; the entry comes back as the cache
+  // row it is (fetchedAt stamp included).
+  assert.deepEqual(
+    await adapter.resolveFullToken("9F3C0001-1111-4222-8333-444444444444", cache),
+    {
+      ...artifactToReferenceItem({ id: "9f3c0001-1111-4222-8333-444444444444", title: "Q3 planning doc", latest_version: 3, kind: "PLAN" }),
+      fetchedAt: 5000,
+    },
+  );
+  assert.equal(clientBuilds, 0, "a cache hit builds no client");
+
+  // A cached row lacking the version metadata falls back to the targeted
+  // fetch (a half-metadata row must not expand with missing attributes);
+  // the fetched metadata is what resolves.
+  assert.deepEqual(
+    await adapter.resolveFullToken("0a1b0001-1111-4222-8333-444444444444", cache),
+    artifactToReferenceItem({ id: "0a1b0001-1111-4222-8333-444444444444", title: "Refreshed metadata row", latest_version: 5, kind: "PLAN" }),
+  );
+  assert.equal(clientBuilds, 1, "the metadata-less row fell back to one fetch");
+
+  // Cache miss: the targeted getArtifact fallback resolves, with the kind
+  // and version taken from the targeted fetch.
+  assert.deepEqual(
+    await adapter.resolveFullToken("77e00001-1111-4222-8333-444444444444", cache),
+    artifactToReferenceItem({ id: "77e00001-1111-4222-8333-444444444444", title: "Server-known artifact", latest_version: 9, kind: "REVIEW" }),
+  );
+  assert.equal(clientBuilds, 2, "the cache-miss fallback built exactly one client");
+
+  // Targeted fetch miss (unknown uuid): null, so the mention stays as typed.
+  assert.equal(await adapter.resolveFullToken("00000000-0000-0000-0000-000000000000", cache), null);
+
+  // Targeted fetch throws (network failure, missing credentials): null,
+  // and nothing throws into the session.
+  const noCreds = createArtifactAdapter({
+    createClient: async () => {
+      throw new Error("missing PAT");
+    },
+  });
+  const emptyCache = createInMemoryReferenceCache();
+  assert.equal(await noCreds.resolveFullToken("9f3c0001-1111-4222-8333-444444444444", emptyCache), null);
+}
+
+console.log("createArtifactAdapter resolveFullToken: ok");
+
+// ---------------------------------------------------------------------------
+// Artifact expansion end-to-end (the input transform with the artifact
+// adapter wired as the factory wires it)
+// ---------------------------------------------------------------------------
+
+{
+  let clientBuilds = 0;
+  const adapter = createArtifactAdapter({
+    createClient: async () => {
+      clientBuilds += 1;
+      return {
+        listArtifacts: async () => ({ items: [], pagination: {} }),
+        getArtifact: async (id: string) => {
+          if (id === "77e00001-1111-4222-8333-444444444444") {
+            return { id, title: "Server-known artifact", latest_version: 9, kind: "REVIEW" };
+          }
+          throw new Error("404 not found");
+        },
+      };
+    },
+  });
+  const registry = createReferenceRegistry([adapter]);
+  const cache = createInMemoryReferenceCache();
+  cache.write("artifact", [
+    artifactToReferenceItem({ id: "9f3c0001-1111-4222-8333-444444444444", title: "Q3 planning doc", latest_version: 3, kind: "PLAN" }),
+  ]);
+  // The factory's lookup wiring: the kind routes to the adapter, whose
+  // resolveFullToken is cache-first with the targeted fallback.
+  const lookup = (kind: string, token: string) => {
+    assert.equal(kind, "artifact");
+    return adapter.resolveFullToken(token, cache);
+  };
+  const cachedTag = '<artifact-ref id="9f3c0001-1111-4222-8333-444444444444" kind="PLAN" version="3">Q3 planning doc</artifact-ref>';
+  const fetchedTag = '<artifact-ref id="77e00001-1111-4222-8333-444444444444" kind="REVIEW" version="9">Server-known artifact</artifact-ref>';
+
+  // Single mention, middle of the prompt: the version comes from the cached
+  // metadata, no client built.
+  assert.equal(
+    await expandReferenceMentions("see #artifact:9f3c0001-1111-4222-8333-444444444444 today", registry, lookup),
+    `see ${cachedTag} today`,
+  );
+  assert.equal(clientBuilds, 0, "cached metadata resolved without a fetch");
+
+  // Mentions at the start and the end of the prompt.
+  assert.equal(
+    await expandReferenceMentions("#artifact:9f3c0001-1111-4222-8333-444444444444 is ready", registry, lookup),
+    `${cachedTag} is ready`,
+  );
+  assert.equal(
+    await expandReferenceMentions("please review #artifact:9f3c0001-1111-4222-8333-444444444444", registry, lookup),
+    `please review ${cachedTag}`,
+  );
+
+  // Multiple distinct mentions, mixed known and unknown: each known one
+  // expands (the cache miss via the targeted fetch, its version from the
+  // fetch), the unknown stays as typed.
+  assert.equal(
+    await expandReferenceMentions(
+      "compare #artifact:9f3c0001-1111-4222-8333-444444444444 with #artifact:77e00001-1111-4222-8333-444444444444 and #artifact:00000000-0000-0000-0000-000000000000",
+      registry,
+      lookup,
+    ),
+    `compare ${cachedTag} with ${fetchedTag} and #artifact:00000000-0000-0000-0000-000000000000`,
+  );
+  assert.equal(clientBuilds, 2, "the miss and the unknown each built one client");
+
+  // Duplicate mentions of the same artifact: one resolution, every
+  // occurrence expands.
+  assert.equal(
+    await expandReferenceMentions(
+      "#artifact:77e00001-1111-4222-8333-444444444444 and #artifact:77e00001-1111-4222-8333-444444444444 again",
+      registry,
+      lookup,
+    ),
+    `${fetchedTag} and ${fetchedTag} again`,
+  );
+  assert.equal(clientBuilds, 3, "duplicates shared one resolution");
+
+  // A prompt without references passes through unchanged.
+  const plain = "a prompt with no references at all";
+  assert.equal(await expandReferenceMentions(plain, registry, lookup), plain);
+
+  // No credentials (the factory's credential gate passes null as the
+  // lookup): the mention stays as typed and no lookup is consulted.
+  assert.equal(
+    await expandReferenceMentions("fix #artifact:9f3c0001-1111-4222-8333-444444444444", registry, null),
+    "fix #artifact:9f3c0001-1111-4222-8333-444444444444",
+  );
+}
+
+console.log("artifact expansion end-to-end: ok");
 
 // ---------------------------------------------------------------------------
 // Factory is a function (smoke; the factory itself is pi-runtime verified)
