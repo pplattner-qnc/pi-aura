@@ -92,3 +92,36 @@ artifact-ref shape.
 - `formatExpansion` / `resolveFullToken` are deliberate stubs until slice
   2 (mentions stay as typed; the interface requires the methods, the
   slice plan assigns the behavior to slice 2's red tests).
+
+### Slice 2: 2-artifact-expansion-instruction (landed)
+
+- The expansion:
+  `<artifact-ref id="..." kind="PLAN" version="3">title</artifact-ref>`,
+  with the kind and version read from the item's metadata extras via
+  `artifactItemMetadata`, the title XML-escaped as element text, and the
+  attribute values entity-escaped (the engine's `escapeText` /
+  `escapeAttr`).
+- Resolution is cache-first gated on complete metadata: a cached uuid
+  whose row carries both `artifactKind` and `version` resolves with no
+  fetch at all; a metadata-less cached row (older or corrupted) falls
+  through to the targeted `getArtifact` instead of expanding with half
+  the attributes; a cache miss resolves via the same fetch (uuids match
+  case-insensitively; the server is authoritative on casing). Unknown
+  uuids, fetch failures, and missing credentials return null, so the
+  mention stays exactly as typed for the agent to resolve via the `aura`
+  skill. The resolution never writes back to the cache (freshness is the
+  SWR refresh's job).
+- The instruction block (`REFERENCE_INSTRUCTION`) grew the artifact-ref
+  shape: the example element, the id / kind / version attributes (kind
+  values PLAN, REVIEW, GENERIC; version = the latest version at
+  resolution time), the title as element text, never the body, and the
+  `aura`-skill pointer for artifact actions.
+- Interface contract recorded for the wiki ticket
+  (`reference-wiki-kind`): the metadata-driven expansion pattern is
+  item extras + a completeness-checking accessor + a cache-first
+  resolution that falls back to the targeted fetch when the cached row
+  is incomplete. The wiki kind should mirror it: extras (e.g. `space`,
+  `path`, `version`) ride the same JSON column, the accessor reports
+  completeness, the resolution falls back to the targeted
+  `getKnowledgeNode`/`getKnowledgeNodeByPath` when the cached row is
+  incomplete, and unresolvable references stay as typed.

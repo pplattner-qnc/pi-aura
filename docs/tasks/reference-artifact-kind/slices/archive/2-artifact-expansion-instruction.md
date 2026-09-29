@@ -4,7 +4,7 @@ slug: 2-artifact-expansion-instruction
 title: "#artifact: expansion and instruction block"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: s
 blocked_by: [1-artifact-autocomplete]
 ---
