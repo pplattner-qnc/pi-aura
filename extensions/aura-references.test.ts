@@ -1116,6 +1116,46 @@ console.log("expandReferenceMentions: single mention + fast path: ok");
 
 console.log("expandReferenceMentions: unresolvable + failure modes: ok");
 
+{
+  const registry = expansionRegistry();
+  const a42 = '<task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>';
+  const a1337 = '<task-ref key="AURA-1337" status="IN_REVIEW">Ship the dashboard</task-ref>';
+
+  // Multiple distinct mentions: each expands in place.
+  const distinct = lookupOver(taskItems());
+  assert.equal(
+    await expandReferenceMentions("#task:AURA-42 and #task:AURA-1337", registry, distinct.lookup),
+    `${a42} and ${a1337}`,
+  );
+  assert.equal(distinct.calls.length, 2, "one resolution per distinct mention");
+
+  // Duplicate mentions: the same token twice resolves ONCE and both
+  // occurrences expand.
+  const dup = lookupOver(taskItems());
+  assert.equal(
+    await expandReferenceMentions("#task:AURA-42 again #task:AURA-42", registry, dup.lookup),
+    `${a42} again ${a42}`,
+  );
+  assert.equal(dup.calls.length, 1, "a duplicate mention resolves once");
+
+  // Case-insensitive duplicates too: same key, different typed casing, still
+  // one resolution.
+  const mixedCase = lookupOver(taskItems());
+  assert.equal(
+    await expandReferenceMentions("#task:AURA-42 and #task:aura-42", registry, mixedCase.lookup),
+    `${a42} and ${a42}`,
+  );
+  assert.equal(mixedCase.calls.length, 1, "casing does not multiply resolutions");
+
+  // Case-insensitive token matching with canonical key output: a lowercase
+  // typed key resolves and the expansion carries the server-cased key.
+  const lower = lookupOver(taskItems());
+  assert.equal(await expandReferenceMentions("see #task:aura-42", registry, lower.lookup), `see ${a42}`);
+  assert.deepEqual(lower.calls, [{ kind: "task", token: "aura-42" }]);
+}
+
+console.log("expandReferenceMentions: multiple + duplicate + case-insensitive: ok");
+
 // ---------------------------------------------------------------------------
 // createReferenceAutocompleteProvider (the deferral wiring over the registry)
 // ---------------------------------------------------------------------------

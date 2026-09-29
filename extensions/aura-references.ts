@@ -463,10 +463,12 @@ function collectMentionOccurrences(
  * Expand every typed reference mention in a submitted prompt to its uniform
  * XML tag: each `#kind:` token (and each registered legacy alias token) is
  * resolved through the injected lookup and rendered by its kind adapter's
- * `formatExpansion`. Unresolvable references (unknown key, unregistered kind,
- * null lookup result) are left exactly as typed so the agent can resolve them
- * via the `aura` skill. A prompt without any mention passes through unchanged
- * (the same string, nothing resolved).
+ * `formatExpansion`. Each unique mention (kind + token, case-insensitive) is
+ * resolved exactly once and every occurrence of it expands. Unresolvable
+ * references (unknown key, unregistered kind, null lookup result) are left
+ * exactly as typed so the agent can resolve them via the `aura` skill. A
+ * prompt without any mention passes through unchanged (the same string,
+ * nothing resolved).
  *
  * Pure: the prompt, the registry, and the injected lookup are the only
  * inputs; the Aura access lives entirely inside the lookup.
@@ -478,16 +480,33 @@ export async function expandReferenceMentions(
 ): Promise<string> {
   const occurrences = collectMentionOccurrences(prompt, registry);
   if (occurrences.length === 0 || lookup === null) return prompt;
+
+  // One resolution per unique (kind, token); duplicate mentions share it.
+  const expansions = new Map<string, string | null>();
+  const seen = new Set<string>();
+  for (const o of occurrences) {
+    const dedupeKey = mentionKey(o);
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    expansions.set(dedupeKey, await resolveMention(o, registry, lookup));
+  }
+
   let out = "";
   let pos = 0;
   for (const o of occurrences) {
     if (o.start < pos) continue; // overlapping match: the earlier one wins
     out += prompt.slice(pos, o.start);
-    out += (await resolveMention(o, registry, lookup)) ?? prompt.slice(o.start, o.end);
+    out += expansions.get(mentionKey(o)) ?? prompt.slice(o.start, o.end);
     pos = o.end;
   }
   out += prompt.slice(pos);
   return out;
+}
+
+/** Case-insensitive identity of a mention within one prompt (the same token
+ *  typed twice, in any casing, is one resolution). */
+function mentionKey(o: MentionOccurrence): string {
+  return o.kind + "\u0000" + o.token.toLowerCase();
 }
 
 /** Resolve one mention to its expansion text, or null to leave it as typed:
