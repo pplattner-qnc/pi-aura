@@ -22,6 +22,7 @@ import auraReferences, {
   createTaskAdapter,
   extractReferenceToken,
   filterReferenceItems,
+  refreshReferenceKind,
   MAX_SUGGESTIONS,
   type ReferenceItem,
 } from "./aura-references.ts";
@@ -531,6 +532,145 @@ function fakeClient(pages: FakeTask[][], behavior?: {
 }
 
 console.log("createTaskAdapter warmup: ok");
+
+// ---------------------------------------------------------------------------
+// refreshReferenceKind (SWR orchestration: injected fetch + cache)
+// ---------------------------------------------------------------------------
+
+/** A promise with its resolve/reject exposed, so tests decide when (and how)
+ *  the server answers. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** What one `listTasks` search eventually answers with. */
+type SearchReply = { items: FakeTask[]; pagination: unknown };
+type SearchCall = ReturnType<typeof deferred<SearchReply>> & { search: string | undefined };
+
+/** A controllable AuraClient for the SWR seam: every `listTasks` search is a
+ *  deferred promise the test resolves, rejects, or leaves hanging. Each call
+ *  is recorded with its query (the typed partial lands in `search`). */
+function controllableSearchClient() {
+  const calls: SearchCall[] = [];
+  return {
+    client: {
+      listTasks: (query?: { search?: string }) => {
+        const d = deferred<SearchReply>();
+        calls.push({ ...d, search: query?.search });
+        return d.promise;
+      },
+      getTaskByHumanKey: async () => {
+        throw new Error("not used here");
+      },
+    },
+    calls,
+  };
+}
+
+{
+  // A completed refresh writes through to the cache (the next query sees fresh
+  // data): a cached item with a stale title plus a server result carrying the
+  // corrected title. The server result replaces its cached twin in place
+  // (dedupe by id) and stamps a fresh fetchedAt.
+  let ts = 0;
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache(() => {
+    ts += 1000;
+    return ts;
+  });
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+
+  const refresh = refreshReferenceKind(cache, adapter, "42");
+  // One microtask hop: the refresh starts its search asynchronously (the
+  // adapter awaits its client factory), so the call record exists only after
+  // the hop. Deterministic: the search start was queued before this await.
+  await Promise.resolve();
+  assert.equal(calls.length, 1, "the refresh fired exactly one server search");
+  assert.equal(calls[0]?.search, "42", "the typed partial is the listTasks search");
+  calls[0]!.resolve({
+    items: [{ id: "u1", human_key: "AURA-42", title: "Fix the renamed login bug", status: "OPEN" }],
+    pagination: {},
+  });
+  await refresh;
+
+  const after = cache.read("task");
+  assert.equal(after.length, 1, "the server result replaced the cached twin, not appended");
+  assert.equal(after[0]?.title, "Fix the renamed login bug");
+  assert.equal(after[0]?.fetchedAt, 2000, "the write-through stamped the fresh fetch");
+  assert.equal(cache.fetchedAt("task"), 2000);
+
+  // The refreshed entry is also what the next local search ranks.
+  assert.equal(adapter.searchLocal(cache.read("task"), "renamed").length, 1);
+}
+
+console.log("refreshReferenceKind write-through: ok");
+
+{
+  // A server-only match (a task outside the local cache window) is added to
+  // the cache, so the next query can find it by title substring.
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+
+  const refresh = refreshReferenceKind(cache, adapter, "obscure");
+  await Promise.resolve(); // let the async search start reach listTasks
+  calls[0]!.resolve({
+    items: [{ id: "u2", human_key: "AURA-999", title: "The obscure story point spike", status: "OPEN" }],
+    pagination: {},
+  });
+  await refresh;
+
+  assert.deepEqual(
+    cache.read("task").map((e) => e.key),
+    ["AURA-42", "AURA-999"],
+    "server-only match added after the cached item",
+  );
+}
+
+console.log("refreshReferenceKind server-only match: ok");
+
+{
+  // Merge semantics: a server page carrying one corrected twin and one new
+  // task merges over the cache (upsert by id; cached order preserved for the
+  // kept entries).
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", [
+    { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" },
+    { kind: "task", id: "u2", key: "AURA-7", title: "Write the docs", status: "OPEN" },
+  ]);
+
+  const refresh = refreshReferenceKind(cache, adapter, "42");
+  await Promise.resolve(); // let the async search start reach listTasks
+  calls[0]!.resolve({
+    items: [
+      { id: "u1", human_key: "AURA-42", title: "Fix the renamed login bug", status: "DONE" },
+      { id: "u3", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" },
+    ],
+    pagination: {},
+  });
+  await refresh;
+
+  const after = cache.read("task");
+  assert.deepEqual(
+    after.map((e) => e.key),
+    ["AURA-42", "AURA-7", "AURA-1337"],
+  );
+  assert.equal(after[0]?.title, "Fix the renamed login bug");
+  assert.equal(after[1]?.title, "Write the docs");
+  assert.equal(after[2]?.title, "Ship the dashboard");
+}
+
+console.log("refreshReferenceKind merge over local: ok");
 
 // ---------------------------------------------------------------------------
 // createReferenceAutocompleteProvider (the deferral wiring over the registry)

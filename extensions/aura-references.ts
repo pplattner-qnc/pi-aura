@@ -337,6 +337,33 @@ export function filterReferenceItems(
 }
 
 // ---------------------------------------------------------------------------
+// Stale-while-revalidate refresh (pure)
+// ---------------------------------------------------------------------------
+
+/**
+ * One background refresh for a query: the adapter's server-side search runs
+ * for the typed partial and the results write through to the cache (upsert by
+ * item id, so a server result replaces its cached twin and a server-only
+ * match is added; the next query filters the merged cache). The caller never
+ * awaits this: the provider returns the cached view first and the refresh
+ * lands afterwards, so fresh results surface on the next keystroke.
+ *
+ * Pure in the arch-spec sense: the Aura access is the injected fetch (the
+ * adapter's `searchServer`, whose `createClient` the caller controls) and the
+ * cache is the injected cache; nothing else is touched.
+ */
+export async function refreshReferenceKind(
+  cache: ReferenceCache,
+  adapter: KindAdapter,
+  partial: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<void> {
+  const results = await adapter.searchServer(partial, { signal: options.signal });
+  if (results.length === 0) return;
+  cache.write(adapter.kind, results);
+}
+
+// ---------------------------------------------------------------------------
 // Task kind adapter (the first kind)
 // ---------------------------------------------------------------------------
 
