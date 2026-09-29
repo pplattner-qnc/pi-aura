@@ -9,9 +9,12 @@
  * reference cache, autocomplete filtering/ranking, the SWR refresh, the task
  * adapter's warmup + local search + full-token resolution, the inline
  * expansion transform (`#kind:` and legacy-alias mentions, tag shapes,
- * escaping, failure modes), the per-turn instruction constant, and the
- * once-per-session deprecation-warning decision. The provider wiring that
- * defers to the built-in provider for non-reference tokens is tested at its
+ * escaping, failure modes), the per-turn instruction constant, the
+ * once-per-session deprecation-warning decision, and the production `@AURA-`
+ * legacy alias end-to-end (recognition at boundaries, legacy-token
+ * autocomplete rows, expansion routing through the task adapter, and the
+ * deprecation-warning trigger). The provider wiring that defers to the built-in
+ * provider for non-reference tokens is tested at its
  * pure wrapper seam. The extension factory (which reaches Aura through the
  * dynamic-import seam and surfaces the deprecation warning via `ctx.ui.notify`)
  * is exercised by the pi runtime once credentials are configured, mirroring
@@ -20,6 +23,7 @@
 
 import assert from "node:assert/strict";
 import auraReferences, {
+  createAuraTaskAlias,
   createInMemoryReferenceCache,
   createReferenceAutocompleteProvider,
   createReferenceRegistry,
@@ -27,6 +31,7 @@ import auraReferences, {
   expandReferenceMentions,
   extractReferenceToken,
   filterReferenceItems,
+  promptHasLegacyMention,
   refreshReferenceKind,
   createDeprecationWarningDecision,
   TASK_REF_INSTRUCTION,
@@ -104,9 +109,10 @@ function stubAdapter(kind: string) {
   // later ticket; registering a rule adapter is all it takes)
   assert.equal(extractReferenceToken("#rule:tracker-aura", registry), null);
 
-  // Legacy `@AURA-` syntax is untouched by the new engine: the alias table is
-  // dormant (empty), so an `@` token never produces a reference token here
-  // (aura-tasks.ts still owns `@` on its own trigger character).
+  // A registry with no registered alias does not recognize legacy syntax: an
+  // `@` token never produces a reference token here (recognition comes from
+  // registration; the production wiring registers `@AURA-` through
+  // createAuraTaskAlias, covered below).
   assert.equal(extractReferenceToken("@AURA-42", registry), null);
 
   // A token that already ended (user typed a space after `42`) defers
@@ -162,25 +168,26 @@ console.log("extractReferenceToken (# deferral): ok");
 console.log("registry dispatch (second kind): ok");
 
 // ---------------------------------------------------------------------------
-// Legacy alias recognition hook (dormant in production wiring; the alias
-// tickets register `@AURA-` / `@rule:` through it)
+// Legacy alias recognition hook (the generic mechanism; the production
+// `@AURA-` registration is pinned further below)
 // ---------------------------------------------------------------------------
 
 {
   // A registered alias pattern teaches extractReferenceToken a legacy syntax
   // without engine surgery: same extraction shape (kind + partial + raw),
-  // dispatching to the alias's kind adapter. No alias is registered in this
-  // slice's production wiring, so the hook is dormant there (the `#`-token
-  // block above asserts the dormant side: `@AURA-42` extracts to null).
-  const aliasRegistry = createReferenceRegistry([stubAdapter("task")], [
-    { pattern: /(?:^|[ \t])@AURA-([^\s]*)$/i, kind: "task" },
-  ]);
+  // dispatching to the alias's kind adapter, plus the matched registration
+  // itself (the autocomplete provider's legacy-row hook). The pattern (not
+  // the engine) defines the group shape: this test pattern captures only the
+  // digits after `AURA-`.
+  const auraAlias = { pattern: /(?:^|[ \t])@AURA-([^\s]*)$/i, kind: "task" };
+  const aliasRegistry = createReferenceRegistry([stubAdapter("task")], [auraAlias]);
 
   // `@AURA-42` at a token boundary extracts as a task reference with the
-  // typed partial and the raw token (without the leading boundary).
+  // typed partial, the raw token (without the leading boundary), and the
+  // matched alias registration.
   assert.deepEqual(
     extractReferenceToken("see @AURA-42", aliasRegistry),
-    { kind: "task", partial: "42", raw: "@AURA-42" },
+    { kind: "task", partial: "42", raw: "@AURA-42", alias: auraAlias },
   );
 
   // A token that already ended defers, same as the engine's own `#` tokens.
@@ -1415,30 +1422,37 @@ console.log("parsePartial decline deferral: ok");
 
 // ---------------------------------------------------------------------------
 // Alias registry API (criterion: register a legacy token pattern to a kind
-// adapter) + no alias in production wiring
+// adapter) + recognition comes from registration
 // ---------------------------------------------------------------------------
 
 {
-  // The production wiring builds exactly this registry (one task adapter, no
-  // aliases): its alias table is empty, so legacy syntax is not recognized.
-  // No alias is registered in production in this slice; the alias tickets do.
-  const production = expansionRegistry();
-  assert.equal(production.aliases.length, 0, "the production registry registers no alias");
-  assert.equal(extractReferenceToken("see @AURA-42", production), null, "legacy syntax is unrecognized without a registered alias");
+  // A registry before any alias registration (a fresh engine, or a
+  // credential-less test wiring): legacy syntax is not recognized until
+  // something calls registerAlias. The production wiring registers `@AURA-`
+  // via createAuraTaskAlias (the blocks below pin that registration).
+  const bare = expansionRegistry();
+  assert.equal(bare.aliases.length, 0, "a registry without registrations has an empty alias table");
+  assert.equal(extractReferenceToken("see @AURA-42", bare), null, "legacy syntax is unrecognized without a registered alias");
 
   // The registration API: a legacy token pattern mapped to a kind adapter,
-  // registered on the built registry (what the alias tickets call). Capture
-  // group 1 is the token text the kind adapter sees in both uses: the
+  // registered on the built registry (the same call the production wiring
+  // makes for `@AURA-`, and the one the rule ticket will make for `@rule:`).
+  // Capture group 1 is the token text the kind adapter sees in both uses: the
   // autocomplete partial while typing and the full key on submit, so the
   // pattern captures the full key minus the trigger char (`@AURA-42` ->
   // "AURA-42").
   const registry = expansionRegistry();
-  registry.registerAlias({ pattern: /(?:^|[ \t])@(AURA-[^\s]*)$/i, kind: "task" });
+  const auraAlias = { pattern: /(?:^|[ \t])@(AURA-[^\s]*)$/i, kind: "task" };
+  registry.registerAlias(auraAlias);
   assert.equal(registry.aliases.length, 1, "registerAlias adds to the alias table");
 
   // Recognition: the registered alias extracts like any reference token
-  // (kind + partial + raw) and dispatches to the alias's kind adapter.
-  assert.deepEqual(extractReferenceToken("see @AURA-42", registry), { kind: "task", partial: "AURA-42", raw: "@AURA-42" });
+  // (kind + partial + raw + the matched registration) and dispatches to the
+  // alias's kind adapter.
+  assert.deepEqual(
+    extractReferenceToken("see @AURA-42", registry),
+    { kind: "task", partial: "AURA-42", raw: "@AURA-42", alias: auraAlias },
+  );
 
   // Expansion routing: the alias mention resolves through the injected lookup
   // and renders through the task adapter's formatExpansion (the uniform tag).
@@ -1458,8 +1472,12 @@ console.log("parsePartial decline deferral: ok");
 
   // An alias registered to a kind with no adapter: recognized as a mention,
   // but expansion has no adapter to route to, so it stays as typed.
-  registry.registerAlias({ pattern: /(?:^|[ \t])@wiki:([^\s]*)$/i, kind: "wiki" });
-  assert.deepEqual(extractReferenceToken("see @wiki:home", registry), { kind: "wiki", partial: "home", raw: "@wiki:home" });
+  const wikiAlias = { pattern: /(?:^|[ \t])@wiki:([^\s]*)$/i, kind: "wiki" };
+  registry.registerAlias(wikiAlias);
+  assert.deepEqual(
+    extractReferenceToken("see @wiki:home", registry),
+    { kind: "wiki", partial: "home", raw: "@wiki:home", alias: wikiAlias },
+  );
   assert.equal(await expandReferenceMentions("see @wiki:home", registry, lookup), "see @wiki:home");
 
   // The warning is user-only: nothing deprecation-shaped is ever added to
@@ -1469,6 +1487,224 @@ console.log("parsePartial decline deferral: ok");
 }
 
 console.log("alias registry registration + expansion routing: ok");
+
+// ---------------------------------------------------------------------------
+// The production `@AURA-` alias (createAuraTaskAlias): recognition at
+// boundaries, legacy-token autocomplete rows, expansion routing, and the
+// warning trigger, all through the real registration
+// ---------------------------------------------------------------------------
+
+/** The production-shaped registry: the task adapter plus its `@AURA-`
+ *  legacy alias, exactly as the extension factory registers them. The
+ *  adapter's client factory always throws, so a test can never reach Aura
+ *  through it. */
+function auraAliasRegistry() {
+  const adapter = createTaskAdapter({ createClient: noopClient });
+  const registry = createReferenceRegistry([adapter]);
+  registry.registerAlias(createAuraTaskAlias(adapter));
+  return registry;
+}
+
+{
+  // Recognition through the real pattern: `@AURA-` at a token boundary
+  // followed by digits, group 1 = the full key minus the trigger char.
+  const registry = auraAliasRegistry();
+  assert.equal(registry.aliases.length, 1, "the production wiring registers exactly one alias");
+  assert.equal(registry.aliases[0]?.kind, "task", "the alias maps to the task kind");
+
+  // At the start of the line, cursor at the end of the token.
+  assert.deepEqual(
+    extractReferenceToken("@AURA-42", registry),
+    { kind: "task", partial: "AURA-42", raw: "@AURA-42", alias: registry.aliases[0] },
+  );
+  // After whitespace; case-insensitive trigger keeps working.
+  assert.deepEqual(
+    extractReferenceToken("work on @aura-1337", registry),
+    { kind: "task", partial: "aura-1337", raw: "@aura-1337", alias: registry.aliases[0] },
+  );
+  // The user is still typing digits: the partial is the full key so far.
+  assert.equal(extractReferenceToken("@AURA-4", registry)?.partial, "AURA-4");
+
+  // `@AURA-` with no digits yet: no match (suggestions start at the first
+  // digit; a bare `@AURA-` never triggers the warning either).
+  assert.equal(extractReferenceToken("@AURA-", registry), null);
+  assert.equal(extractReferenceToken("@AURA", registry), null);
+  // Letters glued after the digits end the token (the legacy grammar).
+  assert.equal(extractReferenceToken("@AURA-12abc", registry), null);
+  // A mid-word `@` is not a token boundary (emails, paths).
+  assert.equal(extractReferenceToken("email@AURA-42", registry), null);
+  // A token that already ended (whitespace after the digits) defers.
+  assert.equal(extractReferenceToken("@AURA-42 ", registry), null);
+}
+
+console.log("production @AURA- alias recognition: ok");
+
+{
+  // Autocomplete through the real registration: the same task suggestions
+  // as `#task:`, but selection inserts the LEGACY token (the user stays in
+  // the syntax they typed; the warning teaches the new one).
+  const registry = auraAliasRegistry();
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", taskItems());
+  const current = fakeCurrent();
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache);
+
+  // The engine declares both trigger characters it serves: `#kind:` tokens
+  // and the `@`-triggered legacy aliases.
+  assert.deepEqual(provider.triggerCharacters, ["#", "@"]);
+
+  // Typing `@AURA-4` offers the same rows `#task:4` would, with the legacy
+  // token as value/label and the adapter's description.
+  const s4 = await suggestAt(provider, "@AURA-4", 7);
+  assert.deepEqual(s4?.items.map((i) => i.value), ["@AURA-42", "@AURA-424"]);
+  assert.equal(s4?.prefix, "@AURA-4", "the typed legacy token is the replaced prefix");
+  assert.equal(s4?.items[0]?.label, "@AURA-42");
+  assert.equal(s4?.items[0]?.description, "[OPEN] Fix the login bug", "the row keeps the adapter's description");
+
+  // Case-insensitive typing, and the same digit-prefix set the old number
+  // filter produced (42 matches AURA-42 and AURA-424).
+  assert.deepEqual((await suggestAt(provider, "@aura-4", 7))?.items.map((i) => i.value), ["@AURA-42", "@AURA-424"]);
+  assert.deepEqual((await suggestAt(provider, "@AURA-42", 8))?.items.map((i) => i.value), ["@AURA-42", "@AURA-424"]);
+
+  // The engine owns the alias token: no file completion while completing it.
+  assert.equal(provider.shouldTriggerFileCompletion?.(["@AURA-4"], 0, 7), false);
+
+  // Deferral: a bare `@AURA-` (no digits), a zero-match number, and a
+  // mid-word `@` all defer to the built-in provider.
+  const defer = current.calls.suggestions;
+  await suggestAt(provider, "@AURA-", 6);
+  await suggestAt(provider, "@AURA-999", 9);
+  await suggestAt(provider, "email@AURA-42", 13);
+  assert.equal(current.calls.suggestions, defer + 3, "every non-alias `@` token deferred");
+
+  // Without credentials (the session cache gate is null): the alias
+  // autocomplete silently defers; nothing throws into the session.
+  const gated = fakeCurrent();
+  const gatedProvider = createReferenceAutocompleteProvider(gated.provider, registry, () => null);
+  const deferred = await suggestAt(gatedProvider, "@AURA-42", 8);
+  assert.deepEqual(deferred?.items[0]?.value, "file.txt");
+  assert.equal(gated.calls.suggestions, 1);
+}
+
+console.log("production @AURA- alias autocomplete: ok");
+
+{
+  // Expansion routing: the alias mention resolves through the task adapter's
+  // resolveFullToken (cache-first, then the targeted getTaskByHumanKey
+  // fallback) and renders the same <task-ref> tag as `#task:`. AURA-42 is
+  // cached; AURA-1337 must come from the targeted fallback; AURA-999 is
+  // unknown everywhere.
+  const keyLookups: string[] = [];
+  const adapter = createTaskAdapter({
+    createClient: async () => ({
+      listTasks: async () => ({ items: [], pagination: {} }),
+      getTaskByHumanKey: async (key: string) => {
+        keyLookups.push(key);
+        if (key.toLowerCase() === "aura-1337") {
+          return { id: "u2", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" };
+        }
+        throw new Error("404 not found");
+      },
+    }),
+  });
+  const registry = createReferenceRegistry([adapter]);
+  registry.registerAlias(createAuraTaskAlias(adapter));
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", [
+    { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" },
+  ]);
+  // The factory's lookup wiring, verbatim: the kind adapter's resolveFullToken
+  // over the session cache.
+  const lookup = (kind: string, token: string) => {
+    const a = registry.kinds.get(kind);
+    return a ? a.resolveFullToken(token, cache) : Promise.resolve(null);
+  };
+
+  const a42 = '<task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>';
+  const a1337 = '<task-ref key="AURA-1337" status="IN_REVIEW">Ship the dashboard</task-ref>';
+
+  // A cached alias mention expands to exactly the tag `#task:AURA-42`
+  // expands to (one expansion format regardless of how the reference was
+  // typed), with no targeted fetch at all.
+  assert.equal(await expandReferenceMentions("work on @AURA-42 today", registry, lookup), `work on ${a42} today`);
+  assert.deepEqual(keyLookups, [], "a cached alias mention attempts no targeted fetch");
+
+  // A cache miss resolves through the targeted fallback; a lowercase typed
+  // key expands with the canonical (server-cased) key.
+  assert.equal(await expandReferenceMentions("see @aura-1337", registry, lookup), `see ${a1337}`);
+  assert.deepEqual(keyLookups, ["aura-1337"], "the alias mention routed through the task adapter's fallback");
+
+  // Legacy and new syntax side by side: both expand through the same adapter
+  // to the same tag shape; two legacy mentions in one prompt both expand.
+  const sideBySide = await expandReferenceMentions("@AURA-42 and #task:AURA-1337", registry, lookup);
+  assert.equal(sideBySide, `${a42} and ${a1337}`);
+  assert.ok(sideBySide.includes("<task-ref"), "the uniform tag is emitted");
+  assert.ok(!sideBySide.includes("<aura-task"), "<aura-task> is never emitted");
+  assert.equal(
+    await expandReferenceMentions("@AURA-42 plus @aura-1337", registry, lookup),
+    `${a42} plus ${a1337}`,
+  );
+
+  // An unknown key is looked up once, then left exactly as typed so the
+  // agent can resolve it via the `aura` skill.
+  const before = keyLookups.length;
+  assert.equal(await expandReferenceMentions("what is @AURA-999 about?", registry, lookup), "what is @AURA-999 about?");
+  assert.deepEqual(keyLookups.slice(before), ["AURA-999"], "the unknown key was looked up before giving up");
+
+  // Without credentials the input handler passes null as the lookup: no
+  // targeted fetch is attempted at all, the mention stays as typed.
+  assert.equal(await expandReferenceMentions("fix @AURA-42", registry, null), "fix @AURA-42");
+}
+
+console.log("production @AURA- alias expansion routing: ok");
+
+{
+  // promptHasLegacyMention: the deprecation-warning trigger (pure). Fires on
+  // the submitted prompt, whatever the mention's resolvability.
+  const registry = auraAliasRegistry();
+
+  assert.equal(promptHasLegacyMention("fix @AURA-42 today", registry), true);
+  assert.equal(promptHasLegacyMention("@aura-7", registry), true);
+  // Start of a later line in a multiline prompt.
+  assert.equal(promptHasLegacyMention("two things:\n@AURA-42 and done", registry), true);
+  // Two mentions in one prompt: one trigger (the once-latch lives in the
+  // decision, not here).
+  assert.equal(promptHasLegacyMention("@AURA-42 and @AURA-1337", registry), true);
+
+  // `@AURA-` with no digits: no mention, no warning.
+  assert.equal(promptHasLegacyMention("bare @AURA- alone", registry), false);
+  // Letters glued after the digits: not a mention.
+  assert.equal(promptHasLegacyMention("@AURA-42abc", registry), false);
+  // A mid-word `@` is not at a boundary.
+  assert.equal(promptHasLegacyMention("email@AURA-42.com", registry), false);
+  // The new syntax never warns, nor does an alias-less registry.
+  assert.equal(promptHasLegacyMention("#task:AURA-42 is the new syntax", registry), false);
+  assert.equal(promptHasLegacyMention("plain prompt", registry), false);
+  assert.equal(promptHasLegacyMention("fix @AURA-42", expansionRegistry()), false);
+}
+
+console.log("promptHasLegacyMention (warning trigger): ok");
+
+{
+  // The factory's composition: the warning fires iff the prompt contains a
+  // legacy mention AND the once-per-session decision fires, in that order (a
+  // new-syntax prompt never consumes the latch).
+  const registry = auraAliasRegistry();
+  const warn = createDeprecationWarningDecision();
+  const shouldWarn = (prompt: string) => promptHasLegacyMention(prompt, registry) && warn();
+  assert.equal(shouldWarn("@AURA-42 hi"), true, "the first submitted legacy mention warns");
+  assert.equal(shouldWarn("#task:AURA-42 is new"), false, "new syntax never warns");
+  assert.equal(shouldWarn("@AURA-42 again"), false, "exactly once per session");
+  assert.equal(shouldWarn("@aura-1337 later"), false);
+
+  // A new session (a fresh decision, as session_start builds one per
+  // session) re-arms the warning.
+  const next = createDeprecationWarningDecision();
+  const shouldWarnNext = (prompt: string) => promptHasLegacyMention(prompt, registry) && next();
+  assert.equal(shouldWarnNext("@AURA-42"), true, "a new session re-arms the warning");
+}
+
+console.log("deprecation-warning composition (once per session): ok");
 
 // ---------------------------------------------------------------------------
 // Once-per-session deprecation-warning decision (user-only: surfaces via
