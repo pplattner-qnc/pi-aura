@@ -6,7 +6,7 @@ title: "#artifact: references end-to-end"
 map: unified-reference-mentions
 status: ready
 blocked_by: [reference-engine-core, reference-cache-sqlite]
-slices: []
+slices: [1-artifact-autocomplete, 2-artifact-expansion-instruction]
 ---
 
 ## What to build
