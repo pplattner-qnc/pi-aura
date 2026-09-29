@@ -672,6 +672,70 @@ console.log("refreshReferenceKind server-only match: ok");
 
 console.log("refreshReferenceKind merge over local: ok");
 
+{
+  // Abort guards. A hung fetch that resolves after the request was aborted
+  // must not write (no write after abort), and an already-aborted request
+  // fires no fetch at all: aborted queries stop their work.
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
+  const stampBefore = cache.fetchedAt("task");
+
+  // Already aborted before the refresh starts: no server search is fired.
+  const preAborted = new AbortController();
+  preAborted.abort();
+  await refreshReferenceKind(cache, adapter, "42", { signal: preAborted.signal });
+  assert.equal(calls.length, 0, "an already-aborted query fires no fetch");
+
+  // Hung fetch, then abort, then a late resolution: the late results are
+  // dropped, the cache stays exactly as it was.
+  const controller = new AbortController();
+  const hung = refreshReferenceKind(cache, adapter, "42", { signal: controller.signal });
+  await Promise.resolve(); // let the async search start reach listTasks
+  assert.equal(calls.length, 1);
+  controller.abort(); // pi-tui superseded this request mid-flight
+  calls[0]!.resolve({
+    items: [{ id: "u1", human_key: "AURA-42", title: "Fix the late renamed title", status: "OPEN" }],
+    pagination: {},
+  });
+  await hung; // resolves (never throws) without writing
+  const after = cache.read("task");
+  assert.equal(after.length, 1, "no write after abort");
+  assert.equal(after[0]?.title, "Fix the login bug");
+  assert.equal(cache.fetchedAt("task"), stampBefore, "the aborted query left no fresh stamp either");
+}
+
+console.log("refreshReferenceKind abort guards: ok");
+
+{
+  // Rapid successive queries: pi-tui aborts the earlier request when the
+  // later starts, so only the later query's results may land.
+  const { client, calls } = controllableSearchClient();
+  const adapter = createTaskAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache();
+
+  const earlier = new AbortController();
+  const later = new AbortController();
+  const first = refreshReferenceKind(cache, adapter, "42", { signal: earlier.signal });
+  const second = refreshReferenceKind(cache, adapter, "42", { signal: later.signal });
+  await Promise.resolve(); // let both async searches reach listTasks
+  assert.equal(calls.length, 2, "each query fired its own search");
+
+  earlier.abort(); // the later request superseded the earlier one
+  calls[0]!.resolve({ items: [{ id: "ua", human_key: "AURA-11", title: "Earlier query result", status: "OPEN" }], pagination: {} });
+  calls[1]!.resolve({ items: [{ id: "ub", human_key: "AURA-22", title: "Later query result", status: "OPEN" }], pagination: {} });
+  await Promise.all([first, second]);
+
+  assert.deepEqual(
+    cache.read("task").map((e) => e.key),
+    ["AURA-22"],
+    "only the surviving (later) query wrote through",
+  );
+}
+
+console.log("refreshReferenceKind rapid queries (later aborts earlier): ok");
+
 // ---------------------------------------------------------------------------
 // createReferenceAutocompleteProvider (the deferral wiring over the registry)
 // ---------------------------------------------------------------------------

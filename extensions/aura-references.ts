@@ -358,7 +358,14 @@ export async function refreshReferenceKind(
   partial: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<void> {
-  const results = await adapter.searchServer(partial, { signal: options.signal });
+  const signal = options.signal;
+  // The request was already superseded (aborted) before the refresh started:
+  // no fetch is fired at all.
+  if (signal?.aborted) return;
+  const results = await adapter.searchServer(partial, { signal });
+  // The request was aborted while the fetch was in flight: the late results
+  // are dropped, nothing is written after the abort.
+  if (signal?.aborted) return;
   if (results.length === 0) return;
   cache.write(adapter.kind, results);
 }
