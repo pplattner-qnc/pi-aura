@@ -1,3 +1,3 @@
-task: reference-engine-core
+task: reference-cache-sqlite
 slice: null
 schema_version: 3

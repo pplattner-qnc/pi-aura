@@ -12,7 +12,7 @@ tasks:
     done: true
   - slug: reference-engine-core
     blocked_by: []
-    done: false
+    done: true
   - slug: reference-cache-sqlite
     blocked_by:
       - reference-engine-core
