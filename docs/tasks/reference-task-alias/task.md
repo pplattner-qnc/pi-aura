@@ -6,7 +6,7 @@ title: Legacy @AURA- through the engine; the task extension shrinks to the probe
 map: unified-reference-mentions
 status: ready
 blocked_by: [reference-engine-core]
-slices: []
+slices: [1-aura-alias-atomic-switch]
 ---
 
 ## What to build
