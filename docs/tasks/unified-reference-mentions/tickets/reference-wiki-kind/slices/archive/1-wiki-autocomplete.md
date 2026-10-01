@@ -4,7 +4,7 @@ slug: 1-wiki-autocomplete
 title: "#wiki: autocomplete end-to-end (dual identity, space/path rows)"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: m
 legacy_blocked_by: []
 ---
