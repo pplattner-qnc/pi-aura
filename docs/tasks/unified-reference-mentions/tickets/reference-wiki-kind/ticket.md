@@ -119,3 +119,43 @@ shape, completing the one-block-documents-all-four end state.
   the completeness accessor), with the uuid as the item id and
   `space/path` as the token key. The warmup and the SWR write-through
   are the only writers.
+
+### Slice 2: 2-wiki-expansion-instruction (landed)
+
+- The expansion: `<wiki-ref space="..." path="..." version="...">title</wiki-ref>`,
+  the metadata-driven shape reading the space, path, and version extras
+  (title XML-escaped as element text, attributes entity-escaped; a
+  metadata-less hand-built item degrades with empty attributes instead of
+  throwing, the artifact pattern). Identical for both input forms: they
+  resolve to the same complete item.
+- The resolution (`resolveFullToken`) is cache-first, keyed by the token's
+  shape (the uuid form matches the item id, the path form the item key,
+  case-insensitively) and gated on complete cached metadata, then the
+  shape-appropriate endpoint: `getKnowledgeNodeByPath(space, path)` for
+  the path form (the token supplies the identity, the response the id,
+  title, and version), `getKnowledgeNode(uuid)` plus the tree join for
+  the uuid form. The composition rule: the fresh node's title and version
+  win over the tree's snapshot (so both forms resolve to the same CURRENT
+  expansion; a stale tree snapshot alone could make the two forms
+  disagree), while the tree supplies the path (the node response has no
+  ancestor chain). A uuid whose node is absent from its space's tree
+  resolves to null: a wrong path would be worse than no expansion. A bare
+  space slug is neither form (no slash) and resolves to null without any
+  client build. Unknown spaces, paths, ghost uuids, throwing endpoints,
+  and missing credentials all leave the mention exactly as typed (the
+  engine's safe passthrough), and the factory's credential gate skips the
+  lookup entirely without a PAT.
+- The targeted-fetch results are not written back to the cache (the task
+  and artifact kinds' recorded behavior): freshness is the SWR refresh's
+  job (the per-keystroke write-through), and the expansion path stays
+  read-only against the cache.
+- Every public method builds exactly one client per call: the tree fetch
+  reuses the caller's client (`createDefaultAuraClient` resolves
+  credentials per call, so the uuid form's node + tree roundtrips share
+  one build).
+- The instruction block (REFERENCE_INSTRUCTION) grew one example element
+  (`<wiki-ref space="eng" path="process/pr-conventions"
+  version="12">PR conventions</wiki-ref>`) and one paragraph (the space /
+  path / version semantics, the page title as element text, never the
+  body, the `aura`-skill pointer), completing the
+  one-block-documents-all-four end state (task, rule, artifact, wiki).

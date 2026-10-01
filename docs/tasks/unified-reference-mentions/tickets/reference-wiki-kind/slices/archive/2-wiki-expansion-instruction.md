@@ -4,7 +4,7 @@ slug: 2-wiki-expansion-instruction
 title: "#wiki: expansion, dual resolution, instruction completion"
 task: ../task.md
 mode: afk
-status: todo
+status: done
 size: s
 legacy_blocked_by: [1-wiki-autocomplete]
 ---
