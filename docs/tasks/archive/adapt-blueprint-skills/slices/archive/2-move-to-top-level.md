@@ -3,7 +3,7 @@ kind: slice
 slug: move-to-top-level
 size: m
 status: done
-blocked_by: []
+legacy_blocked_by: []
 ---
 
 # Slice 2 — move to design-Q6 top-level layout + router + sync manifest + sync utility

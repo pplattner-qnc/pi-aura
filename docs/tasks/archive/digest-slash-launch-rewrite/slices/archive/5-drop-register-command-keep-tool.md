@@ -5,7 +5,7 @@ title: Remove the old /digest-dashboard command; keep registerTool inactive-by-d
 task: ../task.md
 mode: hitl
 size: s
-blocked_by: [rewrite-skill-md-to-tool-flow]
+legacy_blocked_by: [rewrite-skill-md-to-tool-flow]
 ---
 
 ## End-to-end behavior

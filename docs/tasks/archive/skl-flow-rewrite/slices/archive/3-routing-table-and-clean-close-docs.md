@@ -6,7 +6,7 @@ task: ../task.md
 mode: hitl
 status: done
 size: s
-blocked_by: [agent-ack-and-followup-writer]
+legacy_blocked_by: [agent-ack-and-followup-writer]
 ---
 
 ## End-to-end behavior

@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: done
 size: m
-blocked_by: [1-task-autocomplete-warm-cache]
+legacy_blocked_by: [1-task-autocomplete-warm-cache]
 ---
 
 ## End-to-end behavior

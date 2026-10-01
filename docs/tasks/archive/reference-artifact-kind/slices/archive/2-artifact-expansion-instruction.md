@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: done
 size: s
-blocked_by: [1-artifact-autocomplete]
+legacy_blocked_by: [1-artifact-autocomplete]
 ---
 
 ## End-to-end behavior

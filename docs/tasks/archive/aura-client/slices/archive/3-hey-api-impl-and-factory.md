@@ -6,7 +6,7 @@ task: ../task.md
 mode: hitl
 status: todo
 size: m
-blocked_by:
+legacy_blocked_by:
   - aura-client-interface
 ---
 ## End-to-end behavior

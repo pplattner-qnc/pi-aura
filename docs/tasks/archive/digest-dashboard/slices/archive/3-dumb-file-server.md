@@ -5,7 +5,7 @@ title: Build the dumb file server (static shell + /api/digest + SSE /events + PO
 task: ../task.md
 mode: afk
 size: m
-blocked_by: [svelte-dashboard-client]
+legacy_blocked_by: [svelte-dashboard-client]
 status: done
 ---
 

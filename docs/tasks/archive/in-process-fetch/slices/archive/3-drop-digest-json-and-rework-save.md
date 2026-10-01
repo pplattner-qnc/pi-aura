@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: todo
 size: s
-blocked_by: [digest-fetch-in-process]
+legacy_blocked_by: [digest-fetch-in-process]
 ---
 
 ## End-to-end behavior

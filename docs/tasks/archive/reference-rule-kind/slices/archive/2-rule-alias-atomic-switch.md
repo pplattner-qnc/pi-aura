@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: done
 size: m
-blocked_by: [1-rule-kind-hash-token]
+legacy_blocked_by: [1-rule-kind-hash-token]
 ---
 
 ## End-to-end behavior

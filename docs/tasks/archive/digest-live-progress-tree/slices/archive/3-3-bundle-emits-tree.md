@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: done
 size: m
-blocked_by: [1-scheduler-progress-nodes, 2-dashboard-event-plumbing]
+legacy_blocked_by: [1-scheduler-progress-nodes, 2-dashboard-event-plumbing]
 ---
 
 ## End-to-end behavior

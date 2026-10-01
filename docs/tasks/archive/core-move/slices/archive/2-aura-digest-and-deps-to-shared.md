@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: todo
 size: l
-blocked_by: [1-leaf-core-to-shared]
+legacy_blocked_by: [1-leaf-core-to-shared]
 ---
 
 ## End-to-end behavior

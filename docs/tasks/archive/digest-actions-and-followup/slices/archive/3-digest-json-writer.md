@@ -5,7 +5,7 @@ title: Write the corrected digest to ~/.pi/aura/digest.json
 task: ../task.md
 mode: afk
 size: m
-blocked_by: [followup-working-on]
+legacy_blocked_by: [followup-working-on]
 status: done
 ---
 

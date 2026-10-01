@@ -5,7 +5,7 @@ title: Add Digest.followup.currentlyWorkingOn (default null)
 task: ../task.md
 mode: afk
 size: s
-blocked_by: [actions-routing-table]
+legacy_blocked_by: [actions-routing-table]
 status: done
 ---
 

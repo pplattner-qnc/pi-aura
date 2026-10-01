@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: todo
 size: l
-blocked_by: [3-fts-search-and-inlined-index]
+legacy_blocked_by: [3-fts-search-and-inlined-index]
 ---
 
 ## End-to-end behavior

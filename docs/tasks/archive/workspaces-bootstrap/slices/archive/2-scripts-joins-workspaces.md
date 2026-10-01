@@ -6,7 +6,7 @@ task: ../task.md
 mode: hitl
 status: done
 size: s
-blocked_by:
+legacy_blocked_by:
 - workspaces-skeleton
 ---
 

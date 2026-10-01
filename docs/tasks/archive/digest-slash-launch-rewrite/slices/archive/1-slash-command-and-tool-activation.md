@@ -5,7 +5,7 @@ title: The /digest command — activate tools + inject the skill (verify the mec
 task: ../task.md
 mode: hitl
 size: m
-blocked_by: []
+legacy_blocked_by: []
 status: done
 ---
 

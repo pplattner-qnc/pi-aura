@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: todo
 size: s
-blocked_by: [1-wiki-autocomplete]
+legacy_blocked_by: [1-wiki-autocomplete]
 ---
 
 ## End-to-end behavior

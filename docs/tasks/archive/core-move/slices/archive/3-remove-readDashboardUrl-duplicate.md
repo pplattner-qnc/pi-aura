@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: todo
 size: s
-blocked_by: [2-aura-digest-and-deps-to-shared]
+legacy_blocked_by: [2-aura-digest-and-deps-to-shared]
 ---
 
 ## End-to-end behavior

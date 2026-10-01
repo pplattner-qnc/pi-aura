@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: todo
 size: m
-blocked_by: [delete-cli-shim-and-bundle]
+legacy_blocked_by: [delete-cli-shim-and-bundle]
 ---
 
 ## End-to-end behavior

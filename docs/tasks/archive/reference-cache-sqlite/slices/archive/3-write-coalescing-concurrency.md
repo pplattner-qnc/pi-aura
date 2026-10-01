@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: done
 size: m
-blocked_by: [1-sqlite-store-wiring]
+legacy_blocked_by: [1-sqlite-store-wiring]
 ---
 
 ## End-to-end behavior

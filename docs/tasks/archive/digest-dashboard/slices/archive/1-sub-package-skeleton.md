@@ -5,7 +5,7 @@ title: Create the .pi/extensions/digest-dashboard sub-package skeleton
 task: ../task.md
 mode: afk
 size: m
-blocked_by: []
+legacy_blocked_by: []
 status: done
 ---
 
