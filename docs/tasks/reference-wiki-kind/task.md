@@ -6,7 +6,7 @@ title: "#wiki: references end-to-end"
 map: unified-reference-mentions
 status: ready
 blocked_by: [reference-engine-core, reference-cache-sqlite]
-slices: []
+slices: [1-wiki-autocomplete, 2-wiki-expansion-instruction]
 ---
 
 ## What to build
