@@ -120,6 +120,24 @@
  * unresolvable references left as typed; the per-turn instruction block
  * grew the artifact-ref shape.
  *
+ * The reference-wiki-kind task made `#wiki:` the fourth kind and the
+ * dual-identity one: every wiki page is referenceable as
+ * `#wiki:<space>/<path>` (the readable form; autocomplete always offers
+ * and inserts it) or hand-typed as `#wiki:<uuid>` (programmatic or copied
+ * references; the adapter discriminates the shapes with
+ * `isWikiUuidForm`, and a uuid partial still finds its page by id prefix).
+ * Wiki items carry the space, path, and version as metadata extras (the
+ * artifact kind's pattern). Search hits carry no node path (their url is
+ * `<base>/knowledge/<space_slug>/<uuid>`), so the hit-to-path derivation
+ * walks the hit space's knowledge tree (`getKnowledgeTree`, the pure
+ * `wikiItemsFromTree`), joined by node id and memoized per space for the
+ * session, with one refetch when a memo misses a hit's id (a page created
+ * after the memo); only DOCUMENT nodes are referenceable. The client has
+ * no space-listing verb, so the warmup is search-seeded: one generic
+ * `mcpWikiSearch` (bounded at the API max) surfaces the spaces worth
+ * covering, then one memoized tree per distinct hit space writes complete
+ * items, capped per space at 500 in tree order.
+ *
  * Credentials: the task adapter talks to Aura through the shared AuraClient
  * (`createDefaultAuraClient`, which reads `aura.baseUrl` from settings plus
  * the Aura PAT from the OS keyring). When credentials are missing, warmup
@@ -1238,6 +1256,359 @@ export function createArtifactAdapter(options: {
 }
 
 // ---------------------------------------------------------------------------
+// Wiki kind adapter (the dual-identity kind)
+// ---------------------------------------------------------------------------
+
+/** The wiki kind prefix typed after `#` (`#wiki:<space>/<path>` and
+ *  `#wiki:<uuid>`). */
+export const WIKI_KIND = "wiki";
+
+/** The shape of the hand-typed uuid identity form: 8-4-4-4-12 hex digits
+ *  (an Aura node uuid, case-insensitive so a pasted uppercase uuid still
+ *  resolves). Everything else is the readable path form (a space slug, a
+ *  slash, and the slug path within the space). */
+const WIKI_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Is this value the uuid identity form? The dual-identity discriminator:
+ *  both forms share one token prefix (`#wiki:`), so the shape decides which
+ *  identity a partial or a full token carries. */
+export function isWikiUuidForm(value: string): boolean {
+  return WIKI_UUID_PATTERN.test(value);
+}
+
+/** The warmup seed query (the recorded open-detail decision): a generic
+ *  German term that real payloads show spanning the most-referenced
+ *  spaces (engineering-foundation, skills, iso-27001-dokumente, legal-qa
+ *  among ~11 distinct spaces in one 50-hit search). */
+export const WARMUP_WIKI_SEED_QUERY = "der";
+
+/** The warmup seed search's bound (the mcpWikiSearch API caps a query at
+ *  50). */
+export const WARMUP_WIKI_SEARCH_LIMIT = 50;
+
+/** The warmup write bound per space (the same order of magnitude as the
+ *  task and artifact kinds' 500): a space's tree can be large (legal-qa
+ *  carries ~1000 nodes), so the warmup write keeps the head of each
+ *  seeded space. Coverage, not a correctness limit: any page beyond the
+ *  cap is still found by the per-query server search and its
+ *  write-through. */
+export const MAX_WIKI_ITEMS_PER_SPACE = 500;
+
+/** The structural subset of a wiki search hit the adapter reads (mirrors
+ *  the shared client's WikiSearchHit without importing it). Verified
+ *  against live Aura: a hit carries `id`, `space_slug`, `title`, `url`,
+ *  `heading_path`, `excerpt`, `match_source` and NO node path (the url is
+ *  `<base>/knowledge/<space_slug>/<uuid>`, which adds nothing over the
+ *  fields themselves), which is why the derivation goes through the
+ *  per-space tree instead. */
+export interface WikiSearchHit {
+  id: string;
+  space_slug: string;
+  title: string;
+}
+
+/** The structural subset of a knowledge tree node (mirrors the shared
+ *  client's KnowledgeNode as getKnowledgeTree returns it: bodies are
+ *  omitted, `children` carry the hierarchy). */
+export interface WikiTreeNode {
+  id: string;
+  slug: string;
+  title: string;
+  kind: string;
+  latest_version: number;
+  children?: WikiTreeNode[];
+}
+
+/** The structural subset of a knowledge node resolved by id or by path
+ *  (mirrors the shared client's KnowledgeNode return of getKnowledgeNode /
+ *  getKnowledgeNodeByPath; the by-path response carries no parent chain,
+ *  which is why uuid-form resolution joins the tree for the path). */
+export interface WikiNodeSummary {
+  id: string;
+  slug: string;
+  title: string;
+  latest_version: number;
+  space_slug?: string;
+}
+
+/** The structural subset of the shared AuraClient the wiki adapter needs
+ *  (same pattern as TaskAuraClient / ArtifactAuraClient: structural, no
+ *  import of the live client, which only arrives through the
+ *  dynamic-import seam; tests pass fakes). */
+export interface WikiAuraClient {
+  mcpWikiSearch(input: { query: string; space_slug?: string; limit?: number }): Promise<{
+    items: WikiSearchHit[];
+  }>;
+  getKnowledgeTree(spaceSlug: string): Promise<{ nodes: WikiTreeNode[] }>;
+  getKnowledgeNode(uuid: string): Promise<WikiNodeSummary>;
+  getKnowledgeNodeByPath(spaceSlug: string, path: string): Promise<WikiNodeSummary>;
+}
+
+/** A wiki reference item: a ReferenceItem whose extras carry the
+ *  metadata-driven expansion attributes (the artifact kind's pattern, the
+ *  ticket-5 interface contract reused): `space` is the space slug, `path`
+ *  the slug path within the space (the part after the first slash of the
+ *  token), and `version` the page's latest version at fetch time. The item
+ *  id is the node uuid (the hand-typed identity), the key the readable
+ *  `space/path` form (the autocomplete insertion). All three extras land
+ *  in the sqlite cache's kind-agnostic metadata JSON column and read back
+ *  from there on cache-first resolution. */
+export interface WikiReferenceItem extends ReferenceItem {
+  space: string;
+  path: string;
+  version: number;
+}
+
+/** Map a space's knowledge tree to reference items: the hit-to-path
+ *  derivation's pure payload function (the recorded open-detail decision).
+ *  Only DOCUMENT nodes are referenceable (folders are containers, FILE
+ *  nodes are assets; getKnowledgeNodeByPath resolves document nodes), the
+ *  canonical path is the ancestor slug chain, the uuid is the item id, and
+ *  `space/path` the token key. Items keep the tree's navigation order. */
+export function wikiItemsFromTree(spaceSlug: string, nodes: WikiTreeNode[]): WikiReferenceItem[] {
+  const items: WikiReferenceItem[] = [];
+  const walk = (prefix: string, nodes: WikiTreeNode[]): void => {
+    for (const node of nodes) {
+      const path = prefix === "" ? node.slug : `${prefix}/${node.slug}`;
+      if (node.kind === "DOCUMENT") {
+        items.push({
+          kind: WIKI_KIND,
+          id: node.id,
+          key: `${spaceSlug}/${path}`,
+          title: node.title,
+          space: spaceSlug,
+          path,
+          version: node.latest_version,
+        });
+      }
+      if (node.children !== undefined && node.children.length > 0) {
+        walk(path, node.children);
+      }
+    }
+  };
+  walk("", nodes);
+  return items;
+}
+
+/** Read the wiki metadata extras (the metadata JSON column fields) off any
+ *  item. Null when the item does not carry a complete space/path/version
+ *  triple (an older or corrupted cache row), so the caller can fall back
+ *  to the targeted fetch instead of expanding with half the attributes
+ *  (the artifact kind's completeness gate). */
+export function wikiItemMetadata(
+  item: ReferenceItem,
+): { space: string; path: string; version: number } | null {
+  const { space, path, version } = item as Partial<WikiReferenceItem>;
+  if (typeof space === "string" && typeof path === "string" && typeof version === "number") {
+    return { space, path, version };
+  }
+  return null;
+}
+
+/**
+ * The wiki kind adapter: the dual-identity kind. Every wiki page is
+ * referenceable as `#wiki:<space>/<path>` (the readable form; autocomplete
+ * always offers and inserts this one) or hand-typed as `#wiki:<uuid>`
+ * (programmatic or copied references; parsePartial passes both shapes
+ * through, and the shape decides the downstream behavior).
+ *
+ * The hit-to-path derivation (the arch spec's settled open detail): search
+ * hits carry no node path, so a hit's canonical `space/path` form comes
+ * from its space's knowledge tree, `getKnowledgeTree(hit.space_slug)`,
+ * walked by the pure `wikiItemsFromTree` and joined by node id. Trees are
+ * memoized per space for the adapter's lifetime (one per session): the
+ * per-keystroke SWR refresh then costs the search plus at most one tree
+ * per not-yet-memoized space, and a hit whose id is missing from a
+ * memoized tree (a page created after the fetch) refetches that space's
+ * tree once. Hits whose space tree cannot be fetched are dropped, never a
+ * crash. Only DOCUMENT nodes are referenceable.
+ *
+ * The warmup (the second settled open detail): the client has no
+ * space-listing verb, so no cheap enumeration exists; the warmup is
+ * search-seeded. One generic `mcpWikiSearch` (the seed query, bounded at
+ * the API max) surfaces the spaces worth covering, then one memoized tree
+ * per distinct hit space writes complete items to the cache, capped per
+ * space. Aura access goes through the injectable `createClient` factory,
+ * exactly as the task and artifact adapters do.
+ */
+export function createWikiAdapter(options: {
+  createClient: () => Promise<WikiAuraClient>;
+}): KindAdapter {
+  const { createClient } = options;
+
+  // The per-session tree memo (space slug -> the space's items): the
+  // canonical path of any hit in a memoized space costs no fetch.
+  const treeMemo = new Map<string, WikiReferenceItem[]>();
+
+  const fetchTreeItems = async (spaceSlug: string): Promise<WikiReferenceItem[] | null> => {
+    try {
+      const client = await createClient();
+      const tree = await client.getKnowledgeTree(spaceSlug);
+      const items = wikiItemsFromTree(spaceSlug, tree.nodes);
+      treeMemo.set(spaceSlug, items);
+      return items;
+    } catch {
+      // A space whose tree cannot be fetched (unknown slug, 404/403,
+      // network): the derivation is unavailable for its hits; they are
+      // dropped without disturbing the session. The failure is not
+      // memoized, so a later query can still complete the space.
+      return null;
+    }
+  };
+
+  const formatRow = (item: ReferenceItem): AutocompleteItem => ({
+    // The value doubles as the inserted token: the readable space/path
+    // form, never the uuid (the map decision: the uuid form is for
+    // hand-typed references). The label is the same token (readable,
+    // unlike the artifact kind's uuid) and the description carries the
+    // page title, per the prototype's wiki row.
+    value: `#${WIKI_KIND}:${item.key}`,
+    label: `#${WIKI_KIND}:${item.key}`,
+    description: item.title,
+  });
+
+  // Join search hits to complete items through the (memoized) trees: one
+  // tree per distinct hit space, hits matched by node id. A hit with an
+  // empty space slug has no derivation (skipped without a doomed fetch);
+  // a space whose tree fails contributes nothing; a memoized tree missing
+  // a hit's id is refetched once (self-healing for pages created after the
+  // memo).
+  const itemsForHits = async (
+    hits: WikiSearchHit[],
+    signal?: AbortSignal,
+  ): Promise<WikiReferenceItem[]> => {
+    const out: WikiReferenceItem[] = [];
+    const spaces: string[] = [];
+    for (const hit of hits) {
+      if (hit.space_slug !== "" && !spaces.includes(hit.space_slug)) spaces.push(hit.space_slug);
+    }
+    for (const space of spaces) {
+      if (signal?.aborted) return out;
+      const spaceHits = hits.filter((hit) => hit.space_slug === space);
+      let items = treeMemo.get(space) ?? null;
+      const staleMemo =
+        items !== null && spaceHits.some((hit) => !items.some((item) => item.id === hit.id));
+      if (items === null || staleMemo) {
+        items = await fetchTreeItems(space);
+      }
+      if (items === null) continue;
+      for (const hit of spaceHits) {
+        const item = items.find((candidate) => candidate.id === hit.id);
+        if (item !== undefined) out.push(item);
+      }
+    }
+    return out;
+  };
+
+  return {
+    kind: WIKI_KIND,
+
+    // Both identity forms are wiki-shaped and pass through (a hand-typed
+    // uuid partial is recognized, never declined): the shape
+    // discrimination (isWikiUuidForm) decides the downstream behavior,
+    // not whether the token is served.
+    parsePartial(partial) {
+      return partial;
+    },
+
+    searchLocal(items, partial) {
+      // The engine's filter with the per-kind keyMatch hook: a wiki key is
+      // the space/path form, so the key match is a space/path SUBSTRING
+      // (matching the filter's intent: `#wiki:eng/` finds the space,
+      // `#wiki:eng/process/pr` narrows by path), and the uuid (the item
+      // id) matches by prefix so a hand-typed `#wiki:<uuid>` or its
+      // prefix still finds the page and inserts the readable form. The
+      // title-substring leg is the engine's own.
+      return filterReferenceItems(
+        items,
+        partial,
+        MAX_SUGGESTIONS,
+        (item, query) =>
+          item.key.toLowerCase().includes(query) || item.id.toLowerCase().startsWith(query),
+      ).map(formatRow);
+    },
+
+    async searchServer(partial, searchOptions = {}) {
+      // The empty partial and the complete uuid form are not text queries:
+      // mcpWikiSearch matches titles and bodies, never ids, so firing it
+      // would be a doomed call (the API also requires a non-empty query).
+      // The SWR merge simply gets nothing fresh for those partials.
+      if (partial === "" || isWikiUuidForm(partial)) return [];
+      try {
+        const client = await createClient();
+        const res = await client.mcpWikiSearch({
+          query: partial,
+          limit: searchOptions.limit ?? MAX_SUGGESTIONS,
+        });
+        // The request was aborted while the fetch was in flight: the late
+        // results are dropped, and no tree is fetched after the abort.
+        if (searchOptions.signal?.aborted) return [];
+        return await itemsForHits(res.items, searchOptions.signal);
+      } catch {
+        // Missing credentials or a failed search: the SWR merge gets
+        // nothing fresh and skips the write; the session is never
+        // disturbed.
+        return [];
+      }
+    },
+
+    formatRow,
+
+    formatExpansion(item) {
+      // Slice 2 of this ticket fills the space/path/version attributes
+      // (from the cached metadata or the targeted fetch); until it lands,
+      // resolution never reaches here (resolveFullToken below returns
+      // null, so mentions stay exactly as typed).
+      return `<wiki-ref>${escapeText(item.title)}</wiki-ref>`;
+    },
+
+    async resolveFullToken() {
+      // Slice 2 of this ticket lands the dual-endpoint resolution
+      // (cache-first, then getKnowledgeNodeByPath for the path form and
+      // getKnowledgeNode plus the tree join for the uuid form); until then
+      // wiki mentions stay exactly as typed (the safe passthrough the
+      // engine's contract prescribes for unresolvable references).
+      return null;
+    },
+
+    async warmup(cache, warmupOptions = {}) {
+      try {
+        const client = await createClient();
+        // The seed search: one generic query bounded at the API max. Its
+        // hits decide which spaces are worth covering (the recorded
+        // open-detail decision: the client has no space-listing verb, so
+        // there is no cheap enumeration to walk instead).
+        const res = await client.mcpWikiSearch({
+          query: WARMUP_WIKI_SEED_QUERY,
+          limit: WARMUP_WIKI_SEARCH_LIMIT,
+        });
+        if (warmupOptions.signal?.aborted) return;
+        const spaces: string[] = [];
+        for (const hit of res.items) {
+          if (hit.space_slug !== "" && !spaces.includes(hit.space_slug)) spaces.push(hit.space_slug);
+        }
+        for (const space of spaces) {
+          if (warmupOptions.signal?.aborted) return;
+          let items = treeMemo.get(space) ?? null;
+          if (items === null) items = await fetchTreeItems(space);
+          if (items === null) continue; // this space's tree failed; others still land
+          // Write space by space so partial progress (a later tree failure
+          // or an abort mid-flight) still lands; the cap keeps each space's
+          // write bounded in tree (navigation) order.
+          cache.write(WIKI_KIND, items.slice(0, MAX_WIKI_ITEMS_PER_SPACE));
+        }
+      } catch {
+        // Missing credentials (createDefaultAuraClient throws) or a
+        // failed seed search: warmup is best-effort. Nothing is written,
+        // the session is never disturbed, and the provider keeps deferring
+        // until data exists. Credentials appearing later in the session do
+        // not retry: warmup is one-shot at session_start.
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // The `@AURA-<digits>` legacy alias (the first production alias)
 // ---------------------------------------------------------------------------
 
@@ -1418,7 +1789,7 @@ export function createReferenceAutocompleteProvider(
  * imports, so we dynamic-import the client factory here to keep the
  * unit-test entry point runnable with `node --experimental-strip-types`.
  */
-async function createDefaultClient(): Promise<TaskAuraClient & ArtifactAuraClient> {
+async function createDefaultClient(): Promise<TaskAuraClient & ArtifactAuraClient & WikiAuraClient> {
   const { createDefaultAuraClient } = await import("@pi-aura/shared/aura-client");
   return createDefaultAuraClient();
 }
@@ -1501,7 +1872,14 @@ export default function (pi: ExtensionAPI): void {
   // kind does; its items carry the artifact kind + latest version as
   // metadata extras.
   const artifactAdapter = createArtifactAdapter({ createClient: createDefaultClient });
-  const registry = createReferenceRegistry([taskAdapter, ruleAdapter, artifactAdapter]);
+  // The wiki kind (the dual-identity kind): same ride (persistent cache,
+  // SWR refresh, TTL-gated warmup) with its own sources: the server search
+  // is mcpWikiSearch and the warmup is search-seeded (one generic seed
+  // search, then one tree per distinct hit space; the two open-detail
+  // decisions recorded in the ticket doc's implementation notes). Its
+  // items carry the space, path, and version as metadata extras.
+  const wikiAdapter = createWikiAdapter({ createClient: createDefaultClient });
+  const registry = createReferenceRegistry([taskAdapter, ruleAdapter, artifactAdapter, wikiAdapter]);
   // The first production alias: `@AURA-<digits>` keeps working through the
   // engine (legacy-token autocomplete insertion, expansion to the same
   // <task-ref> tag as #task:, once-per-session user-only deprecation
