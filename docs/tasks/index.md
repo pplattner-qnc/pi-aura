@@ -10,7 +10,6 @@ title: docs/tasks
 
 - add-capacity-subcommands
 - refine-phase-transition
-- unified-reference-mentions
 
 ## Archived
 
@@ -48,6 +47,7 @@ title: docs/tasks
 - reference-engine-core
 - reference-rule-kind
 - reference-task-alias
+- reference-wiki-kind
 - skl-flow-rewrite
 - unified-reference-mentions
 - wire-bitbucket-guided-edit
