@@ -3633,6 +3633,366 @@ console.log("refreshReferenceKind server-only wiki match: ok");
 console.log("createWikiAdapter warmup: ok");
 
 // ---------------------------------------------------------------------------
+// createWikiAdapter: formatExpansion (the wiki-ref tag)
+// ---------------------------------------------------------------------------
+
+{
+  const adapter = createWikiAdapter({
+    createClient: async () => {
+      throw new Error("no credentials in this test");
+    },
+  });
+
+  // The expansion shape: <wiki-ref space path version>title</wiki-ref>,
+  // with the space, path, and version read from the item's metadata
+  // extras (identical for both input forms: they resolve to the same
+  // complete item).
+  assert.equal(
+    adapter.formatExpansion({
+      kind: "wiki",
+      id: ENG_PR_ID,
+      key: "eng/process/pr-conventions",
+      title: "PR conventions",
+      space: "eng",
+      path: "process/pr-conventions",
+      version: 12,
+    }),
+    '<wiki-ref space="eng" path="process/pr-conventions" version="12">PR conventions</wiki-ref>',
+  );
+
+  // Escaping: the title is XML-escaped as element text and the attribute
+  // values carry entity escaping (a unicode title survives intact).
+  assert.equal(
+    adapter.formatExpansion({
+      kind: "wiki",
+      id: "x",
+      key: "eng/x",
+      title: `Überblick & "<Leitfaden>"`,
+      space: 'a"b',
+      path: "x&y<z>",
+      version: 3,
+    }),
+    '<wiki-ref space="a&quot;b" path="x&amp;y&lt;z>" version="3">Überblick &amp; "&lt;Leitfaden>"</wiki-ref>',
+  );
+
+  // A hand-built item without metadata degrades instead of throwing (the
+  // artifact pattern; unreachable in production because the resolution
+  // gate guarantees complete metadata on every expanded item).
+  assert.equal(
+    adapter.formatExpansion({ kind: "wiki", id: "x", key: "eng/x", title: "T" }),
+    '<wiki-ref space="" path="" version="">T</wiki-ref>',
+  );
+}
+
+console.log("createWikiAdapter formatExpansion: ok");
+
+// ---------------------------------------------------------------------------
+// createWikiAdapter: resolveFullToken (cache-first with the metadata gate,
+// then the shape-appropriate endpoint; unresolvable is null)
+// ---------------------------------------------------------------------------
+
+{
+  // A counting client factory: a cache hit with complete metadata must
+  // build no client at all (no targeted fetch); only the fallbacks reach
+  // Aura.
+  let clientBuilds = 0;
+  const byPathCalls: Array<[string, string]> = [];
+  const nodeCalls: string[] = [];
+  const treeCalls: string[] = [];
+  const adapter = createWikiAdapter({
+    createClient: async () => {
+      clientBuilds += 1;
+      return {
+        mcpWikiSearch: async () => ({ items: [] }),
+        getKnowledgeTree: async (slug: string) => {
+          treeCalls.push(slug);
+          if (slug === "eng") {
+            return {
+              nodes: [
+                wikiNode("00000000-0000-4000-8000-00000000000f", "process", "Process", {
+                  kind: "FOLDER",
+                  latest_version: 0,
+                  children: [wikiNode(ENG_PR_ID, "pr-conventions", "PR conventions", { latest_version: 12 })],
+                }),
+              ],
+            };
+          }
+          throw new Error("404 no space");
+        },
+        getKnowledgeNode: async (uuid: string) => {
+          nodeCalls.push(uuid);
+          if (uuid === ENG_PR_ID) {
+            // Fresh node data: the version is NEWER than the memoized
+ // tree's (the targeted fetch is the fresh authority; the tree supplies
+            // the path).
+            return { id: uuid, slug: "pr-conventions", title: "PR conventions", latest_version: 15, space_slug: "eng" };
+          }
+          if (uuid === "99999999-9999-4999-8999-999999999999") {
+            // A ghost node: resolvable by id, but absent from its space's
+            // tree (no derivable path).
+            return { id: uuid, slug: "ghost", title: "Ghost", latest_version: 1, space_slug: "eng" };
+          }
+          throw new Error("404 not found");
+        },
+        getKnowledgeNodeByPath: async (slug: string, path: string) => {
+          byPathCalls.push([slug, path]);
+          if (slug === "eng" && path === "process/pr-conventions") {
+            return { id: ENG_PR_ID, slug: "pr-conventions", title: "PR conventions", latest_version: 12 };
+          }
+          throw new Error("404 not found");
+        },
+      };
+    },
+  });
+  const cache = createInMemoryReferenceCache(() => 5000);
+  const cachedOverview = {
+    kind: "wiki",
+    id: "77e00001-1111-4111-8111-111111111111",
+    key: "iso-27001-dokumente/overview",
+    title: "Space overview",
+    space: "iso-27001-dokumente",
+    path: "overview",
+    version: 7,
+  };
+  cache.write("wiki", [
+    cachedOverview,
+    // A metadata-less cached row (an older or corrupted entry): present in
+    // the cache but incomplete, so resolution must not stop at it.
+    { kind: "wiki", id: "0a1b0001-1111-4111-8111-111111111111", key: "eng/process/qa-checklist", title: "QA checklist" },
+  ]);
+
+  // Path-form cache hit (case-insensitive key): resolved from the cached
+  // metadata, no client built, no targeted fetch; the entry comes back as
+  // the cache row it is (fetchedAt stamp included).
+  assert.deepEqual(
+    await adapter.resolveFullToken("ISO-27001-DOKUMENTE/OVERVIEW", cache),
+    { ...cachedOverview, fetchedAt: 5000 },
+  );
+  assert.equal(clientBuilds, 0, "a cache hit builds no client");
+
+  // Uuid-form cache hit (by id, case-insensitive): same, no fetch.
+  assert.deepEqual(
+    await adapter.resolveFullToken("77E00001-1111-4111-8111-111111111111", cache),
+    { ...cachedOverview, fetchedAt: 5000 },
+  );
+  assert.equal(clientBuilds, 0);
+
+  // Path-form cache miss: the targeted getKnowledgeNodeByPath(space, path)
+  // resolves, the item built from the response (id, title, version) plus
+  // the token's identity (space, path).
+  assert.deepEqual(
+    await adapter.resolveFullToken("eng/process/pr-conventions", cache),
+    {
+      kind: "wiki",
+      id: ENG_PR_ID,
+      key: "eng/process/pr-conventions",
+      title: "PR conventions",
+      space: "eng",
+      path: "process/pr-conventions",
+      version: 12,
+    },
+  );
+  assert.deepEqual(byPathCalls, [["eng", "process/pr-conventions"]]);
+  assert.equal(clientBuilds, 1, "the cache-miss fallback built exactly one client");
+
+  // Uuid-form cache miss: getKnowledgeNode(uuid) supplies the space, the
+  // fresh title, and the fresh version; the space's tree (memoized or
+  // fetched) supplies the canonical path.
+  assert.deepEqual(
+    await adapter.resolveFullToken(ENG_PR_ID, cache),
+    {
+      kind: "wiki",
+      id: ENG_PR_ID,
+      key: "eng/process/pr-conventions",
+      title: "PR conventions",
+      space: "eng",
+      path: "process/pr-conventions",
+      version: 15,
+    },
+    "the fresh node's version wins over the tree's snapshot",
+  );
+  assert.deepEqual(nodeCalls, [ENG_PR_ID]);
+  assert.deepEqual(treeCalls, ["eng"], "the space's tree fetched on first touch");
+  assert.equal(clientBuilds, 2);
+
+  // A cached row lacking the metadata falls back to the targeted fetch (a
+  // half-metadata row must not expand with missing attributes); the
+  // endpoint 404s, so the mention stays as typed.
+  assert.equal(await adapter.resolveFullToken("eng/process/qa-checklist", cache), null);
+  assert.deepEqual(byPathCalls[byPathCalls.length - 1], ["eng", "qa-checklist"]);
+
+  // A uuid whose node is absent from its space's tree: no derivable path,
+  // null (a wrong path would be worse than no expansion).
+  assert.equal(await adapter.resolveFullToken("99999999-9999-4999-8999-999999999999", cache), null);
+
+  // Unknown path and unknown uuid (404s): null, mentions stay as typed.
+  assert.equal(await adapter.resolveFullToken("eng/nope/missing", cache), null);
+  assert.equal(await adapter.resolveFullToken("00000000-0000-4000-8000-000000000000", cache), null);
+
+  // A bare space slug is neither the path form (no slash) nor the uuid
+  // form: null, with no client built for it.
+  const buildsBefore = clientBuilds;
+  assert.equal(await adapter.resolveFullToken("eng", cache), null);
+  assert.equal(clientBuilds, buildsBefore, "the invalid form builds no client");
+
+  // Targeted fetch throws (network failure, missing credentials): null,
+  // and nothing throws into the session.
+  const noCreds = createWikiAdapter({
+    createClient: async () => {
+      throw new Error("missing PAT");
+    },
+  });
+  const emptyCache = createInMemoryReferenceCache();
+  assert.equal(await noCreds.resolveFullToken("eng/process/pr-conventions", emptyCache), null);
+  assert.equal(await noCreds.resolveFullToken(ENG_PR_ID, emptyCache), null);
+}
+
+console.log("createWikiAdapter resolveFullToken: ok");
+
+// ---------------------------------------------------------------------------
+// Wiki expansion end-to-end (the input transform with the wiki adapter
+// wired as the factory wires it)
+// ---------------------------------------------------------------------------
+
+{
+  let clientBuilds = 0;
+  const adapter = createWikiAdapter({
+    createClient: async () => {
+      clientBuilds += 1;
+      return {
+        mcpWikiSearch: async () => ({ items: [] }),
+        getKnowledgeTree: async () => ({
+          nodes: [
+            wikiNode("00000000-0000-4000-8000-00000000000f", "process", "Process", {
+              kind: "FOLDER",
+              latest_version: 0,
+              children: [wikiNode(ENG_PR_ID, "pr-conventions", "PR conventions", { latest_version: 12 })],
+            }),
+          ],
+        }),
+        getKnowledgeNode: async (uuid: string) => {
+          if (uuid === ENG_PR_ID) {
+            return { id: uuid, slug: "pr-conventions", title: "PR conventions", latest_version: 12, space_slug: "eng" };
+          }
+          throw new Error("404 not found");
+        },
+        getKnowledgeNodeByPath: async (slug: string, path: string) => {
+          if (slug === "eng" && path === "process/qa-checklist") {
+            return { id: "11111111-1111-4111-8111-111111111111", slug: "qa-checklist", title: "QA & `<review>` checklist", latest_version: 4 };
+          }
+          throw new Error("404 not found");
+        },
+      };
+    },
+  });
+  const registry = createReferenceRegistry([adapter]);
+  const cache = createInMemoryReferenceCache();
+  cache.write("wiki", [
+    {
+      kind: "wiki",
+      id: ENG_PR_ID,
+      key: "eng/process/pr-conventions",
+      title: "PR conventions",
+      space: "eng",
+      path: "process/pr-conventions",
+      version: 12,
+    },
+  ]);
+  // The factory's lookup wiring: the kind routes to the adapter, whose
+  // resolveFullToken is cache-first with the shape-appropriate fallback.
+  const lookup = (kind: string, token: string) => {
+    assert.equal(kind, "wiki");
+    return adapter.resolveFullToken(token, cache);
+  };
+  const cachedTag = '<wiki-ref space="eng" path="process/pr-conventions" version="12">PR conventions</wiki-ref>';
+
+  // Both identity forms of the SAME page expand to the identical canonical
+  // tag: the path form from the cached metadata (no client built), the
+  // uuid form from the node + tree join.
+  assert.equal(
+    await expandReferenceMentions("see #wiki:eng/process/pr-conventions today", registry, lookup),
+    `see ${cachedTag} today`,
+  );
+  assert.equal(clientBuilds, 0, "the cached path form resolved without a fetch");
+  assert.equal(
+    await expandReferenceMentions("see #wiki:a36cd327-2e9b-47cd-9f4c-17bea059546a today", registry, lookup),
+    `see ${cachedTag} today`,
+    "the uuid form of the same page produces the identical expansion",
+  );
+  assert.equal(clientBuilds, 0, "the cached uuid form resolved without a fetch");
+
+  // A cache miss through the path form: the by-path fetch resolves, with
+  // the version and title from the fetch and the XML-special title
+  // escaped as element text.
+  assert.equal(
+    await expandReferenceMentions("also #wiki:eng/process/qa-checklist please", registry, lookup),
+    'also <wiki-ref space="eng" path="process/qa-checklist" version="4">QA &amp; `&lt;review>` checklist</wiki-ref> please',
+  );
+  assert.equal(clientBuilds, 1);
+
+  // Mixed known and unknown mentions: each known one expands, the unknown
+  // stays as typed.
+  assert.equal(
+    await expandReferenceMentions(
+      "compare #wiki:eng/process/pr-conventions with #wiki:legal-qa/missing and #wiki:eng/process/pr-conventions again",
+      registry,
+      lookup,
+    ),
+    `compare ${cachedTag} with #wiki:legal-qa/missing and ${cachedTag} again`,
+  );
+  assert.equal(clientBuilds, 2, "the unknown mention resolved once (a miss) and duplicates shared it");
+
+  // Mentions at the start and the end of the prompt.
+  assert.equal(
+    await expandReferenceMentions("#wiki:eng/process/pr-conventions is ready", registry, lookup),
+    `${cachedTag} is ready`,
+  );
+  assert.equal(
+    await expandReferenceMentions("please review #wiki:eng/process/pr-conventions", registry, lookup),
+    `please review ${cachedTag}`,
+  );
+
+  // A prompt without references passes through unchanged.
+  const plain = "a prompt with no references at all";
+  assert.equal(await expandReferenceMentions(plain, registry, lookup), plain);
+
+  // No credentials (the factory's credential gate passes null as the
+  // lookup): the mention stays as typed, no fetch attempted.
+  assert.equal(
+    await expandReferenceMentions("fix #wiki:eng/process/pr-conventions", registry, null),
+    "fix #wiki:eng/process/pr-conventions",
+  );
+  assert.equal(clientBuilds, 2, "no further client was built under the null lookup");
+}
+
+console.log("wiki expansion end-to-end: ok");
+
+// ---------------------------------------------------------------------------
+// REFERENCE_INSTRUCTION grows the wiki-ref shape (the one-block-documents-
+// all-four end state)
+// ---------------------------------------------------------------------------
+
+{
+  // All four tag shapes are documented in the one block.
+  assert.ok(REFERENCE_INSTRUCTION.includes("<task-ref"), "task-ref");
+  assert.ok(REFERENCE_INSTRUCTION.includes("<rule-ref"), "rule-ref");
+  assert.ok(REFERENCE_INSTRUCTION.includes("<artifact-ref"), "artifact-ref");
+  assert.ok(REFERENCE_INSTRUCTION.includes("<wiki-ref"), "shows the wiki-ref tag shape");
+  assert.ok(REFERENCE_INSTRUCTION.includes("space="), "names the wiki space attribute");
+  assert.ok(REFERENCE_INSTRUCTION.includes("path="), "names the wiki path attribute");
+  assert.ok(/`space`/.test(REFERENCE_INSTRUCTION), "documents the space attribute");
+  assert.ok(/`path`/.test(REFERENCE_INSTRUCTION), "documents the path attribute");
+  assert.ok(/page title as the element text/.test(REFERENCE_INSTRUCTION), "names the wiki title part");
+  assert.ok(/never the body/.test(REFERENCE_INSTRUCTION), "bodies are never inlined");
+  assert.ok(
+    /To read the page[^]*use the `aura` skill/.test(REFERENCE_INSTRUCTION),
+    "points at the aura skill for wiki references",
+  );
+}
+
+console.log("REFERENCE_INSTRUCTION wiki-ref shape: ok");
+
+// ---------------------------------------------------------------------------
 // Factory is a function (smoke; the factory itself is pi-runtime verified)
 // ---------------------------------------------------------------------------
 
