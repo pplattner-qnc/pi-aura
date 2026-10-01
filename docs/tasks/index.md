@@ -9,7 +9,6 @@ title: docs/tasks
 ## Live
 
 - add-capacity-subcommands
-- reference-wiki-kind
 - refine-phase-transition
 - unified-reference-mentions
 

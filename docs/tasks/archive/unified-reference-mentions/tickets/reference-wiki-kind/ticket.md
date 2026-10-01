@@ -1,12 +1,12 @@
 ---
 type: ticket
 title: "#wiki: references end-to-end"
-status: stable
+status: deprecated
 blocked_by:
 - reference-engine-core
 - reference-cache-sqlite
 subtype: feature
-workflow_state: in-progress
+workflow_state: done
 ---
 
 ## What to build
