@@ -9,9 +9,9 @@ Status: approved (two slices, m then s; levels [1] then [2]). The
 kickoff is deliberately deferred by the user until a pending item is
 settled; do not treat the delay as a change to this plan.
 
-- Task doc: `docs/tasks/reference-wiki-kind/task.md`
+- Ticket doc: `docs/tasks/unified-reference-mentions/tickets/reference-wiki-kind/ticket.md`
 - Effort spec: `docs/tasks/unified-reference-mentions/spec.md`
-- Map: `docs/tasks/maps/unified-reference-mentions/map.md`
+- Map: `docs/tasks/unified-reference-mentions/map.md`
 - As-built reference: `extensions/aura-references.ts` (the task and
   artifact adapters are the patterns), `packages/shared/src/aura-client.ts`
   (`mcpWikiSearch`, `getKnowledgeNodeByPath`, `getKnowledgeNode`,

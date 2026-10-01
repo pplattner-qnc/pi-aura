@@ -5,7 +5,7 @@ status: stable
 ---
 # Spec: Unified in-chat resource references
 
-Map: `docs/tasks/maps/unified-reference-mentions/map.md`
+Map: `docs/tasks/unified-reference-mentions/map.md` (this effort's root)
 
 ## Problem Statement
 
