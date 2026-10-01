@@ -50,8 +50,8 @@
  *    exactly as typed so the agent can resolve them via the `aura` skill.
  *    Without Aura credentials no targeted fetch is attempted at all.
  * 7. The system prompt gains a slim per-turn instruction block
- *    (REFERENCE_INSTRUCTION; task-ref shape then, task-ref + rule-ref
- *    shapes since the rule-kind ticket) pointing at the `aura` skill,
+ *    (REFERENCE_INSTRUCTION; one tag shape per kind, grown to all four by
+ *    the wiki-kind ticket) pointing at the `aura` skill,
  *    appended via `before_agent_start` (pi
  *    rebuilds the base prompt each turn, so the append never accumulates).
  * 8. The alias registry API: `registerAlias` maps a legacy token
@@ -136,7 +136,15 @@
  * no space-listing verb, so the warmup is search-seeded: one generic
  * `mcpWikiSearch` (bounded at the API max) surfaces the spaces worth
  * covering, then one memoized tree per distinct hit space writes complete
- * items, capped per space at 500 in tree order.
+ * items, capped per space at 500 in tree order. Its slice 2 shipped
+ * expansion: on submit, both identity forms resolve to the same canonical
+ * `<wiki-ref space path version>title</wiki-ref>` (cache-first through
+ * complete cached metadata, then `getKnowledgeNodeByPath` for the path
+ * form and `getKnowledgeNode` plus the tree join for the uuid form, the
+ * fresh node's title and version composed over the tree's canonical
+ * path), with unresolvable references left as typed; the per-turn
+ * instruction block grew the wiki-ref shape, completing the
+ * one-block-documents-all-four end state.
  *
  * Credentials: the task adapter talks to Aura through the shared AuraClient
  * (`createDefaultAuraClient`, which reads `aura.baseUrl` from settings plus
@@ -721,7 +729,9 @@ async function resolveMention(
  *  and rule references carry their body in the system prompt already
  *  (the engineering-rules mention injection). The artifact kind grew the
  *  block to three tag shapes (artifact attributes are metadata-driven:
- *  id, kind, and the version the reference resolved to). */
+ *  id, kind, and the version the reference resolved to), and the wiki
+ *  kind completed the one-block-documents-all-four end state (wiki
+ *  attributes: space, path, and the version the reference resolved to). */
 export const REFERENCE_INSTRUCTION = `
 ## Inline references
 
@@ -730,12 +740,15 @@ User messages may contain inline references rendered as tagged elements:
   <task-ref key="AURA-42" status="OPEN">Fix the login bug</task-ref>
   <rule-ref name="tracker-aura" attach="manual">Tracker Aura</rule-ref>
   <artifact-ref id="9f3c2e8a-1111-4222-8333-444444444444" kind="PLAN" version="3">Q3 planning doc</artifact-ref>
+  <wiki-ref space="eng" path="process/pr-conventions" version="12">PR conventions</wiki-ref>
 
 Task references carry only the key, status, and title, never the task body. \`key\` is the task's human-readable identifier (e.g. \`AURA-42\`), \`status\` its current Aura workflow status (e.g. \`OPEN\`, \`IN_REVIEW\`, \`DONE\`), and the element text is the task title. To read the full task, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further task details from the reference alone.
 
 Rule references carry the rule's \`name\`, how it attaches (\`attach\`: \`manual\`, \`always\`, or \`glob\` with its patterns), and the rule's display title as the element text. The referenced rule's body is injected into the system prompt for this turn; honor it without further action.
 
 Artifact references carry the artifact's \`id\` (its uuid), its \`kind\` (\`PLAN\`, \`REVIEW\`, or \`GENERIC\`), the \`version\` the reference resolved to (the latest version at resolution time), and the artifact title as the element text; never the body. To read the full artifact, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further artifact details from the reference alone.
+
+Wiki references carry the page's \`space\` (its knowledge-space slug), its \`path\` (the slug path within that space), the \`version\` the reference resolved to, and the page title as the element text; never the body. To read the page, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further wiki details from the reference alone.
 `;
 
 // ---------------------------------------------------------------------------
@@ -1440,10 +1453,16 @@ export function createWikiAdapter(options: {
   // canonical path of any hit in a memoized space costs no fetch.
   const treeMemo = new Map<string, WikiReferenceItem[]>();
 
-  const fetchTreeItems = async (spaceSlug: string): Promise<WikiReferenceItem[] | null> => {
+  const fetchTreeItems = async (
+    spaceSlug: string,
+    client?: WikiAuraClient,
+  ): Promise<WikiReferenceItem[] | null> => {
     try {
-      const client = await createClient();
-      const tree = await client.getKnowledgeTree(spaceSlug);
+      // The caller's client is reused when it holds one (every public
+      // method builds exactly one client per call); standalone callers
+      // (none today) would build their own here.
+      const active = client ?? (await createClient());
+      const tree = await active.getKnowledgeTree(spaceSlug);
       const items = wikiItemsFromTree(spaceSlug, tree.nodes);
       treeMemo.set(spaceSlug, items);
       return items;
@@ -1476,6 +1495,7 @@ export function createWikiAdapter(options: {
   const itemsForHits = async (
     hits: WikiSearchHit[],
     signal?: AbortSignal,
+    client?: WikiAuraClient,
   ): Promise<WikiReferenceItem[]> => {
     const out: WikiReferenceItem[] = [];
     const spaces: string[] = [];
@@ -1489,7 +1509,7 @@ export function createWikiAdapter(options: {
       const staleMemo =
         items !== null && spaceHits.some((hit) => !items.some((item) => item.id === hit.id));
       if (items === null || staleMemo) {
-        items = await fetchTreeItems(space);
+        items = await fetchTreeItems(space, client);
       }
       if (items === null) continue;
       for (const hit of spaceHits) {
@@ -1543,7 +1563,7 @@ export function createWikiAdapter(options: {
         // The request was aborted while the fetch was in flight: the late
         // results are dropped, and no tree is fetched after the abort.
         if (searchOptions.signal?.aborted) return [];
-        return await itemsForHits(res.items, searchOptions.signal);
+        return await itemsForHits(res.items, searchOptions.signal, client);
       } catch {
         // Missing credentials or a failed search: the SWR merge gets
         // nothing fresh and skips the write; the session is never
@@ -1555,20 +1575,75 @@ export function createWikiAdapter(options: {
     formatRow,
 
     formatExpansion(item) {
-      // Slice 2 of this ticket fills the space/path/version attributes
-      // (from the cached metadata or the targeted fetch); until it lands,
-      // resolution never reaches here (resolveFullToken below returns
-      // null, so mentions stay exactly as typed).
-      return `<wiki-ref>${escapeText(item.title)}</wiki-ref>`;
+      // The metadata-driven expansion: the space, path, and version come
+      // from the item's metadata extras (cached metadata when the
+      // resolution was cache-first, the targeted fetch otherwise); an item
+      // without them (only reachable through a hand-built item) expands
+      // with empty attributes rather than throwing. Identical for both
+      // input forms: they resolve to the same complete item.
+      const meta = wikiItemMetadata(item);
+      return `<wiki-ref space="${escapeAttr(meta?.space ?? "")}" path="${escapeAttr(meta?.path ?? "")}" version="${escapeAttr(String(meta?.version ?? ""))}">${escapeText(item.title)}</wiki-ref>`;
     },
 
-    async resolveFullToken() {
-      // Slice 2 of this ticket lands the dual-endpoint resolution
-      // (cache-first, then getKnowledgeNodeByPath for the path form and
-      // getKnowledgeNode plus the tree join for the uuid form); until then
-      // wiki mentions stay exactly as typed (the safe passthrough the
-      // engine's contract prescribes for unresolvable references).
-      return null;
+    async resolveFullToken(token, cache) {
+      // Resolve cache-first, keyed by the token's identity form: the uuid
+      // form matches the item id, the path form the item key
+      // (case-insensitively; the server is the authority on casing). A
+      // cached row WITHOUT complete metadata (space/path/version, the
+      // sqlite JSON column fields) must not expand with half the
+      // attributes, so it falls through with the cache miss.
+      const lower = token.toLowerCase();
+      const uuidForm = isWikiUuidForm(token);
+      const hit = cache.read(WIKI_KIND).find(
+        (item) =>
+          (uuidForm ? item.id.toLowerCase() === lower : item.key.toLowerCase() === lower) &&
+          wikiItemMetadata(item) !== null,
+      );
+      if (hit) return hit;
+      // ...then via the shape-appropriate endpoint. A bare space slug is
+      // neither form (no slash to split, not a uuid): unresolvable without
+      // any fetch.
+      const slash = token.indexOf("/");
+      if (!uuidForm && slash <= 0) return null;
+      try {
+        const client = await createClient();
+        if (uuidForm) {
+          // The uuid identity: the node carries its space, its fresh title,
+          // and its fresh version, but no ancestor chain (the node response
+          // has no path), so the canonical path comes from the space's tree
+          // (memoized, one refetch when the memo misses the id). The fresh
+          // node's title and version win over the tree's snapshot, so both
+          // identity forms resolve to the same current expansion.
+          const node = await client.getKnowledgeNode(token);
+          const space = node.space_slug ?? "";
+          if (space === "") return null;
+          let items = treeMemo.get(space) ?? null;
+          if (items === null || !items.some((item) => item.id === node.id)) {
+            items = await fetchTreeItems(space, client);
+          }
+          const item = items?.find((candidate) => candidate.id === node.id);
+          if (item === undefined) return null;
+          return { ...item, title: node.title, version: node.latest_version };
+        }
+        // The path identity: the space and path come from the token, the
+        // id, title, and version from the targeted by-path lookup.
+        const space = token.slice(0, slash);
+        const path = token.slice(slash + 1);
+        const node = await client.getKnowledgeNodeByPath(space, path);
+        return {
+          kind: WIKI_KIND,
+          id: node.id,
+          key: token,
+          title: node.title,
+          space,
+          path,
+          version: node.latest_version,
+        };
+      } catch {
+        // Missing credentials, 404/403, or network: leave the reference as
+        // typed so the agent can resolve it via the `aura` skill.
+        return null;
+      }
     },
 
     async warmup(cache, warmupOptions = {}) {
@@ -1590,7 +1665,7 @@ export function createWikiAdapter(options: {
         for (const space of spaces) {
           if (warmupOptions.signal?.aborted) return;
           let items = treeMemo.get(space) ?? null;
-          if (items === null) items = await fetchTreeItems(space);
+          if (items === null) items = await fetchTreeItems(space, client);
           if (items === null) continue; // this space's tree failed; others still land
           // Write space by space so partial progress (a later tree failure
           // or an abort mid-flight) still lands; the cap keeps each space's

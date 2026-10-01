@@ -3819,7 +3819,7 @@ console.log("createWikiAdapter formatExpansion: ok");
   // half-metadata row must not expand with missing attributes); the
   // endpoint 404s, so the mention stays as typed.
   assert.equal(await adapter.resolveFullToken("eng/process/qa-checklist", cache), null);
-  assert.deepEqual(byPathCalls[byPathCalls.length - 1], ["eng", "qa-checklist"]);
+  assert.deepEqual(byPathCalls[byPathCalls.length - 1], ["eng", "process/qa-checklist"]);
 
   // A uuid whose node is absent from its space's tree: no derivable path,
   // null (a wrong path would be worse than no expansion).
