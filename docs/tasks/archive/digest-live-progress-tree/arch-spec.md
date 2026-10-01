@@ -1,3 +1,8 @@
+---
+type: arch spec
+title: Architecture spec — digest-live-progress-tree
+status: stable
+---
 # Architecture spec — digest-live-progress-tree
 
 Shared across all slice chains. Each slice tests only at its listed seams; the

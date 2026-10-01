@@ -1,3 +1,8 @@
+---
+type: spec
+title: "Spec: Unified in-chat resource references"
+status: stable
+---
 # Spec: Unified in-chat resource references
 
 Map: `docs/tasks/maps/unified-reference-mentions/map.md`

@@ -1,3 +1,7 @@
+---
+type: changelog
+title: Task Changelog
+---
 # Task Changelog
 
 ## 2026-09-29: #artifact: references end-to-end (reference-artifact-kind)

@@ -1,3 +1,8 @@
+---
+type: arch spec
+title: Architecture spec — digest-notif-window
+status: stable
+---
 # Architecture spec — digest-notif-window
 
 > aura-digest: since-last-run + older-unread notifications, drop auto mark-read.

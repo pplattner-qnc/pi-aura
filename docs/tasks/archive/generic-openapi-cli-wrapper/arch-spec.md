@@ -1,3 +1,8 @@
+---
+type: arch spec
+title: Architecture Spec — generic-openapi-cli-wrapper
+status: stable
+---
 # Architecture Spec — generic-openapi-cli-wrapper
 
 Shared across all slice chains. Each slice implements against this spec and

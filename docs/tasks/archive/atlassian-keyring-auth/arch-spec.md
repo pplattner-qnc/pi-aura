@@ -1,3 +1,8 @@
+---
+type: arch spec
+title: Architecture spec — atlassian-keyring-auth
+status: stable
+---
 # Architecture spec — atlassian-keyring-auth
 
 Owns pi-aura's Atlassian access: an email + API token in the `@pi-aura/shared`
