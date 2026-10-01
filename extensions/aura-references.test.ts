@@ -61,7 +61,17 @@ import auraReferences, {
   createRuleAdapter,
   createRuleAlias,
   filterRuleItems,
+  createWikiAdapter,
+  isWikiUuidForm,
+  wikiItemsFromTree,
+  wikiItemMetadata,
+  WIKI_KIND,
+  WARMUP_WIKI_SEED_QUERY,
+  WARMUP_WIKI_SEARCH_LIMIT,
+  MAX_WIKI_ITEMS_PER_SPACE,
   type ReferenceItem,
+  type WikiSearchHit,
+  type WikiTreeNode,
 } from "./aura-references.ts";
 import { resolveRuleMentions, type Rule } from "./engineering-rules.ts";
 
@@ -2894,6 +2904,733 @@ console.log("createArtifactAdapter resolveFullToken: ok");
 }
 
 console.log("artifact expansion end-to-end: ok");
+
+// ---------------------------------------------------------------------------
+// The wiki kind (the dual-identity kind): isWikiUuidForm + wikiItemsFromTree
+// (the hit-to-path derivation, pure) + wikiItemMetadata
+// ---------------------------------------------------------------------------
+
+{
+  // The dual-identity shape discriminator: a complete Aura node uuid
+  // (8-4-4-4-12 hex, case-insensitive so a pasted uppercase uuid resolves)
+  // is the uuid form; everything else is the readable path form.
+  assert.equal(isWikiUuidForm("a36cd327-2e9b-47cd-9f4c-17bea059546a"), true);
+  assert.equal(isWikiUuidForm("A36CD327-2E9B-47CD-9F4C-17BEA059546A"), true);
+  assert.equal(isWikiUuidForm("19116556-6e3b-451a-9866-2d61c0736a78"), true);
+  assert.equal(isWikiUuidForm("eng/process/pr-conventions"), false, "the path form");
+  assert.equal(isWikiUuidForm("eng"), false, "a bare space slug");
+  assert.equal(isWikiUuidForm("a36cd327-2e9b-47cd"), false, "a partial uuid prefix");
+  assert.equal(isWikiUuidForm(""), false);
+  assert.equal(isWikiUuidForm("a36cd3272e9b47cd9f4c17bea059546a"), false, "no dashes");
+  assert.equal(isWikiUuidForm("z36cd327-2e9b-47cd-9f4c-17bea059546a"), false, "non-hex");
+}
+
+console.log("isWikiUuidForm: ok");
+
+{
+  // wikiItemsFromTree: the hit-to-path derivation's payload source, pure
+  // over the real getKnowledgeTree response shape (verified against live
+  // Aura: nodes carry id, kind, slug, title, latest_version, children).
+  // Only DOCUMENT nodes are referenceable (folders are containers, FILE
+  // nodes are assets); the canonical path is the ancestor slug chain; the
+  // uuid is the item id and `space/path` the token key.
+  const tree: WikiTreeNode[] = [
+    {
+      id: "2f6b7f30-5cb1-42f7-9545-e22409284253",
+      kind: "FOLDER",
+      slug: "nis-2",
+      title: "NIS-2",
+      latest_version: 0,
+      children: [
+        {
+          id: "19116556-6e3b-451a-9866-2d61c0736a78",
+          kind: "DOCUMENT",
+          slug: "it-sicherheitskonzept",
+          title: "IT-Sicherheitskonzept",
+          latest_version: 2,
+          children: [],
+        },
+        {
+          id: "9d152742-2ea6-4b64-9958-dbc032f3ff19",
+          kind: "DOCUMENT",
+          slug: "isms-basiskonzept",
+          title: "ISMS-Basiskonzept",
+          latest_version: 1,
+          children: [],
+        },
+      ],
+    },
+    {
+      id: "00000000-0000-0000-0000-000000000001",
+      kind: "DOCUMENT",
+      slug: "overview",
+      title: "Space overview",
+      latest_version: 7,
+      children: [],
+    },
+    {
+      id: "00000000-0000-0000-0000-000000000002",
+      kind: "FILE",
+      slug: "policy-pdf",
+      title: "Policy PDF",
+      latest_version: 3,
+      children: [],
+    },
+  ];
+  const items = wikiItemsFromTree("iso-27001-dokumente", tree);
+  assert.deepEqual(items, [
+    {
+      kind: "wiki",
+      id: "19116556-6e3b-451a-9866-2d61c0736a78",
+      key: "iso-27001-dokumente/nis-2/it-sicherheitskonzept",
+      title: "IT-Sicherheitskonzept",
+      space: "iso-27001-dokumente",
+      path: "nis-2/it-sicherheitskonzept",
+      version: 2,
+    },
+    {
+      kind: "wiki",
+      id: "9d152742-2ea6-4b64-9958-dbc032f3ff19",
+      key: "iso-27001-dokumente/nis-2/isms-basiskonzept",
+      title: "ISMS-Basiskonzept",
+      space: "iso-27001-dokumente",
+      path: "nis-2/isms-basiskonzept",
+      version: 1,
+    },
+    {
+      kind: "wiki",
+      id: "00000000-0000-0000-0000-000000000001",
+      key: "iso-27001-dokumente/overview",
+      title: "Space overview",
+      space: "iso-27001-dokumente",
+      path: "overview",
+      version: 7,
+    },
+  ], "folders and files are skipped, nested paths carry the ancestor slugs");
+
+  // Deep nesting: the slug chain accumulates across levels.
+  const deep = wikiItemsFromTree("eng", [
+    {
+      id: "00000000-0000-0000-0000-00000000000a",
+      kind: "FOLDER",
+      slug: "process",
+      title: "Process",
+      latest_version: 0,
+      children: [
+        {
+          id: "00000000-0000-0000-0000-00000000000b",
+          kind: "FOLDER",
+          slug: "reviews",
+          title: "Reviews",
+          latest_version: 0,
+          children: [
+            {
+              id: "00000000-0000-0000-0000-00000000000c",
+              kind: "DOCUMENT",
+              slug: "pr-conventions",
+              title: "PR conventions",
+              latest_version: 12,
+              children: [],
+            },
+          ],
+        },
+      ],
+    },
+  ]);
+  assert.deepEqual(deep, [
+    {
+      kind: "wiki",
+      id: "00000000-0000-0000-0000-00000000000c",
+      key: "eng/process/reviews/pr-conventions",
+      title: "PR conventions",
+      space: "eng",
+      path: "process/reviews/pr-conventions",
+      version: 12,
+    },
+  ]);
+
+  // The metadata accessor (the artifact pattern): a complete space/path/
+  // version triple reads off any item; an incomplete row reports null so
+  // resolution can distinguish a metadata-less cached row.
+  assert.deepEqual(wikiItemMetadata(items[0]), {
+    space: "iso-27001-dokumente",
+    path: "nis-2/it-sicherheitskonzept",
+    version: 2,
+  });
+  assert.equal(wikiItemMetadata({ kind: "wiki", id: "x", key: "eng/x", title: "T" }), null);
+  assert.equal(
+    wikiItemMetadata({ kind: "wiki", id: "x", key: "eng/x", title: "T", space: "eng", path: "x" }),
+    null,
+    "a missing version is incomplete",
+  );
+  assert.equal(
+    wikiItemMetadata({ kind: "wiki", id: "x", key: "eng/x", title: "T", space: "eng", path: "x", version: "3" }),
+    null,
+    "a string version is incomplete",
+  );
+}
+
+console.log("wikiItemsFromTree + wikiItemMetadata: ok");
+
+// ---------------------------------------------------------------------------
+// createWikiAdapter: rows + local filtering (space/path substring, title
+// substring, uuid prefix; the readable form is ALWAYS the inserted value)
+// ---------------------------------------------------------------------------
+
+{
+  const adapter = createWikiAdapter({
+    createClient: async () => {
+      throw new Error("no credentials in this test");
+    },
+  });
+
+  assert.equal(WIKI_KIND, "wiki");
+  assert.equal(adapter.kind, WIKI_KIND);
+
+  // parsePartial: BOTH identity forms are wiki-shaped and pass through (a
+  // hand-typed uuid partial is recognized, not declined); the shape
+  // discrimination happens downstream (searchServer skips the text search
+  // for the uuid form; resolveFullToken routes by shape).
+  assert.equal(adapter.parsePartial("eng/process/pr"), "eng/process/pr");
+  assert.equal(adapter.parsePartial("a36cd327-2e9b-47cd-9f4c-17bea059546a"), "a36cd327-2e9b-47cd-9f4c-17bea059546a");
+  assert.equal(adapter.parsePartial(""), "");
+
+  const prConventions: ReferenceItem = {
+    kind: "wiki",
+    id: "a36cd327-2e9b-47cd-9f4c-17bea059546a",
+    key: "eng/process/pr-conventions",
+    title: "PR conventions",
+    space: "eng",
+    path: "process/pr-conventions",
+    version: 12,
+  };
+  const qaChecklist: ReferenceItem = {
+    kind: "wiki",
+    id: "11111111-1111-4111-8111-111111111111",
+    key: "eng/process/qa-checklist",
+    title: "QA checklist",
+    space: "eng",
+    path: "process/qa-checklist",
+    version: 3,
+  };
+  const itSicherheitskonzept: ReferenceItem = {
+    kind: "wiki",
+    id: "19116556-6e3b-451a-9866-2d61c0736a78",
+    key: "iso-27001-dokumente/nis-2/it-sicherheitskonzept",
+    title: "IT-Sicherheitskonzept",
+    space: "iso-27001-dokumente",
+    path: "nis-2/it-sicherheitskonzept",
+    version: 2,
+  };
+  const sameTitleElsewhere: ReferenceItem = {
+    kind: "wiki",
+    id: "22222222-2222-4222-8222-222222222222",
+    key: "legal-qa/case-notes",
+    title: "PR conventions",
+    space: "legal-qa",
+    path: "case-notes",
+    version: 1,
+  };
+  const items = [prConventions, qaChecklist, itSicherheitskonzept, sameTitleElsewhere];
+
+  // The row (the prototype's wiki row): the readable space/path token is
+  // the value AND the label, the page title rides the description, and the
+  // uuid NEVER appears (selection always inserts the space/path form).
+  const row = adapter.formatRow(prConventions);
+  assert.equal(row.value, "#wiki:eng/process/pr-conventions");
+  assert.equal(row.label, "#wiki:eng/process/pr-conventions");
+  assert.equal(row.description, "PR conventions");
+  assert.ok(!row.value.includes("a36cd327"), "the uuid is never inserted");
+
+  // A unicode title rides the row unescaped (rows are plain text).
+  assert.equal(
+    adapter.formatRow({ ...prConventions, title: "Überblick: Zählpunkte & mehr" }).description,
+    "Überblick: Zählpunkte & mehr",
+  );
+
+  // Empty partial: the head of the cached order.
+  assert.deepEqual(adapter.searchLocal(items, "").map((r) => r.value), items.map((i) => `#wiki:${i.key}`));
+
+  // `#wiki:eng/` matches the space (and any path prefix) by substring.
+  assert.deepEqual(adapter.searchLocal(items, "eng/").map((r) => r.value), [
+    "#wiki:eng/process/pr-conventions",
+    "#wiki:eng/process/qa-checklist",
+  ]);
+
+  // `#wiki:eng/process/pr` narrows by path substring, case-insensitively.
+  assert.deepEqual(adapter.searchLocal(items, "eng/process/pr").map((r) => r.value), [
+    "#wiki:eng/process/pr-conventions",
+  ]);
+  assert.deepEqual(adapter.searchLocal(items, "ENG/PROCESS/PR").map((r) => r.value), [
+    "#wiki:eng/process/pr-conventions",
+  ]);
+
+  // `#wiki:conven` matches the title substring: two pages with the same
+  // title in different spaces both list, disambiguated by the space/path
+  // label (never by a uuid).
+  assert.deepEqual(adapter.searchLocal(items, "conven").map((r) => r.label), [
+    "#wiki:eng/process/pr-conventions",
+    "#wiki:legal-qa/case-notes",
+  ]);
+
+  // A hand-typed uuid partial is recognized as wiki-shaped: the local leg
+  // matches the uuid prefix, and the row STILL inserts the readable
+  // space/path form (the map decision: no uuid insertion from
+  // autocomplete).
+  assert.deepEqual(adapter.searchLocal(items, "a36c").map((r) => r.value), [
+    "#wiki:eng/process/pr-conventions",
+  ]);
+  assert.deepEqual(adapter.searchLocal(items, "A36CD327-2E9B-47CD-9F4C-17BEA059546A").map((r) => r.value), [
+    "#wiki:eng/process/pr-conventions",
+  ], "a complete hand-typed uuid also finds its page");
+
+  // Zero-match partial and empty cache: no rows (the provider defers).
+  assert.deepEqual(adapter.searchLocal(items, "zzz-nothing"), []);
+  assert.deepEqual(adapter.searchLocal([], ""), []);
+
+  // Cap: at most MAX_SUGGESTIONS rows.
+  const many: ReferenceItem[] = Array.from({ length: 30 }, (_, i) => ({
+    kind: "wiki",
+    id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+    key: `space/page-${i}`,
+    title: `Page ${i}`,
+    space: "space",
+    path: `page-${i}`,
+    version: 1,
+  }));
+  assert.equal(adapter.searchLocal(many, "").length, MAX_SUGGESTIONS);
+
+  // Registration behind the common interface: the registry's compiled token
+  // pattern recognizes `#wiki:` (the factory registers the same adapter at
+  // session_start).
+  const registry = createReferenceRegistry([adapter]);
+  assert.deepEqual(
+    extractReferenceToken("see #wiki:eng/process/pr", registry),
+    { kind: "wiki", partial: "eng/process/pr", raw: "#wiki:eng/process/pr" },
+  );
+}
+
+console.log("createWikiAdapter rows + local filtering: ok");
+
+// ---------------------------------------------------------------------------
+// Fake wiki client (the structural WikiAuraClient seam)
+// ---------------------------------------------------------------------------
+
+/** One knowledge tree node in the fake payload shape. */
+function wikiNode(
+  id: string,
+  slug: string,
+  title: string,
+  extra: Partial<WikiTreeNode> = {},
+): WikiTreeNode {
+  return { id, slug, title, kind: "DOCUMENT", latest_version: 1, children: [], ...extra };
+}
+
+/** Fake wiki client: search hits plus per-space trees (both live records so
+ * a test can mutate them between calls, simulating pages created after a
+ * memoized tree), with call recording and failure switches. An unknown
+ * space slug models the real 404 (a throw), not an empty tree. */
+function fakeWikiClient(options: {
+  hits: WikiSearchHit[];
+  trees: Record<string, WikiTreeNode[]>;
+  failSearch?: boolean;
+  failTrees?: string[];
+}) {
+  const searchCalls: Array<{ query: string; limit?: number }> = [];
+  const treeCalls: string[] = [];
+  return {
+    client: {
+      mcpWikiSearch: async (input: { query: string; limit?: number }) => {
+        searchCalls.push({ query: input.query, limit: input.limit });
+        if (options.failSearch) throw new Error("search down");
+        return { items: options.hits };
+      },
+      getKnowledgeTree: async (slug: string) => {
+        treeCalls.push(slug);
+        if (options.failTrees?.includes(slug)) throw new Error("tree down");
+        const nodes = options.trees[slug];
+        if (nodes === undefined) throw new Error(`404 no space ${slug}`);
+        return { nodes };
+      },
+      getKnowledgeNode: async () => {
+        throw new Error("not used in this slice");
+      },
+      getKnowledgeNodeByPath: async () => {
+        throw new Error("not used in this slice");
+      },
+    },
+    searchCalls,
+    treeCalls,
+  };
+}
+
+const ENG_PR_ID = "a36cd327-2e9b-47cd-9f4c-17bea059546a";
+const ISO_IT_ID = "19116556-6e3b-451a-9866-2d61c0736a78";
+
+function engTree(): WikiTreeNode[] {
+  return [
+    wikiNode("00000000-0000-4000-8000-00000000000f", "process", "Process", {
+      kind: "FOLDER",
+      latest_version: 0,
+      children: [wikiNode(ENG_PR_ID, "pr-conventions", "PR conventions", { latest_version: 12 })],
+    }),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// createWikiAdapter: searchServer (mcpWikiSearch + the tree join)
+// ---------------------------------------------------------------------------
+
+{
+  // The typed partial lands in the search query (capped); the hit-to-path
+  // derivation fetches ONE tree per distinct hit space; the returned items
+  // carry the complete dual identity (uuid id + space/path key + version).
+  const trees: Record<string, WikiTreeNode[]> = {
+    eng: [
+      wikiNode("00000000-0000-4000-8000-00000000000f", "process", "Process", { kind: "FOLDER", latest_version: 0 }),
+      wikiNode(ENG_PR_ID, "pr-conventions", "PR conventions", { latest_version: 12 }),
+    ],
+    "iso-27001-dokumente": [
+      wikiNode("2f6b7f30-5cb1-42f7-9545-e22409284253", "nis-2", "NIS-2", { kind: "FOLDER", latest_version: 0 }),
+      wikiNode(ISO_IT_ID, "it-sicherheitskonzept", "IT-Sicherheitskonzept", { latest_version: 2 }),
+    ],
+  };
+  const hits: WikiSearchHit[] = [
+    { id: ISO_IT_ID, space_slug: "iso-27001-dokumente", title: "IT-Sicherheitskonzept" },
+    { id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" },
+  ];
+  const { client, searchCalls, treeCalls } = fakeWikiClient({ hits, trees });
+  const adapter = createWikiAdapter({ createClient: async () => client });
+
+  const results = await adapter.searchServer("konvention");
+  assert.deepEqual(searchCalls, [{ query: "konvention", limit: MAX_SUGGESTIONS }]);
+  assert.deepEqual(treeCalls, ["iso-27001-dokumente", "eng"], "one tree per distinct hit space, in hit order");
+  assert.deepEqual(results, [
+    {
+      kind: "wiki",
+      id: ISO_IT_ID,
+      key: "iso-27001-dokumente/it-sicherheitskonzept",
+      title: "IT-Sicherheitskonzept",
+      space: "iso-27001-dokumente",
+      path: "it-sicherheitskonzept",
+      version: 2,
+    },
+    {
+      kind: "wiki",
+      id: ENG_PR_ID,
+      key: "eng/pr-conventions",
+      title: "PR conventions",
+      space: "eng",
+      path: "pr-conventions",
+      version: 12,
+    },
+  ]);
+
+  // A custom limit is honored (the SWR seam passes one).
+  const { client: limited, searchCalls: limitedCalls } = fakeWikiClient({ hits: [], trees: {} });
+  const limitedAdapter = createWikiAdapter({ createClient: async () => limited });
+  await limitedAdapter.searchServer("x", { limit: 5 });
+  assert.equal(limitedCalls[0]?.limit, 5);
+
+  // The tree memo: a second search in the SAME space does not refetch the
+  // tree (the per-session memo bounds the SWR refresh to the search itself).
+  await adapter.searchServer("konvention");
+  assert.deepEqual(treeCalls, ["iso-27001-dokumente", "eng"], "memoized tree reused");
+
+  // A hit whose id is missing from the memoized tree (a page created after
+  // the tree fetch) triggers exactly one refetch of that space, and the
+  // refetched tree completes the item (self-healing).
+  const newHit: WikiSearchHit = { id: "33333333-3333-4333-8333-333333333333", space_slug: "eng", title: "New page" };
+  hits.push(newHit);
+  trees.eng.push(wikiNode(newHit.id, "new-page", "New page", { latest_version: 1 }));
+  const healed = await adapter.searchServer("new page");
+  assert.deepEqual(treeCalls, ["iso-27001-dokumente", "eng", "eng"], "one refetch for the stale memo");
+  assert.deepEqual(
+    healed.map((i) => i.key),
+    ["iso-27001-dokumente/it-sicherheitskonzept", "eng/pr-conventions", "eng/new-page"],
+    "the refetched tree completes the new page's item",
+  );
+
+  // A hit with a missing space_slug (the slice's edge case): no derivation
+  // is possible, the hit is dropped, nothing crashes, and no tree call for
+  // the empty slug is fired (the space guard skips the doomed fetch).
+  const { client: noSpace, treeCalls: noSpaceTrees } = fakeWikiClient({
+    hits: [{ id: ENG_PR_ID, space_slug: "", title: "Ghost hit" }],
+    trees,
+  });
+  const noSpaceAdapter = createWikiAdapter({ createClient: async () => noSpace });
+  assert.deepEqual(await noSpaceAdapter.searchServer("ghost"), []);
+  assert.deepEqual(noSpaceTrees, []);
+
+  // A space whose tree fetch fails: that space's hits are dropped, no
+  // crash; other spaces still complete.
+  const { client: partialFail } = fakeWikiClient({
+    hits: [
+      { id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" },
+      { id: ISO_IT_ID, space_slug: "iso-27001-dokumente", title: "IT-Sicherheitskonzept" },
+    ],
+    trees,
+    failTrees: ["eng"],
+  });
+  const partialFailAdapter = createWikiAdapter({ createClient: async () => partialFail });
+  assert.deepEqual(
+    (await partialFailAdapter.searchServer("x")).map((i) => i.key),
+    ["iso-27001-dokumente/it-sicherheitskonzept"],
+  );
+
+  // The empty partial and the complete uuid form are not text queries:
+  // mcpWikiSearch matches titles and bodies, never ids, so no search is
+  // fired at all (a doomed call skipped).
+  const { client: skip, searchCalls: skipCalls } = fakeWikiClient({ hits: [], trees: {} });
+  const skipAdapter = createWikiAdapter({ createClient: async () => skip });
+  assert.deepEqual(await skipAdapter.searchServer(""), []);
+  assert.deepEqual(await skipAdapter.searchServer(ENG_PR_ID), []);
+  assert.deepEqual(skipCalls, [], "neither the empty partial nor the uuid form searches");
+
+  // An aborted request: the late in-flight results are dropped ([]).
+  const controller = new AbortController();
+  const { client: late } = fakeWikiClient({
+    hits: [{ id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" }],
+    trees,
+  });
+  const lateAdapter = createWikiAdapter({ createClient: async () => late });
+  const pending = lateAdapter.searchServer("x", { signal: controller.signal });
+  controller.abort(); // abort while the fetch is in flight
+  assert.deepEqual(await pending, [], "late results after an abort are dropped");
+
+  // A failed search (missing credentials, network): [] (nothing fresh for
+  // the SWR merge, nothing thrown into the session).
+  const failingSearch = createWikiAdapter({
+    createClient: async () => ({
+      mcpWikiSearch: async () => {
+        throw new Error("network down");
+      },
+      getKnowledgeTree: async () => {
+        throw new Error("not used here");
+      },
+      getKnowledgeNode: async () => {
+        throw new Error("not used here");
+      },
+      getKnowledgeNodeByPath: async () => {
+        throw new Error("not used here");
+      },
+    }),
+  });
+  assert.deepEqual(await failingSearch.searchServer("x"), []);
+
+  // Missing credentials: searchServer returns [] and never builds past the
+  // client factory.
+  const noCreds = createWikiAdapter({
+    createClient: async () => {
+      throw new Error("missing PAT");
+    },
+  });
+  assert.deepEqual(await noCreds.searchServer("x"), []);
+}
+
+console.log("createWikiAdapter searchServer: ok");
+
+// ---------------------------------------------------------------------------
+// refreshReferenceKind with the wiki adapter (write-through)
+// ---------------------------------------------------------------------------
+
+{
+  // A server-only match (a page outside the local cache window) is added by
+  // the write-through, so the next query finds it by title substring one
+  // keystroke after the refresh lands.
+  const { client } = fakeWikiClient({
+    hits: [{ id: "44444444-4444-4444-8444-444444444444", space_slug: "eng", title: "Release conventions" }],
+    trees: {
+      eng: [wikiNode("44444444-4444-4444-8444-444444444444", "release-conventions", "Release conventions", { latest_version: 5 })],
+    },
+  });
+  const adapter = createWikiAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache();
+  cache.write("wiki", [
+    {
+      kind: "wiki",
+      id: ENG_PR_ID,
+      key: "eng/pr-conventions",
+      title: "PR conventions",
+      space: "eng",
+      path: "pr-conventions",
+      version: 12,
+    },
+  ]);
+  await refreshReferenceKind(cache, adapter, "release");
+  assert.deepEqual(
+    cache.read("wiki").map((e) => e.key),
+    ["eng/pr-conventions", "eng/release-conventions"],
+    "server-only match added after the cached item",
+  );
+  // The added row carries the metadata extras.
+  const added = cache.read("wiki")[1];
+  assert.equal(added?.space, "eng");
+  assert.equal(added?.path, "release-conventions");
+  assert.equal(added?.version, 5);
+  // The merged cache finds the fresh page by title on the next keystroke.
+  assert.equal(adapter.searchLocal(cache.read("wiki"), "release conven").length, 1);
+}
+
+console.log("refreshReferenceKind server-only wiki match: ok");
+
+// ---------------------------------------------------------------------------
+// createWikiAdapter: warmup (search-seeded, tree-completed)
+// ---------------------------------------------------------------------------
+
+{
+  // The recorded warmup decision: one generic seed search (bounded at the
+  // API max), then one tree per distinct hit space, whose items write to
+  // the cache per space with complete metadata.
+  const { client, searchCalls, treeCalls } = fakeWikiClient({
+    hits: [
+      { id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" },
+      { id: ISO_IT_ID, space_slug: "iso-27001-dokumente", title: "IT-Sicherheitskonzept" },
+    ],
+    trees: {
+      eng: engTree(),
+      "iso-27001-dokumente": [wikiNode(ISO_IT_ID, "it-sicherheitskonzept", "IT-Sicherheitskonzept", { latest_version: 2 })],
+    },
+  });
+  const adapter = createWikiAdapter({ createClient: async () => client });
+  const cache = createInMemoryReferenceCache();
+  await adapter.warmup(cache);
+  assert.deepEqual(searchCalls, [
+    { query: WARMUP_WIKI_SEED_QUERY, limit: WARMUP_WIKI_SEARCH_LIMIT },
+  ]);
+  assert.deepEqual(treeCalls, ["eng", "iso-27001-dokumente"], "one tree per distinct seed-hit space");
+  assert.deepEqual(
+    cache.read("wiki").map((e) => e.key),
+    ["eng/process/pr-conventions", "iso-27001-dokumente/it-sicherheitskonzept"],
+  );
+  const first = cache.read("wiki")[0];
+  assert.equal(first?.space, "eng");
+  assert.equal(first?.path, "process/pr-conventions");
+  assert.equal(first?.version, 12);
+  assert.equal(cache.fetchedAt("wiki") !== null, true);
+
+  // The warmup write is capped per space (MAX_WIKI_ITEMS_PER_SPACE), in
+  // tree order (the space's navigation order).
+  const many: WikiTreeNode[] = Array.from({ length: 600 }, (_, i) =>
+    wikiNode(`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`, `page-${i}`, `Page ${i}`),
+  );
+  const { client: big } = fakeWikiClient({
+    hits: [{ id: "00000000-0000-4000-8000-000000000000", space_slug: "big", title: "Page 0" }],
+    trees: { big: many },
+  });
+  const bigAdapter = createWikiAdapter({ createClient: async () => big });
+  const bigCache = createInMemoryReferenceCache();
+  await bigAdapter.warmup(bigCache);
+  assert.equal(bigCache.read("wiki").length, MAX_WIKI_ITEMS_PER_SPACE);
+  assert.deepEqual(
+    bigCache.read("wiki").slice(0, 2).map((e) => e.key),
+    ["big/page-0", "big/page-1"],
+    "tree order is kept within the cap",
+  );
+
+  // Abort after the seed search: no tree fetches, no writes.
+  const controller = new AbortController();
+  const abortSearches: Array<{ query: string; limit?: number }> = [];
+  const aborting = {
+    mcpWikiSearch: async (input: { query: string; limit?: number }) => {
+      abortSearches.push({ query: input.query, limit: input.limit });
+      controller.abort(); // abort while the seed search resolves
+      return { items: [{ id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" }] };
+    },
+    getKnowledgeTree: async () => {
+      throw new Error("no tree should be fetched");
+    },
+    getKnowledgeNode: async () => {
+      throw new Error("not used here");
+    },
+    getKnowledgeNodeByPath: async () => {
+      throw new Error("not used here");
+    },
+  };
+  const abortAdapter = createWikiAdapter({ createClient: async () => aborting });
+  const abortCache = createInMemoryReferenceCache();
+  await abortAdapter.warmup(abortCache, { signal: controller.signal });
+  assert.deepEqual(abortCache.read("wiki"), []);
+  assert.equal(abortSearches.length, 1);
+
+  // Abort between spaces: the in-flight space's already-received tree
+  // still lands (the artifact warmup's between-pages precedent), and the
+  // NEXT space is never fetched.
+  const controller2 = new AbortController();
+  const treeSlugs: string[] = [];
+  const staggered = {
+    mcpWikiSearch: async () => ({
+      items: [
+        { id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" },
+        { id: ISO_IT_ID, space_slug: "iso-27001-dokumente", title: "IT-Sicherheitskonzept" },
+        { id: "55555555-5555-4555-8555-555555555555", space_slug: "third", title: "Third space page" },
+      ],
+    }),
+    getKnowledgeTree: async (slug: string) => {
+      treeSlugs.push(slug);
+      if (slug === "iso-27001-dokumente") controller2.abort(); // abort during the second tree
+      const id = slug === "eng" ? ENG_PR_ID : slug === "iso-27001-dokumente" ? ISO_IT_ID : "55555555-5555-4555-8555-555555555555";
+      return { nodes: [wikiNode(id, "doc", "Doc")] };
+    },
+    getKnowledgeNode: async () => {
+      throw new Error("not used here");
+    },
+    getKnowledgeNodeByPath: async () => {
+      throw new Error("not used here");
+    },
+  };
+  const staggeredAdapter = createWikiAdapter({ createClient: async () => staggered });
+  const staggeredCache = createInMemoryReferenceCache();
+  await staggeredAdapter.warmup(staggeredCache, { signal: controller2.signal });
+  assert.deepEqual(treeSlugs, ["eng", "iso-27001-dokumente"], "the third space is never fetched");
+  assert.deepEqual(
+    staggeredCache.read("wiki").map((e) => e.key),
+    ["eng/doc", "iso-27001-dokumente/doc"],
+    "both in-flight trees landed their writes",
+  );
+
+  // A failed seed search: no tree calls, no write, warmup resolves.
+  const { client: searchFail, treeCalls: searchFailTrees } = fakeWikiClient({ hits: [], trees: {}, failSearch: true });
+  const searchFailAdapter = createWikiAdapter({ createClient: async () => searchFail });
+  const searchFailCache = createInMemoryReferenceCache();
+  await searchFailAdapter.warmup(searchFailCache);
+  assert.deepEqual(searchFailTrees, []);
+  assert.deepEqual(searchFailCache.read("wiki"), []);
+
+  // A space whose tree fails mid-warmup: the other spaces still land.
+  const { client: treeFail } = fakeWikiClient({
+    hits: [
+      { id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" },
+      { id: ISO_IT_ID, space_slug: "iso-27001-dokumente", title: "IT-Sicherheitskonzept" },
+    ],
+    trees: {
+      eng: engTree(),
+      "iso-27001-dokumente": [wikiNode(ISO_IT_ID, "it-sicherheitskonzept", "IT-Sicherheitskonzept")],
+    },
+    failTrees: ["eng"],
+  });
+  const treeFailAdapter = createWikiAdapter({ createClient: async () => treeFail });
+  const treeFailCache = createInMemoryReferenceCache();
+  await treeFailAdapter.warmup(treeFailCache);
+  assert.deepEqual(
+    treeFailCache.read("wiki").map((e) => e.key),
+    ["iso-27001-dokumente/it-sicherheitskonzept"],
+    "the failing space is skipped, the healthy one lands",
+  );
+
+  // Missing credentials: createDefaultAuraClient throws. Warmup no-ops
+  // (resolves, empty cache, nothing thrown into the session).
+  const noCreds = createWikiAdapter({
+    createClient: async () => {
+      throw new Error("missing PAT");
+    },
+  });
+  const emptyCache = createInMemoryReferenceCache();
+  await noCreds.warmup(emptyCache);
+  assert.deepEqual(emptyCache.read("wiki"), []);
+}
+
+console.log("createWikiAdapter warmup: ok");
 
 // ---------------------------------------------------------------------------
 // Factory is a function (smoke; the factory itself is pi-runtime verified)
