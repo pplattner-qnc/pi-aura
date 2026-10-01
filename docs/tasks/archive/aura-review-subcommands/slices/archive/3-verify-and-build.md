@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: done
 size: s
-blocked_by:
+legacy_blocked_by:
 - wire-aura-mjs-review-subcommands
 ---
 

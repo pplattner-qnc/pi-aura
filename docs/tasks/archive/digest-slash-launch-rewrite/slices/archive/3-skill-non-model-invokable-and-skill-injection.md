@@ -1,12 +1,12 @@
 ---
 kind: slice
 slug: skill-non-model-invokable-and-skill-injection
-title: Set aura-digest disable-model-invocation: true + confirm zero idle context
+title: "Set aura-digest disable-model-invocation: true + confirm zero idle context"
 task: ../task.md
 mode: hitl
 size: s
 status: done
-blocked_by: [digest-fetch-and-save-tools]
+legacy_blocked_by: [digest-fetch-and-save-tools]
 ---
 
 ## End-to-end behavior

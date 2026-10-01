@@ -5,7 +5,7 @@ title: Rewrite the aura-digest SKILL.md body to call tools (no bash shell-outs)
 task: ../task.md
 mode: hitl
 size: m
-blocked_by: [skill-non-model-invokable-and-skill-injection]
+legacy_blocked_by: [skill-non-model-invokable-and-skill-injection]
 status: done
 ---
 

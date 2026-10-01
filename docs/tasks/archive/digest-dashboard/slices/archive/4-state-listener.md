@@ -5,7 +5,7 @@ title: Build the state.json fs.watch listener (forward action_click → pi.sendM
 task: ../task.md
 mode: afk
 size: m
-blocked_by: [dumb-file-server]
+legacy_blocked_by: [dumb-file-server]
 status: done
 ---
 

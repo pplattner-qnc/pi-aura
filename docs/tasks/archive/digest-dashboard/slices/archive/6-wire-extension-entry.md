@@ -5,7 +5,7 @@ title: Wire /digest-dashboard start (spawn detached server + open browser + star
 task: ../task.md
 mode: afk
 size: m
-blocked_by: [teardown-subcommand]
+legacy_blocked_by: [teardown-subcommand]
 status: done
 ---
 

@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 size: m
 status: done
-blocked_by: [slash-command-and-tool-activation]
+legacy_blocked_by: [slash-command-and-tool-activation]
 ---
 
 ## End-to-end behavior

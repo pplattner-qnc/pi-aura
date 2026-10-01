@@ -2,12 +2,11 @@
  * Engineering Rules Extension
  *
  * Reads the repo's `.mdc` Cursor rule files from `<cwd>/.cursor/rules/`
- * (recursively) and dispatches each by its frontmatter attach mode, provides
- * a universal `@mention` overlay for all loaded rules, and lists the
- * non-auto-loaded rules in the system prompt every turn.
+ * (recursively) and dispatches each by its frontmatter attach mode, and
+ * lists the non-auto-loaded rules in the system prompt every turn.
  *
  * Syncing the `.mdc` files into a repo's `.cursor/rules/` is a per-repo
- * concern — this package ships no rules of its own. The extension reads
+ * concern: this package ships no rules of its own. The extension reads
  * whatever the repo (its cwd) has deposited there. Until a repo populates
  * `.cursor/rules/`, the extension no-ops (no rules are injected).
  *
@@ -15,18 +14,26 @@
  *   - `alwaysApply: true`  → append the rule body to the system prompt every turn.
  *   - `globs:` + `alwaysApply: false` → list (path + globs) in the system
  *     prompt every turn; the agent `read`s the rule on demand.
- *   - neither (manual) → list in the system prompt + `@mention`-able.
+ *   - neither (manual) → list in the system prompt + mention-able.
  *
- * Universal `@mention` overlay (all loaded rules):
- *   - `ctx.ui.addAutocompleteProvider` with `triggerCharacters: ["@", ...]`.
- *   - When the text after `@` starts with `rule:`, offer the loaded rules;
- *     selecting one inserts `@rule:<name>`.
- *   - Defer to the built-in path provider when the token after `@` doesn't
- *     start with `rule:` (avoid clobbering pi's `@file` path syntax).
+ * Autocomplete and inline expansion for rule mentions live in the shared
+ * reference engine (`extensions/aura-references.ts`): typing `#rule:` or
+ * the legacy `@rule:` opens the engine's provider over the same loaded
+ * rules, and on submit the mention expands to a `<rule-ref>` element.
+ * This file's own `@rule:` autocomplete provider was deleted when the
+ * engine registered the `@rule:` alias (atomic landing: the alias and the
+ * old provider would double-answer the same tokens). What stays here:
+ * rule loading, frontmatter dispatch, and the always-on/glob system-prompt
+ * sections below.
  *
- * `before_agent_start` `@rule:` resolver — scans the user's prompt for
- * `@rule:<name>` tokens and appends the corresponding rule body to the
- * system prompt for that turn.
+ * `before_agent_start` rule resolver: scans the user's prompt for rule
+ * mentions and appends the corresponding rule bodies to the system prompt
+ * for that turn. Three mention forms are matched: legacy `@rule:<name>`
+ * tokens, new `#rule:<name>` tokens (the shared reference engine's
+ * syntax), and expanded `<rule-ref name="...">` elements (the reference
+ * engine's input transform rewrites `#rule:` mentions before
+ * `before_agent_start` runs, so the resolver must match both the raw tokens
+ * and the expanded elements).
  *
  * Configurable skip (`aura.cursorRules.ignore`):
  *   - An array of glob patterns matched against the rule path **relative to
@@ -36,68 +43,18 @@
  *     CWDs) and `<cwd>/.pi/settings.json` (project-local); the two lists are
  *     unioned, so a rule matching either is skipped.
  *   - Lives under the `aura` settings block (this package's namespace); the
- *     setting is repo-controlled, not package-controlled — there is no
+ *     setting is repo-controlled, not package-controlled: there is no
  *     package-wide ignore list and no drift manifest.
  *
  * Rules are resources, NOT pi skills (no `/skill:<rule>`). One concern per
- * extension — this file owns rule dispatch + `@mention`; it does not touch
- * the aura-skill reminder (that's `aura-skill-instruction.ts`).
+ * extension: this file owns rule loading + dispatch + body injection; it
+ * does not touch the aura-skill reminder (that's `aura-skill-instruction.ts`).
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-// ---------------------------------------------------------------------------
-// Autocomplete types (minimal structural shapes)
-// ---------------------------------------------------------------------------
-// `@earendil-works/pi-tui` exports AutocompleteItem / AutocompleteProvider /
-// AutocompleteSuggestions, but this package only declares
-// `@earendil-works/pi-coding-agent` as a peer dep — importing from `pi-tui`
-// directly would be an undeclared transitive dep. The shapes are structurally
-// typed here (matching pi-tui's interface) so the extension compiles against
-// the declared peer dep only. `addAutocompleteProvider` is structurally typed
-// by `ExtensionAPI`, so a compatible provider shape is accepted.
-
-interface AutocompleteItem {
-  value: string;
-  label: string;
-  description?: string;
-}
-
-interface AutocompleteSuggestions {
-  items: AutocompleteItem[];
-  prefix: string;
-}
-
-interface GetSuggestionsOptions {
-  signal: AbortSignal;
-  force?: boolean;
-}
-
-interface AutocompleteProvider {
-  /** Characters that should naturally trigger this provider at token boundaries. */
-  triggerCharacters?: string[];
-  getSuggestions(
-    lines: string[],
-    cursorLine: number,
-    cursorCol: number,
-    options: GetSuggestionsOptions,
-  ): Promise<AutocompleteSuggestions | null>;
-  applyCompletion(
-    lines: string[],
-    cursorLine: number,
-    cursorCol: number,
-    item: AutocompleteItem,
-    prefix: string,
-  ): { lines: string[]; cursorLine: number; cursorCol: number };
-  shouldTriggerFileCompletion?(
-    lines: string[],
-    cursorLine: number,
-    cursorCol: number,
-  ): boolean;
-}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -123,9 +80,6 @@ const SETTINGS_BLOCK = "aura";
 const SETTINGS_KEY = "cursorRules";
 const IGNORE_FIELD = "ignore";
 
-/** The `@mention` token prefix. */
-const RULE_TOKEN_PREFIX = "rule:";
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -133,8 +87,13 @@ const RULE_TOKEN_PREFIX = "rule:";
 type AttachMode = "always" | "glob" | "manual";
 
 interface Rule {
-  /** Rule name (filename without `.mdc`). */
+  /** Rule name (filename without `.mdc`). The canonical token key for
+   *  `#rule:`/`@rule:` mentions. */
   name: string;
+  /** Display title: the frontmatter `name` when present, falling back to
+   *  the filename-derived name. The reference engine's `<rule-ref>`
+   *  element text. */
+  displayName?: string;
   /** Absolute path to the `.mdc` file. */
   path: string;
   /** Path relative to RULES_DIR (no leading sep), for the system-prompt listing
@@ -389,8 +348,14 @@ export function loadRules(cwd: string): Rule[] {
     // name = filename without ".mdc" (last path segment, extension stripped).
     const lastSeg = relWithExt.split("/").pop() ?? relWithExt;
     const name = lastSeg.endsWith(".mdc") ? lastSeg.slice(0, -4) : lastSeg;
+    // Display title: the frontmatter `name` when it carries one (a
+    // non-empty string), else undefined so readers fall back to the
+    // filename-derived name.
+    const displayName =
+      typeof fm.name === "string" && fm.name.trim() !== "" ? fm.name : undefined;
     rules.push({
       name,
+      displayName,
       path,
       relPath: relWithExt,
       attach,
@@ -428,101 +393,55 @@ export function buildListedRulesSection(rules: Rule[]): string {
     const globsStr = r.globs.length > 0 ? ` (globs: ${r.globs.join(", ")})` : "";
     return `- ${RULES_DIR}/${r.relPath}${globsStr}`;
   }).join("\n");
-  return `\n\n## Engineering Rules (on-demand)\n\nThe following house rules are available but not auto-loaded. Use the \`read\` tool to load a rule when its topic is relevant, or mention it with \`@rule:<name>\` to inject its body for this turn.\n\n${lines}\n`;
+  return `\n\n## Engineering Rules (on-demand)\n\nThe following house rules are available but not auto-loaded. Use the \`read\` tool to load a rule when its topic is relevant, or mention it with \`#rule:<name>\` (legacy \`@rule:<name>\`) to inject its body for this turn.\n\n${lines}\n`;
 }
 
 // ---------------------------------------------------------------------------
-// Autocomplete provider (universal `@mention` overlay)
+// `@rule:`/`#rule:`/`<rule-ref>` resolver (before_agent_start)
 // ---------------------------------------------------------------------------
 
-/** Extract the `@rule:<token>` text after the cursor, or `null` if the `@`
- *  token isn't a `rule:` token (so we defer to the built-in path provider). */
-export function extractRuleToken(textBeforeCursor: string): string | null {
-  // Match `@rule:<chars>` where the token starts with `rule:`. We require the
-  // `@` to be at a token boundary (start or after whitespace) so we don't
-  // hijack `@` inside emails/paths.
-  const match = textBeforeCursor.match(/(?:^|[ \t])@(rule:[^\s@]*)$/);
-  return match ? (match[1] ?? "") : null;
-}
-
-function formatRuleItem(rule: Rule): AutocompleteItem {
-  return {
-    value: `@${RULE_TOKEN_PREFIX}${rule.name}`,
-    label: `@rule:${rule.name}`,
-    description: rule.globs.length > 0
-      ? `(glob: ${rule.globs.join(", ")})`
-      : "(manual)",
-  };
-}
-
-function createRuleAutocompleteProvider(
-  current: AutocompleteProvider,
-  getRules: () => Rule[],
-): AutocompleteProvider {
-  return {
-    triggerCharacters: ["@"],
-    async getSuggestions(lines, cursorLine, cursorCol, options): Promise<AutocompleteSuggestions | null> {
-      const line = lines[cursorLine] ?? "";
-      const beforeCursor = line.slice(0, cursorCol);
-      const token = extractRuleToken(beforeCursor);
-      if (token === null) {
-        // Not a `@rule:` token — defer to the built-in path provider (don't
-        // clobber pi's `@file` path syntax).
-        return current.getSuggestions(lines, cursorLine, cursorCol, options);
-      }
-      const rules = getRules();
-      if (rules.length === 0) {
-        return current.getSuggestions(lines, cursorLine, cursorCol, options);
-      }
-      // token is `rule:<partial-name>`; the prefix we replace is `@rule:<partial>`.
-      const afterAt = token; // e.g. "rule:track"
-      const partial = afterAt.slice(RULE_TOKEN_PREFIX.length); // e.g. "track"
-      const matches = partial
-        ? rules.filter((r) => r.name.toLowerCase().includes(partial.toLowerCase()))
-        : rules;
-      if (matches.length === 0) {
-        return current.getSuggestions(lines, cursorLine, cursorCol, options);
-      }
-      return {
-        items: matches.map(formatRuleItem),
-        prefix: `@${afterAt}`,
-      };
-    },
-    applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
-      return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
-    },
-    shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
-      // Defer to the built-in provider's decision unless we're actively
-      // completing a `@rule:` token.
-      const line = lines[cursorLine] ?? "";
-      const beforeCursor = line.slice(0, cursorCol);
-      if (extractRuleToken(beforeCursor) !== null) return false;
-      return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
-// `@rule:` resolver (before_agent_start)
-// ---------------------------------------------------------------------------
-
-/** Scan the prompt for `@rule:<name>` tokens and append the corresponding
- *  rule bodies to the system prompt for that turn. Returns the text to append
- *  (or empty string if no `@rule:` tokens are present). */
-export function resolveRuleMentions(prompt: string, rules: Rule[]): string {
-  const mentioned = new Set<string>();
-  const re = /@(?:rule:)([a-z0-9-]+)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(prompt)) !== null) {
-    mentioned.add((m[1] ?? "").toLowerCase());
+/** Collect the mentioned rule names from a prompt, lowercased, in
+ *  first-seen order. Three mention forms are matched:
+ *
+ *  - legacy `@rule:<name>` tokens (the original grammar, unchanged),
+ *  - new `#rule:<name>` tokens (the shared reference engine's syntax),
+ *    and
+ *  - expanded `<rule-ref name="...">` elements: the reference engine's
+ *    input transform rewrites `#rule:` mentions to `<rule-ref>` elements
+ *    BEFORE `before_agent_start` runs, so a submitted mention usually
+ *    arrives here already expanded. The raw token form still matters for
+ *    mentions the transform left as typed (unresolvable names).
+ *
+ *  The token grammar stops at non-name characters (letters, digits,
+ *  hyphens), so trailing punctuation is lenient, matching the legacy
+ *  `@rule:` behavior. The same rule through any mix of forms is one
+ *  name. */
+export function collectRuleMentionNames(prompt: string): string[] {
+  const names = new Set<string>();
+  const tokenRe = /[@#]rule:([a-z0-9-]+)/gi;
+  for (const m of prompt.matchAll(tokenRe)) {
+    names.add((m[1] ?? "").toLowerCase());
   }
-  if (mentioned.size === 0) return "";
+  const elementRe = /<rule-ref\b[^>]*\bname="([^"]*)"/gi;
+  for (const m of prompt.matchAll(elementRe)) {
+    names.add((m[1] ?? "").toLowerCase());
+  }
+  return Array.from(names);
+}
+
+/** Scan the prompt for rule mentions (tokens and expanded elements; see
+ *  collectRuleMentionNames) and append the corresponding rule bodies to
+ *  the system prompt for that turn. Returns the text to append (or empty
+ *  string when no mentioned rule resolves). */
+export function resolveRuleMentions(prompt: string, rules: Rule[]): string {
+  const mentioned = collectRuleMentionNames(prompt);
+  if (mentioned.length === 0) return "";
   const byName = new Map(rules.map((r) => [r.name.toLowerCase(), r]));
   const blocks: string[] = [];
   for (const name of mentioned) {
     const rule = byName.get(name);
     if (rule) {
-      blocks.push(`### Rule: ${rule.name} (@rule:${name})\n\n${rule.body.trim()}`);
+      blocks.push(`### Rule: ${rule.name}\n\n${rule.body.trim()}`);
     }
   }
   if (blocks.length === 0) return "";
@@ -539,16 +458,13 @@ export default function (pi: ExtensionAPI): void {
   let rules: Rule[] = [];
 
   pi.on("session_start", async (_event, ctx) => {
+    // Rules are loaded once at session start (the files don't change during a
+    // session) and reloaded on /reload (which re-emits session_start). A repo
+    // without `.cursor/rules/` loads an empty set: no sections, no body
+    // injection, and nothing offered through the engine's rule kind either
+    // (it loads the same directory). Do not notify: the empty state is
+    // expected until the repo syncs its rules.
     rules = loadRules(ctx.cwd);
-    if (rules.length === 0) {
-      // No rules in <cwd>/.cursor/rules/ — the extension no-ops. Do not
-      // notify: this is the expected state until the repo syncs its rules.
-      return;
-    }
-    // Register the universal `@mention` overlay for all rules.
-    ctx.ui.addAutocompleteProvider((current) =>
-      createRuleAutocompleteProvider(current, () => rules),
-    );
   });
 
   pi.on("before_agent_start", async (event, _ctx) => {

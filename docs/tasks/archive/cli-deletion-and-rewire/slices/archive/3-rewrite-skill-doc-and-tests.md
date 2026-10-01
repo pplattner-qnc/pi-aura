@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: todo
 size: m
-blocked_by: [drop-dead-shared-exports]
+legacy_blocked_by: [drop-dead-shared-exports]
 ---
 
 ## End-to-end behavior

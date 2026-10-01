@@ -3,7 +3,7 @@ kind: slice
 slug: edge-fixes
 size: s
 status: done
-blocked_by: []
+legacy_blocked_by: []
 ---
 
 # Slice 1 — residual Cursor-edge fixes (all 14 skills, in place)

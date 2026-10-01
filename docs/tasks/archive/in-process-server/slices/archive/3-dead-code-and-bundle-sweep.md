@@ -6,7 +6,7 @@ task: ../task.md
 mode: afk
 status: todo
 size: s
-blocked_by: [backing-in-memory]
+legacy_blocked_by: [backing-in-memory]
 ---
 
 ## End-to-end behavior

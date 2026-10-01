@@ -5,7 +5,7 @@ title: Rewrite SKILL.md Step 4 to the interactive dashboard flow (start → wait
 task: ../task.md
 mode: hitl
 size: m
-blocked_by: []
+legacy_blocked_by: []
 status: done
 ---
 

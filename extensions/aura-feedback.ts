@@ -45,9 +45,10 @@
  * `skills/core/aura/resources/usecases/feedback-submission.md`.
  *
  * One concern per extension — this file owns the feedback-proposal tool and
- * its interactive sign-off; it does not touch the `@AURA-<number>` overlay
- * (`aura-tasks.ts`), the skill reminder (`aura-skill-instruction.ts`), or the
- * engineering-rules dispatch.
+ * its interactive sign-off; it does not touch the reference engine
+ * (`aura-references.ts`, which also owns the legacy `@AURA-<number>` alias),
+ * the reachability probe (`aura-tasks.ts`), the skill reminder
+ * (`aura-skill-instruction.ts`), or the engineering-rules dispatch.
  */
 
 import { appendFile, mkdir } from "node:fs/promises";
@@ -983,7 +984,7 @@ async function commentScreen(
 }
 
 // ---------------------------------------------------------------------------
-// Aura client + local log (dynamic-import seams, mirroring aura-tasks.ts)
+// Aura client + local log (dynamic-import seams, mirroring aura-references.ts)
 // ---------------------------------------------------------------------------
 
 /** Submit the payload via the shared AuraClient. The client is built from
@@ -995,8 +996,8 @@ async function createFeedbackInAura(payload: CreateFeedbackInput): Promise<Feedb
   // Dynamic import: @pi-aura/shared/aura-client uses .js extension specifiers
   // internally, which Node's experimental strip-types loader cannot resolve.
   // Pi's extension runtime handles static imports; the dynamic seam keeps the
-  // unit-test entry point free of the client dependency (same pattern as
-  // aura-tasks.ts importing createDefaultAuraClient).
+  // unit-test entry point free of the client dependency (the same seam
+  // aura-references.ts uses for its task adapter).
   const { createDefaultAuraClient } = await import("@pi-aura/shared/aura-client");
   const client = await createDefaultAuraClient();
   return client.createFeedback(payload);

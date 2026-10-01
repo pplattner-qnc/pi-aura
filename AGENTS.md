@@ -36,7 +36,7 @@ instruction. User-invoked skills are phrased as instructions for the human
 ## Task-workflow
 
 Work is planned and executed via a dependency-aware task graph under
-`docs/tasks/` (maps, tasks, slices, archive). The workflow skills
+`docs/tasks/` (efforts with tickets, tasks, and archive). The workflow skills
 (setup-workflow, task-overview, wayfinder, implement-task, finalize-task,
 to-spec, to-tickets, tdd, code-review, etc.) come from the
 `task-workflow` package and operate on this tree. `docs/tasks/state.yaml`

@@ -6,7 +6,7 @@ task: ../task.md
 mode: hitl
 status: done
 size: l
-blocked_by: []
+legacy_blocked_by: []
 ---
 
 ## End-to-end behavior

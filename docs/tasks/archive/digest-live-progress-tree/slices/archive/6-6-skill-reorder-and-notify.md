@@ -6,7 +6,7 @@ task: ../task.md
 mode: hitl
 status: done
 size: s
-blocked_by: [3-bundle-emits-tree, 4-svelte-tree-view]
+legacy_blocked_by: [3-bundle-emits-tree, 4-svelte-tree-view]
 ---
 
 ## End-to-end behavior

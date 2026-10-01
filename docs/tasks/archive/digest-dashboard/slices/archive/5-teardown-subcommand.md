@@ -5,7 +5,7 @@ title: Implement the /digest-dashboard stop teardown (kill PID + delete state.js
 task: ../task.md
 mode: afk
 size: s
-blocked_by: [state-listener]
+legacy_blocked_by: [state-listener]
 status: done
 ---
 
