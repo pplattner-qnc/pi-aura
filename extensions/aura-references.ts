@@ -357,6 +357,14 @@ export interface KindAdapter {
   /** Best-effort initial cache population at `session_start` (fire-and-
    *  forget; never rejects). Kinds without a server skip it. */
   warmup?(cache: ReferenceCache, options?: { signal?: AbortSignal }): Promise<void>;
+  /** Hide the kind from the bare-`#` kind menu (the stage-1 suggestions the
+   *  provider shows when only `#` plus an optional kind-name prefix is
+   *  typed). Hidden kinds stay fully functional when typed directly
+   *  (`#rule:` still autocompletes and expands); only the menu omits them. */
+  readonly kindMenuHidden?: boolean;
+  /** One-line description shown in the kind menu row (what you get when
+   *  you pick this kind). */
+  readonly kindMenuDescription?: string;
 }
 
 /** The registry: kind prefixes, adapters, and the legacy alias table are
@@ -483,9 +491,57 @@ export function extractReferenceToken(
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// Filtering / ranking (pure)
-// ---------------------------------------------------------------------------
+/**
+ * Stage-1 kind-menu extraction: the partial kind name typed after a bare
+ * `#` (possibly empty), or null when the bare-`#` kind menu must not show
+ * and the provider defers to the built-in provider instead.
+ *
+ * Runs only after stage-2 (`extractReferenceToken`, the full `#kind:` form)
+ * declined: the menu never shadows a typed `#kind:` token. `#` must sit at
+ * a token boundary (start of line or after whitespace) and everything after
+ * it to the cursor must be letters only, case-insensitively prefixing at
+ * least one kind that is not `kindMenuHidden`. So `#`, `#t`, and `#task`
+ * offer the menu, while `# x` (a heading being typed), `foo#t` (mid-word),
+ * `#42`, and `#r` (rule is hidden) defer.
+ *
+ * Returns the RAW typed partial (not lowercased): the completion prefix
+ * must replace exactly what the user typed; filtering is case-insensitive.
+ */
+export function extractKindMenuPartial(
+  textBeforeCursor: string,
+  registry: ReferenceRegistry,
+): string | null {
+  const match = textBeforeCursor.match(/(?:^|[ \t])#([A-Za-z]*)$/);
+  if (!match) return null;
+  const partial = (match[1] ?? "").toLowerCase();
+  for (const [kind, adapter] of registry.kinds) {
+    if (adapter.kindMenuHidden) continue;
+    if (kind.toLowerCase().startsWith(partial)) return match[1] ?? "";
+  }
+  return null;
+}
+
+/** The stage-1 kind-menu rows: one per non-hidden kind whose name
+ *  case-insensitively starts with the typed partial, in registry order.
+ *  The inserted value carries the colon (`#task:`), so selecting a row
+ *  drops the user straight into the kind's stage-2 item autocomplete. */
+export function kindMenuItems(
+  registry: ReferenceRegistry,
+  partial: string,
+): AutocompleteItem[] {
+  const lower = partial.toLowerCase();
+  const rows: AutocompleteItem[] = [];
+  for (const [kind, adapter] of registry.kinds) {
+    if (adapter.kindMenuHidden) continue;
+    if (!kind.toLowerCase().startsWith(lower)) continue;
+    rows.push({
+      value: `#${kind}:`,
+      label: `#${kind}:`,
+      description: adapter.kindMenuDescription ?? "",
+    });
+  }
+  return rows;
+}
 
 /** Maximum suggestions to render in the autocomplete pane at once. */
 export const MAX_SUGGESTIONS = 20;
@@ -864,6 +920,7 @@ export function createTaskAdapter(options: {
 
   return {
     kind: TASK_KIND,
+    kindMenuDescription: "Aura task by key or title",
 
     // Tasks accept any non-space partial after `#task:`.
     parsePartial(partial) {
@@ -1022,6 +1079,10 @@ export function createRuleAdapter(options: { getRules: () => Rule[] }): KindAdap
   return {
     kind: RULE_KIND,
     local: true,
+    // The rule kind opts out of the bare-`#` kind menu (the user asked for
+    // task/artifact/wiki suggestions only); typing `#rule:` directly still
+    // works end to end.
+    kindMenuHidden: true,
 
     // Rules accept any non-space partial after `#rule:`.
     parsePartial(partial) {
@@ -1169,6 +1230,7 @@ export function createArtifactAdapter(options: {
 
   return {
     kind: ARTIFACT_KIND,
+    kindMenuDescription: "Aura artifact by uuid",
 
     // Artifacts accept any non-space partial after `#artifact:` (uuid
     // prefixes and title substrings both type).
@@ -1522,6 +1584,7 @@ export function createWikiAdapter(options: {
 
   return {
     kind: WIKI_KIND,
+    kindMenuDescription: "Aura wiki page by space/path",
 
     // Both identity forms are wiki-shaped and pass through (a hand-typed
     // uuid partial is recognized, never declined): the shape
@@ -1800,6 +1863,19 @@ export function createReferenceAutocompleteProvider(
       const beforeCursor = line.slice(0, cursorCol);
       const token = extractReferenceToken(beforeCursor, registry);
       if (token === null) {
+        // Stage 1: the bare-`#` kind menu. Only a `#` (at a token boundary)
+        // plus an optional kind-name prefix lands here; picking a row inserts
+        // `#kind:` and the next query runs the kind's stage-2 autocomplete
+        // below. The menu never touches the cache or Aura, so it renders
+        // identically in a credential-less session. Kinds flagged
+        // `kindMenuHidden` are omitted (the rule kind opts out).
+        const menuPartial = extractKindMenuPartial(beforeCursor, registry);
+        if (menuPartial !== null) {
+          return {
+            items: kindMenuItems(registry, menuPartial),
+            prefix: `#${menuPartial}`,
+          };
+        }
         // Not a reference token: defer (don't clobber pi's built-in syntaxes).
         return current.getSuggestions(lines, cursorLine, cursorCol, options);
       }
@@ -1843,10 +1919,11 @@ export function createReferenceAutocompleteProvider(
     },
     shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
       // Defer to the built-in provider's decision unless we're actively
-      // completing a reference token.
+      // completing a reference token or the bare-`#` kind menu.
       const line = lines[cursorLine] ?? "";
       const beforeCursor = line.slice(0, cursorCol);
       if (extractReferenceToken(beforeCursor, registry) !== null) return false;
+      if (extractKindMenuPartial(beforeCursor, registry) !== null) return false;
       return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
     },
   };

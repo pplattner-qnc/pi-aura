@@ -3999,4 +3999,73 @@ console.log("REFERENCE_INSTRUCTION wiki-ref shape: ok");
 assert.equal(typeof auraReferences, "function", "default export is a factory function");
 console.log("factory: ok");
 
+// ---------------------------------------------------------------------------
+// Stage-1 kind menu (bare `#` suggests the offered kinds)
+// ---------------------------------------------------------------------------
+
+{
+  // A registry with all four production adapters, mirroring the factory.
+  const registry = createReferenceRegistry([
+    createTaskAdapter({ createClient: noopClient }),
+    createRuleAdapter({ getRules: () => [] }),
+    createArtifactAdapter({ createClient: noopClient }),
+    createWikiAdapter({ createClient: noopClient }),
+  ]);
+  const current = fakeCurrent();
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () => null);
+  const defer = current.calls.suggestions;
+
+  // Bare `#` at a token boundary: one row per offered kind (task, artifact,
+  // wiki; the rule kind is hidden from the menu), values carry the colon so
+  // selection drops into the kind's item autocomplete. The menu needs no
+  // cache: it renders identically in a credential-less session (null cache).
+  const bare = await suggestAt(provider, "#", 1);
+  assert.deepEqual(
+    bare?.items.map((i) => i.value),
+    ["#task:", "#artifact:", "#wiki:"],
+    "bare # offers exactly task, artifact, wiki (rule hidden)",
+  );
+  assert.equal(bare?.items[0]?.description, "Aura task by key or title");
+  assert.equal(bare?.prefix, "#");
+  assert.equal(current.calls.suggestions, defer, "the menu never defers to the built-in provider");
+
+  // Partial kind names filter the menu; matching is case-insensitive and the
+  // prefix is the RAW typed text (only the typed token is replaced).
+  assert.deepEqual((await suggestAt(provider, "#t", 2))?.items.map((i) => i.value), ["#task:"]);
+  assert.deepEqual((await suggestAt(provider, "#a", 2))?.items.map((i) => i.value), ["#artifact:"]);
+  assert.deepEqual((await suggestAt(provider, "#w", 2))?.items.map((i) => i.value), ["#wiki:"]);
+  const cased = await suggestAt(provider, "#T", 2);
+  assert.deepEqual(cased?.items.map((i) => i.value), ["#task:"]);
+  assert.equal(cased?.prefix, "#T", "the completion prefix keeps the typed casing");
+
+  // A complete kind name without the colon still offers (selection adds the
+  // colon); with the colon it is stage 2 and the menu must not shadow it.
+  assert.deepEqual((await suggestAt(provider, "#task", 5))?.items.map((i) => i.value), ["#task:"]);
+  assert.equal(current.calls.suggestions, defer, "`#task:`-shaped queries never hit the menu");
+
+  // Deferral contract: the rule kind is hidden (typing `#r`/`#rule` offers
+  // nothing, while direct `#rule:` input keeps working end to end), and
+  // everything that is not a kind prefix defers to the built-in provider.
+  for (const [line, col] of [["#r", 2], ["#ru", 3], ["#rule", 5], ["#x", 2], ["#42", 3], ["# task", 7], ["foo#t", 5], ["##", 2]] as const) {
+    await suggestAt(provider, line, col);
+  }
+  assert.equal(current.calls.suggestions, defer + 8, "every non-menu `#` defers to the built-in provider");
+  const ruleDirect = await suggestAt(provider, "#rule:", 6);
+  assert.deepEqual(ruleDirect?.items.map((i) => i.value), ["file.txt"], "`#rule:` goes to stage 2, which defers on the empty rule set (menu never shadows it)");
+  assert.equal(current.calls.suggestions, defer + 9, "`#rule:` goes to stage 2, not the menu");
+
+  // shouldTriggerFileCompletion claims both stages and defers otherwise.
+  assert.equal(provider.shouldTriggerFileCompletion(["#"], 0, 1), false, "bare # claims completion");
+  assert.equal(provider.shouldTriggerFileCompletion(["#task:"], 0, 6), false, "stage 2 claims completion");
+  assert.equal(provider.shouldTriggerFileCompletion(["# Heading"], 0, 9), true, "headings defer to the built-in decision");
+  assert.equal(current.calls.fileCompletion >= 1, true, "the deferred call reached the built-in provider");
+
+  // Selection delegation: applying a menu row is the built-in's job, unchanged.
+  const lines = ["#t"];
+  provider.applyCompletion(lines, 0, 2, { value: "#task:", label: "#task:" }, "#t");
+  assert.equal(current.calls.applyCompletion, 1, "applyCompletion delegates to the built-in provider");
+}
+
+console.log("kind menu: bare # offers task/artifact/wiki, rule hidden: ok");
+
 console.log("\nall aura-references tests passed");
