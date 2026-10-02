@@ -9,6 +9,7 @@ title: docs/tasks
 ## Live
 
 - add-capacity-subcommands
+- aura-env-override
 - refine-phase-transition
 
 ## Archived
