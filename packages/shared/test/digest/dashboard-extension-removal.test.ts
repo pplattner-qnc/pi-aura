@@ -44,3 +44,17 @@ describe("ticket: dashboard-extension-removal — package manifest seam", () => 
     );
   });
 });
+
+describe("ticket: dashboard-extension-removal — gitignore seam", () => {
+  it("carries no digest-dashboard exception lines", () => {
+    const gitignore = fs.readFileSync(path.join(repoRoot, ".gitignore"), "utf-8");
+    const offending = gitignore
+      .split("\n")
+      .filter((line) => line.includes("digest-dashboard"));
+    assert.deepEqual(
+      offending,
+      [],
+      ".gitignore should not carry digest-dashboard exception lines",
+    );
+  });
+});
