@@ -31,7 +31,7 @@ function readPiExtensions(): string[] {
   return pkg.pi?.extensions ?? [];
 }
 
-describe("ticket: dashboard-extension-removal — package manifest seam", () => {
+describe("ticket: dashboard-extension-removal, package manifest seam", () => {
   it("registers no digest-dashboard extension", () => {
     const extensions = readPiExtensions();
     const dashboardEntry = extensions.find((entry) =>
@@ -45,7 +45,7 @@ describe("ticket: dashboard-extension-removal — package manifest seam", () => 
   });
 });
 
-describe("ticket: dashboard-extension-removal — gitignore seam", () => {
+describe("ticket: dashboard-extension-removal, gitignore seam", () => {
   it("carries no digest-dashboard exception lines", () => {
     const gitignore = fs.readFileSync(path.join(repoRoot, ".gitignore"), "utf-8");
     const offending = gitignore
@@ -55,6 +55,26 @@ describe("ticket: dashboard-extension-removal — gitignore seam", () => {
       offending,
       [],
       ".gitignore should not carry digest-dashboard exception lines",
+    );
+  });
+});
+
+describe("ticket: dashboard-extension-removal, tracked-tree seam", () => {
+  it("has no digest-dashboard extension package directory", () => {
+    const dir = path.join(repoRoot, ".pi", "extensions", "digest-dashboard");
+    assert.equal(
+      fs.existsSync(dir),
+      false,
+      ".pi/extensions/digest-dashboard should be deleted",
+    );
+  });
+
+  it("has no digest-dashboard vitest suite directory", () => {
+    const dir = path.join(repoRoot, "test", "digest-dashboard");
+    assert.equal(
+      fs.existsSync(dir),
+      false,
+      "test/digest-dashboard should be deleted with the extension",
     );
   });
 });
