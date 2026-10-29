@@ -23,6 +23,11 @@ Audit the root docs claim by claim:
   description.
 - AGENTS.md: the `skills/core/aura-digest` line ("removal handles"); the
   rest against current Aura.
+- docs/testing.md and docs/dev-env.md (amended into this task at
+  remove-digest spec time): after remove-digest rewrites their digest and
+  Atlassian sections, audit the remaining claims: the keyring-era bundle
+  externals claim, the runner and mock-convention descriptions, and
+  anything else that no longer matches the post-removal tree.
 
 Mark each digest-related claim "removal handles"; audit the rest against
 current Aura and the post-removal tree.
@@ -33,7 +38,8 @@ The root-docs update tickets.
 
 ## Trusted sources
 
-- The three files.
+- The five files (README.md, CONTEXT.md, AGENTS.md, docs/testing.md,
+  docs/dev-env.md).
 - The live server facts (the mcp-inventory-drift report).
 - package.json and Taskfile.yml for what the post-removal package actually
   ships.

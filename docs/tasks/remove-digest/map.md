@@ -50,8 +50,9 @@ audit-update-aura-instructions finalize and covers both efforts.
   - `scripts/morning-fetch.js` and `scripts/src/followup-working-on.test.ts`
   - the `settings.digest` namespace in `packages/shared/src/settings.ts`
   - inside extensions that stay: the digest settings + guided-walkthrough
-    section of `aura-secrets.ts`, the digest mentions in
-    `aura-skill-instruction.ts`, and all of `atlassian-provision.ts`
+    section of `aura-secrets.ts` and all of `atlassian-provision.ts` (spec
+    exploration found no digest references in `aura-skill-instruction.ts`;
+    the original inventory line naming it was wrong)
   - the Atlassian provisioning docs `docs/atlassian-api-token.md` and
     `docs/atlassian-api-token-walkthrough.md`
   - test scaffolding: the digest-dashboard config in `vitest.config.ts`,
@@ -60,7 +61,10 @@ audit-update-aura-instructions finalize and covers both efforts.
   - root docs: README (skill table row, agents table, morning-routine
     section, digest lines in design principles), CONTEXT.md (the Digest,
     digest-dashboard, in-process, and /digest terms), AGENTS.md (the
-    `skills/core/aura-digest` line)
+    `skills/core/aura-digest` line), docs/testing.md (the digest and
+    Atlassian sections, the FakeKeyring example re-point), and
+    docs/dev-env.md (the digest reproduction mention); the two doc files
+    joined the scope at spec time
   - `Taskfile.yml` digest note
   - root `package.json`: the digest-dashboard entry, the subagents entry,
     and digest-only devDependencies (verify per dependency: svelte, vite
