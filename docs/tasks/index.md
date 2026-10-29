@@ -9,7 +9,9 @@ title: docs/tasks
 ## Live
 
 - add-capacity-subcommands
+- audit-update-aura-instructions
 - refine-phase-transition
+- remove-digest
 
 ## Archived
 
