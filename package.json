@@ -12,8 +12,7 @@
       "./extensions/aura-tasks.ts",
       "./extensions/aura-feedback.ts",
       "./extensions/engineering-rules.ts",
-      "./extensions/aura-references.ts",
-      "./.pi/extensions/digest-dashboard/index.ts"
+      "./extensions/aura-references.ts"
     ],
     "skills": [
       "./skills"
