@@ -17,12 +17,7 @@
     ],
     "skills": [
       "./skills"
-    ],
-    "subagents": {
-      "agents": [
-        "./agents"
-      ]
-    }
+    ]
   },
   "workspaces": [
     "scripts",
