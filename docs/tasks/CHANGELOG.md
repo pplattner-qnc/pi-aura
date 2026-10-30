@@ -4,6 +4,27 @@ title: Task Changelog
 ---
 # Task Changelog
 
+## 2026-10-30: Remove the digest functionality entirely (remove-digest)
+
+All 7 tickets landed: the digest dashboard extension (package, registration,
+gitignore exceptions, its vitest suite), the digest skill and morning agents
+(plus the subagents registration), the shared digest core (nine modules, nine
+subpath exports, unit suites, morning-fetch, the followup test, the MCP SDK
+dependency, the three dev-links e2e families, the digest-era build package
+name), the Atlassian dev-links machinery (provisioning module, both token
+docs, the guided walkthrough and Atlassian flows out of the secrets command,
+now a one-item chooser for the Aura PAT only), the manifest and infra shape
+(digest settings comment, keyring secret-key union shrunk to aura/pat, root
+vitest and test tree gone, 13 devDependencies pruned to the one verified
+survivor, Taskfile comment), the dead refine-phase-transition effort archived,
+and the five root docs refreshed with the stale Atlassian bug report archived.
+108 files changed, +2,153/-43,644. A consolidated 40-test no-remnants guard
+pins the end state; the end-of-effort stage authored the repo's first gated
+test protocol into docs/testing.md. The stacked lineage forked once mid-effort
+and was repaired by a user-approved merge; all gates green (shared 169/169,
+all strip-types suites, typecheck, build, registration smoke). The 0.9.0
+release stays deferred to the audit effort's finalize per the map decision.
+
 ## 2026-10-01: Map complete: Unified in-chat resource references (unified-reference-mentions)
 
 All 6 tickets done: `reference-engine-core` (the registry-driven `aura-references` engine with the task kind end-to-end: `#task:` extraction with deferral, the cache interface, TTL-gated warmup, SWR refresh with server search merge, inline `<task-ref>` expansion, the per-turn instruction block, the dormant alias machinery), `reference-cache-sqlite` (the persistent `node:sqlite` WAL store at `~/.pi/agent/aura-reference-cache.db` behind the same interface, with the cross-session journal-mode race fix), `reference-task-alias` (`@AURA-` as the first engine alias with the once-per-session warning; `aura-tasks.ts` shrunk to the reachability probe), `reference-rule-kind` (the local-only rule kind with body injection matching both raw tokens and expanded elements; the `@rule:` alias; `engineering-rules.ts` slimmed), `reference-artifact-kind` (uuid-token UX with title-labeled rows, metadata-driven expansion attributes), and `reference-wiki-kind` (dual identity `#wiki:<space>/<path>` and `#wiki:<uuid>`, dual-endpoint resolution, the four-tag instruction block). Code: 10 files, +7,624/-950 (engine 2,102 lines, cache store + tests, two legacy extensions shrunk); whole tree +12,072/-1,701. All suites green; the one red (`atlassian-provision.test.ts`) is pre-existing on develop and filed as `docs/bugs/atlassian-provision-test-broken-import.md`. Per the branching mandate, all implementation landed on the integration branch `task/unified-reference-mentions` and reached `develop` in a single merge after the whole map was finalizable. Map archived.
