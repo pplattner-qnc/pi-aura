@@ -151,3 +151,17 @@ describe("ticket: manifest-and-infra-cleanup, root devDependency seam", () => {
     );
   });
 });
+
+describe("ticket: manifest-and-infra-cleanup, build manifest seam", () => {
+  it("carries no digest-era comment", () => {
+    const taskfile = fs.readFileSync(path.join(repoRoot, "Taskfile.yml"), "utf-8");
+    const offending = taskfile
+      .split("\n")
+      .filter((line) => line.toLowerCase().includes("digest"));
+    assert.deepEqual(
+      offending,
+      [],
+      "Taskfile.yml should not carry the digest-era bundle note (targets unchanged)",
+    );
+  });
+});
