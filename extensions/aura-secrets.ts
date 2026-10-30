@@ -118,23 +118,15 @@ export async function discoverPat(sources: DiscoverySource[]): Promise<Discovere
 
 const AURA_PAT_KEY: SecretKey = { service: "aura", name: "pat" };
 
-/** Labels shown in the /aura secrets edit chooser. The standalone
- *  "Atlassian email" item is GONE — the email is prompted within the
- *  combined flow for each Atlassian token. The two Atlassian token labels
- *  are distinct so the user can tell them apart. */
+/** Labels shown in the /aura secrets edit chooser. The secrets command
+ *  manages only the Aura PAT, so the chooser lists exactly one item. */
 const SECRET_LABELS = [
   "Aura PAT",
-  "Atlassian Teamwork Graph token",
-  "Atlassian Bitbucket token",
 ] as const;
 
-/** Prefill placeholders for each editable secret. The email placeholder is
- *  keyed by the email secret's label, used by the combined flow. */
+/** Prefill placeholder for the editable secret. */
 const SECRET_PLACEHOLDERS: Record<string, string> = {
   "Aura PAT": "<paste your Aura PAT here>",
-  "Atlassian email": "<paste your Atlassian email here>",
-  "Atlassian Teamwork Graph token": "<paste your Atlassian Teamwork Graph API token here>",
-  "Atlassian Bitbucket token": "<paste your Atlassian Bitbucket API token here>",
 };
 
 /** Map a chooser label to the SecretKey it corresponds to.
@@ -327,50 +319,16 @@ async function resolveEmptyGuard(
   return decision.value;
 }
 
-/** The default walkthrough-doc path the guided mode reads at run time. */
-export const WALKTHROUGH_DOC_PATH =
-  "docs/atlassian-api-token-walkthrough.md";
-
 /** Chooser → edit orchestrator for `/aura secrets edit`.
  *
- *  Slice 3: first asks a yes/no "guided walkthrough?" prompt.
- *  - **Yes** → the guided mode (runGuidedWalkthrough), which steps through
- *    the walkthrough doc.
- *  - **No** (confirm returns false) → the chooser (slice 2, unchanged).
- *    The prompt is clearly "guided walkthrough?" so false means "just the
- *    chooser".
- *
- *  When the chooser is shown, Aura PAT routes through the existing
- *  `handleEdit` (unchanged). The two Atlassian token labels route through
- *  `handleAtlassianPatEdit` (the combined email+token flow). Cancel (select
- *  returns undefined) exits with "no change" and no keyring write. */
+ *  Shows the chooser (one item: the Aura PAT) and routes the selection
+ *  through the generalized `handleEdit` flow. Cancel (select returns
+ *  undefined or an unknown label) exits with "no change" and no keyring
+ *  write. */
 export async function handleSecretEdit(
   ui: Pick<ExtensionUIContext, "notify" | "editor" | "confirm" | "select">,
   keyringFactory: () => Promise<Keyring>
 ): Promise<void> {
-  // Slice 3: yes/no "guided walkthrough?" prompt BEFORE the chooser.
-  const guided = await ui.confirm(
-    "Guided walkthrough?",
-    "Yes to step through creating both Atlassian tokens from the walkthrough doc. No to pick a single secret to edit."
-  );
-  if (guided) {
-    const { runGuidedWalkthrough } = await import("./atlassian-provision.ts");
-    const { loadSettings } = await import("../scripts/src/settings.ts");
-    const settings = loadSettings();
-    const digest = settings.digest;
-    await runGuidedWalkthrough(
-      ui,
-      keyringFactory,
-      WALKTHROUGH_DOC_PATH,
-      {
-        jiraCloudId: digest?.jiraCloudId ?? "",
-        bitbucketWorkspace: digest?.bitbucket?.workspace ?? "",
-      }
-    );
-    return;
-  }
-
-  // No → the chooser (slice 2, unchanged).
   const choice = await ui.select("Edit which secret?", [...SECRET_LABELS]);
   const key = pickSecretKey(choice);
   if (key === null) {
@@ -379,20 +337,10 @@ export async function handleSecretEdit(
   }
 
   const label = choice!;
-
-  // Aura PAT is a single-secret edit — route through the unchanged handleEdit.
-  if (label === "Aura PAT") {
-    const keyring = await keyringFactory();
-    const current = await keyring.getSecret(key);
-    const placeholder = SECRET_PLACEHOLDERS[label];
-    await handleEdit(ui, () => Promise.resolve(keyring), current, key, label, placeholder);
-    return;
-  }
-
-  // The two Atlassian token labels route through the combined email+token flow.
-  const tokenPlaceholder = SECRET_PLACEHOLDERS[label];
-  const emailPlaceholder = SECRET_PLACEHOLDERS["Atlassian email"];
-  await handleAtlassianPatEdit(ui, keyringFactory, key, label, emailPlaceholder, tokenPlaceholder);
+  const keyring = await keyringFactory();
+  const current = await keyring.getSecret(key);
+  const placeholder = SECRET_PLACEHOLDERS[label];
+  await handleEdit(ui, () => Promise.resolve(keyring), current, key, label, placeholder);
 }
 
 /** Thin UI wrapper around `discoverPat`.
