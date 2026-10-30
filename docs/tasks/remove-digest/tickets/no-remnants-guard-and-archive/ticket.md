@@ -3,8 +3,10 @@ type: ticket
 subtype: feature
 title: Add the no-remnants guard and archive the dead digest effort
 status: stable
-workflow_state: ready
-blocked_by: [digest-skill-and-agents-removal, manifest-and-infra-cleanup]
+workflow_state: done
+blocked_by:
+- digest-skill-and-agents-removal
+- manifest-and-infra-cleanup
 size: m
 ---
 

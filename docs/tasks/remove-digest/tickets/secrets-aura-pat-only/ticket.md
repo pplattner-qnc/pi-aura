@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Slim the secrets command to the Aura PAT only
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by: []
 size: m
 ---

@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Remove the digest dashboard extension
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by: []
 size: m
 ---

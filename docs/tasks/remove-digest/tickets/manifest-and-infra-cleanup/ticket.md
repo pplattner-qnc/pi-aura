@@ -3,8 +3,11 @@ type: ticket
 subtype: feature
 title: Prune the package manifest and infra to the post-removal shape
 status: stable
-workflow_state: ready
-blocked_by: [dashboard-extension-removal, digest-core-and-build-pkg-cleanup, secrets-aura-pat-only]
+workflow_state: done
+blocked_by:
+- dashboard-extension-removal
+- digest-core-and-build-pkg-cleanup
+- secrets-aura-pat-only
 size: m
 ---
 

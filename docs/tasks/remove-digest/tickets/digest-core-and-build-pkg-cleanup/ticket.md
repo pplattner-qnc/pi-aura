@@ -3,8 +3,9 @@ type: ticket
 subtype: feature
 title: Remove the shared digest core and the scripts-side digest leftovers
 status: stable
-workflow_state: ready
-blocked_by: [dashboard-extension-removal]
+workflow_state: done
+blocked_by:
+- dashboard-extension-removal
 size: m
 ---
 
