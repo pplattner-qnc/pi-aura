@@ -2,7 +2,7 @@
 type: ticket
 subtype: feature
 title: Add the no-remnants guard and archive the dead digest effort
-status: stable
+status: deprecated
 workflow_state: done
 blocked_by:
 - digest-skill-and-agents-removal

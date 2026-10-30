@@ -2,7 +2,7 @@
 type: ticket
 subtype: feature
 title: Remove the shared digest core and the scripts-side digest leftovers
-status: stable
+status: deprecated
 workflow_state: done
 blocked_by:
 - dashboard-extension-removal

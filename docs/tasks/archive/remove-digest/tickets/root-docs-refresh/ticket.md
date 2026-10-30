@@ -2,7 +2,7 @@
 type: ticket
 subtype: feature
 title: Refresh the root docs to the post-removal package
-status: stable
+status: deprecated
 workflow_state: done
 blocked_by:
 - digest-skill-and-agents-removal

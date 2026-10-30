@@ -2,7 +2,7 @@
 type: ticket
 subtype: feature
 title: Remove the digest dashboard extension
-status: stable
+status: deprecated
 workflow_state: done
 blocked_by: []
 size: m

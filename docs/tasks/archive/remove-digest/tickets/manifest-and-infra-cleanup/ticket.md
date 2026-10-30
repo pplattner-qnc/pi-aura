@@ -2,7 +2,7 @@
 type: ticket
 subtype: feature
 title: Prune the package manifest and infra to the post-removal shape
-status: stable
+status: deprecated
 workflow_state: done
 blocked_by:
 - dashboard-extension-removal

@@ -1,7 +1,7 @@
 ---
 type: map
 title: Remove the digest functionality entirely
-status: stable
+status: deprecated
 blocked_by: []
 ---
 
