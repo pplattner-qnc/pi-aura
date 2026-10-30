@@ -420,23 +420,27 @@ console.log("decideEditAction pure-function tests passed");
 
 // --- pickSecretKey pure function ---
 
-// pickSecretKey is a PURE single-key lookup: the two Atlassian token labels
-// map to their token keys. The standalone "Atlassian email" label is GONE —
-// the email is now prompted within the combined flow, not chosen directly.
+// pickSecretKey is a PURE single-key lookup for the one remaining secret:
+// the Aura PAT. The Atlassian labels are gone; they must not map to keys.
 assert.deepStrictEqual(
   pickSecretKey("Aura PAT"),
   { service: "aura", name: "pat" },
   "Aura PAT -> aura/pat"
 );
-assert.deepStrictEqual(
+assert.strictEqual(
   pickSecretKey("Atlassian Teamwork Graph token"),
-  { service: "atlassian", name: "api_token" },
-  "Atlassian Teamwork Graph token -> atlassian/api_token"
+  null,
+  "the Atlassian Teamwork Graph label is gone and maps to nothing"
 );
-assert.deepStrictEqual(
+assert.strictEqual(
   pickSecretKey("Atlassian Bitbucket token"),
-  { service: "atlassian", name: "bitbucket_token" },
-  "Atlassian Bitbucket token -> atlassian/bitbucket_token"
+  null,
+  "the Atlassian Bitbucket label is gone and maps to nothing"
+);
+assert.strictEqual(
+  pickSecretKey("Atlassian email"),
+  null,
+  "the Atlassian email label is gone and maps to nothing"
 );
 assert.strictEqual(pickSecretKey(undefined), null, "undefined (cancel) -> null");
 assert.strictEqual(pickSecretKey(""), null, "empty string -> null");

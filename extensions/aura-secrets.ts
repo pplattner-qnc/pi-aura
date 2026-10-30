@@ -132,19 +132,13 @@ const SECRET_PLACEHOLDERS: Record<string, string> = {
 /** Map a chooser label to the SecretKey it corresponds to.
  *
  *  Pure single-key lookup, unit-testable without a pi session or keyring.
- *  Maps the two Atlassian token labels to their token keys; Aura PAT is
- *  unchanged. Returns null for cancel (undefined) or an unknown label. */
+ *  The only editable secret is the Aura PAT. Returns null for cancel
+ *  (undefined) or an unknown label. */
 export function pickSecretKey(choice: string | undefined): SecretKey | null {
-  switch (choice) {
-    case "Aura PAT":
-      return { service: "aura", name: "pat" };
-    case "Atlassian Teamwork Graph token":
-      return { service: "atlassian", name: "api_token" };
-    case "Atlassian Bitbucket token":
-      return { service: "atlassian", name: "bitbucket_token" };
-    default:
-      return null;
+  if (choice === "Aura PAT") {
+    return { service: "aura", name: "pat" };
   }
+  return null;
 }
 
 /** Decision produced by `decideEditAction` for the edit handler. */
