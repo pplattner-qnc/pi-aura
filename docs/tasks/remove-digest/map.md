@@ -19,6 +19,11 @@ and works for the core `aura` and `engineering-foundation` skills. No
 standalone version bump here: the 0.9.0 release happens at the
 audit-update-aura-instructions finalize and covers both efforts.
 
+Reached on 2026-10-30: all seven tickets landed (see the changelog entry and
+the twice-reconciled arch spec); every gate is green and a consolidated
+no-remnants guard pins the end state. The 0.9.0 release itself stays deferred
+to the audit effort's finalize per the decision above.
+
 ## Constraints
 
 - The Aura PAT path stays: the aura-secrets core (settings + keyring PAT)
@@ -79,11 +84,30 @@ audit-update-aura-instructions finalize and covers both efforts.
 - Keep `add-capacity-subcommands` as-is (user decision, grilling Q4): a
   CLI capacity surface may still be wanted; not this effort's business.
 
+Decisions recorded during execution (2026-10-30):
+
+- Two level-0 deviation routings, applied to pending charters within the
+  approved Q3 scope: the shared keyring secret-key union shrink went to
+  manifest-and-infra-cleanup (the coherence pass cannot change API
+  surfaces), and the stale Atlassian bug-report archive went to
+  root-docs-refresh.
+- The stacked landing lineage forked once (the second ticket forked from the
+  starting branch); user-approved repair merge folded ticket 1's landing
+  back into the stack, and every later chain forked from the current stack
+  tip per the reconciled arch spec.
+- The per-ticket absence suites were relocated (never deleted) and finally
+  consolidated into a single 40-test no-remnants guard, which also absorbed
+  the docs ticket's seams.
+- The end-of-effort stage authored the repo's first gated test protocol
+  into docs/testing.md (always-run set plus numbered run-if-asked gates),
+  resolving the suite runner's fail-closed refusal.
+- Chain budgets: after two deadline backstops on one ticket, the user
+  approved a 45-minute window, which carried the remaining chains.
+
 ## Fog
 
-- None. The exact file list, the per-dependency decisions, and the
-  aura-secrets slimming are to-spec's to refine; the boundaries above are
-  settled.
+None at planning time; the to-spec refinements settled everything. The two
+fog items of the audit effort (not this one) remain with it.
 
 ## Out of scope
 

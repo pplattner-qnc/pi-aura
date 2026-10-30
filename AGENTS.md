@@ -1,9 +1,8 @@
 # Agent conventions for pi-aura
 
 pi-aura is a Pi package: install with `pi install`, no Claude Code plugin
-manifest, no `skills.sh`. Skills are organized under `skills/core/`, agents
-under `agents/`, and pi extensions under `extensions/` plus
-`.pi/extensions/`. The task-workflow lives under `docs/tasks/`.
+manifest, no `skills.sh`. Skills are organized under `skills/core/` and pi
+extensions under `extensions/`. The task-workflow lives under `docs/tasks/`.
 
 ## Skill layout
 
@@ -11,7 +10,6 @@ Skills live under `skills/core/` (a single bucket, not the workflow
 package's engineering/productivity split):
 
 - `skills/core/aura/`: reference skill for working with Aura
-- `skills/core/aura-digest/`: the morning routine
 - `skills/core/engineering-foundation/`: router for the anwalt.de
   engineering canon in the Aura wiki
 

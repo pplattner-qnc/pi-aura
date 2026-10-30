@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Remove the digest dashboard extension
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by: []
 size: m
 ---
@@ -33,3 +33,27 @@ the remaining test trees still run.
 ## Blocked by
 
 - None (can start immediately).
+
+## Implementation notes
+
+- Landed on `task/dashboard-extension-removal` as merge commit `e3ad58c`
+  (`ticket(dashboard-extension-removal): Remove the digest dashboard
+  extension`); the working branch `ticket/dashboard-extension-removal`,
+  forked from `develop`, was deleted after the merge. Gates at merge time:
+  shared runner 206 tests green (including this ticket's 4 absence
+  assertions), root vitest 55 tests green over the remaining trees,
+  `task typecheck` clean, `task build` green.
+- The absence suite lives at
+  `packages/shared/test/digest/dashboard-extension-removal.test.ts`.
+  `digest-core-and-build-pkg-cleanup` must relocate this file when it
+  empties `packages/shared/test/digest/`, not delete it with the digest
+  suites, or its tracked-tree seam fails at the letter. The final guard
+  ticket consolidates the absence tests either way.
+- The `.gitignore` comment above `dist/**` was rewritten because its only
+  rationale named the dashboard bundles; the `dist/**` rule itself is
+  untouched. Both `!.pi/extensions/digest-dashboard/dist/*` exception
+  lines are gone.
+- The fresh-session behavioral smoke (no digest launch command, no digest
+  tools, clean load) is covered only by structural proxies here; the arch
+  spec assigns the interactive registration smoke to
+  `no-remnants-guard-and-archive`.
