@@ -5,6 +5,11 @@
 // or morning agents, no digest-era settings or keyring surface, a root
 // devDependency list free of the dashboard stack, and the dead
 // refine-phase-transition effort archived off the task index's live list.
+// The root-docs-refresh ticket appended its two doc seams to the same
+// file: the five root docs' content (digest- and Atlassian-provisioning
+// free, README tables matching the shipped manifest, testing doc matching
+// the post-removal runner reality) and the stale Atlassian provisioning
+// bug report archived with a resolution note.
 // Absence assertions only (fs reads, no imports of deleted content),
 // following the digest suite's no-dead-exports structural pattern.
 //
@@ -26,6 +31,12 @@
 //   session loads the package with no errors, the secrets command
 //   registers, and no digest command or tools appear; it is not an
 //   assertion here)
+//
+// Extension seams (arch spec, root-docs-refresh):
+//   1. docs content: no digest or Atlassian-provisioning mentions outside
+//      task history, and no active bug report mentioning Atlassian
+//      provisioning (the archived report carries the resolution note)
+//   2. the README's skill and agent tables match the shipped manifest
 //
 // Run with: cd packages/shared && npx tsx --test test/guards/no-remnants.test.ts
 
@@ -504,6 +515,43 @@ describe("no-remnants guard: consolidation seam", () => {
       offenders,
       [],
       `the per-ticket absence suites are consolidated into no-remnants.test.ts, still found: ${offenders.join(", ")}`,
+    );
+  });
+});
+
+// root-docs-refresh: the README describes the package as it now is. The
+// skill table lists exactly the skills shipped under skills/core (the
+// manifest scans ./skills), and no agents table remains (the package
+// registers no subagents). Table content parsed structurally, not by
+// position, so formatting drift cannot hide a row.
+describe("no-remnants guard: README surface tables", () => {
+  it("lists exactly the shipped skills in the README skill table", () => {
+    const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf-8");
+    const bounded = readme.split("## Prerequisites")[0];
+    const skillsPart = bounded.split("### Skills")[1] ?? "";
+    const tableSkills = skillsPart
+      .split("\n")
+      .filter((line) => line.startsWith("| `"))
+      .map((line) => line.match(/^\| `([^`]+)`/)?.[1])
+      .filter((name) => name !== undefined)
+      .sort();
+    const shipped = fs
+      .readdirSync(path.join(repoRoot, "skills", "core"), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+    assert.deepEqual(
+      tableSkills,
+      shipped,
+      "the README skill table should list exactly the skills shipped under skills/core",
+    );
+  });
+
+  it("carries no agents table", () => {
+    const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf-8");
+    assert.ok(
+      !readme.includes("### Agents"),
+      "the README should carry no agents table (the package ships no agents)",
     );
   });
 });
