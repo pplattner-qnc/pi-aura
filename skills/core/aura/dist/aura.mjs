@@ -28,10 +28,7 @@ var init_file_keyring = __esm({
     NAMESPACE = "aura-skills";
     DEFAULT_STORE_PATH = join(homedir(), ".cache", NAMESPACE, "store.json");
     KNOWN_SECRET_KEYS = [
-      { service: "aura", name: "pat" },
-      { service: "atlassian", name: "email" },
-      { service: "atlassian", name: "api_token" },
-      { service: "atlassian", name: "bitbucket_token" }
+      { service: "aura", name: "pat" }
     ];
     FileKeyring = class {
       storePath;
@@ -201,10 +198,7 @@ var init_macos_keyring = __esm({
     NAMESPACE2 = "aura-skills";
     SECURITY_BINARY = "/usr/bin/security";
     KNOWN_SECRET_KEYS2 = [
-      { service: "aura", name: "pat" },
-      { service: "atlassian", name: "email" },
-      { service: "atlassian", name: "api_token" },
-      { service: "atlassian", name: "bitbucket_token" }
+      { service: "aura", name: "pat" }
     ];
     MacosKeyring = class {
       /** True on macOS when `/usr/bin/security` exists. */
@@ -391,10 +385,7 @@ var init_secret_service_keyring = __esm({
     COLLECTION_INTERFACE = "org.freedesktop.Secret.Collection";
     ITEM_INTERFACE = "org.freedesktop.Secret.Item";
     KNOWN_SECRET_KEYS3 = [
-      { service: "aura", name: "pat" },
-      { service: "atlassian", name: "email" },
-      { service: "atlassian", name: "api_token" },
-      { service: "atlassian", name: "bitbucket_token" }
+      { service: "aura", name: "pat" }
     ];
     SecretServiceKeyring = class {
       /** True on Linux when the D-Bus session bus is reachable and a Secret
