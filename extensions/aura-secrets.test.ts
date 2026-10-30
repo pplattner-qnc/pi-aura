@@ -24,6 +24,36 @@ import auraSecretsExtension, {
   type EditDecision,
 } from "./aura-secrets.ts";
 
+// --- module-surface pin (the shrunk export surface) ---
+//
+// The secrets extension keeps only: command parsing, discovery, the chooser
+// (machinery, one Aura PAT item), and the generalized edit flow. The
+// Atlassian combined flow and the guided-walkthrough surface are gone.
+// If this pin fails, something was added back to (or removed from) the
+// module; the extension should stay the Aura-PAT-only surface.
+{
+  const exports = Object.keys(await import("./aura-secrets.ts")).sort();
+  assert.deepStrictEqual(
+    exports,
+    [
+      "DISCOVERY_SOURCES",
+      "decideEditAction",
+      "default",
+      "discoverPat",
+      "getArgumentCompletions",
+      "handleDiscover",
+      "handleEdit",
+      "handleSecretEdit",
+      "parseAuraArgs",
+      "pickSecretKey",
+      "readMcpBearerToken",
+    ],
+    "the module exports only the shrunk Aura-PAT surface"
+  );
+}
+
+console.log("module-surface pin passed");
+
 // Empty/unknown -> usage
 assert.deepStrictEqual(parseAuraArgs(""), { command: "usage", rest: "" });
 assert.deepStrictEqual(parseAuraArgs("   "), { command: "usage", rest: "" });
