@@ -11,7 +11,6 @@ Skills live under `skills/core/` (a single bucket, not the workflow
 package's engineering/productivity split):
 
 - `skills/core/aura/`: reference skill for working with Aura
-- `skills/core/aura-digest/`: the morning routine
 - `skills/core/engineering-foundation/`: router for the anwalt.de
   engineering canon in the Aura wiki
 

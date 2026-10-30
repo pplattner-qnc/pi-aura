@@ -28,9 +28,6 @@ or your hosted instance. The PAT/bearer token is currently read from
 ```bash
 # Run the aura skill CLI against a workdir (artifact/wiki workflows):
 node skills/core/aura/dist/aura.mjs artifact get <uuid>
-
-# The morning digest now runs via the in-process digest-fetch tool
-# (the aura-digest.mjs CLI bundle was deleted — no shell-out needed).
 ```
 
 ## Do-not-attempt-AI-reproduction

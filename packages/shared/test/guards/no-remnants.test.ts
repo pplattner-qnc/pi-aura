@@ -5,6 +5,11 @@
 // or morning agents, no digest-era settings or keyring surface, a root
 // devDependency list free of the dashboard stack, and the dead
 // refine-phase-transition effort archived off the task index's live list.
+// The root-docs-refresh ticket appended its two doc seams to the same
+// file: the five root docs' content (digest- and Atlassian-provisioning
+// free, README tables matching the shipped manifest, testing doc matching
+// the post-removal runner reality) and the stale Atlassian provisioning
+// bug report archived with a resolution note.
 // Absence assertions only (fs reads, no imports of deleted content),
 // following the digest suite's no-dead-exports structural pattern.
 //
@@ -26,6 +31,12 @@
 //   session loads the package with no errors, the secrets command
 //   registers, and no digest command or tools appear; it is not an
 //   assertion here)
+//
+// Extension seams (arch spec, root-docs-refresh):
+//   1. docs content: no digest or Atlassian-provisioning mentions outside
+//      task history, and no active bug report mentioning Atlassian
+//      provisioning (the archived report carries the resolution note)
+//   2. the README's skill and agent tables match the shipped manifest
 //
 // Run with: cd packages/shared && npx tsx --test test/guards/no-remnants.test.ts
 
@@ -504,6 +515,178 @@ describe("no-remnants guard: consolidation seam", () => {
       offenders,
       [],
       `the per-ticket absence suites are consolidated into no-remnants.test.ts, still found: ${offenders.join(", ")}`,
+    );
+  });
+});
+
+// root-docs-refresh: the README describes the package as it now is. The
+// skill table lists exactly the skills shipped under skills/core (the
+// manifest scans ./skills), and no agents table remains (the package
+// registers no subagents). Table content parsed structurally, not by
+// position, so formatting drift cannot hide a row.
+describe("no-remnants guard: README surface tables", () => {
+  it("lists exactly the shipped skills in the README skill table", () => {
+    const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf-8");
+    const bounded = readme.split("## Prerequisites")[0];
+    const skillsPart = bounded.split("### Skills")[1] ?? "";
+    const tableSkills = skillsPart
+      .split("\n")
+      .filter((line) => line.startsWith("| `"))
+      .map((line) => line.match(/^\| `([^`]+)`/)?.[1])
+      .filter((name) => name !== undefined)
+      .sort();
+    const shipped = fs
+      .readdirSync(path.join(repoRoot, "skills", "core"), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+    assert.deepEqual(
+      tableSkills,
+      shipped,
+      "the README skill table should list exactly the skills shipped under skills/core",
+    );
+  });
+
+  it("carries no agents table", () => {
+    const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf-8");
+    assert.ok(
+      !readme.includes("### Agents"),
+      "the README should carry no agents table (the package ships no agents)",
+    );
+  });
+});
+
+// root-docs-refresh: the testing doc's runner and mock-convention
+// descriptions match the post-removal reality (no root vitest, remaining
+// suites only). Seam 1 applied to docs/testing.md.
+describe("no-remnants guard: testing doc", () => {
+  it("describes no deleted runners or test trees", () => {
+    const lines = fs
+      .readFileSync(path.join(repoRoot, "docs", "testing.md"), "utf-8")
+      .split("\n");
+    const offenders = lines
+      .map((line, index) => ({ line, index }))
+      .filter(
+        ({ line }) =>
+          /vitest/i.test(line) ||
+          line.includes("test/digest-dashboard") ||
+          line.includes("test/atlassian-keyring-auth") ||
+          line.includes("test/bitbucket-token-infra") ||
+          line.includes("test/wire-bitbucket-reader") ||
+          /atlassian-provision/i.test(line) ||
+          line.includes("test/digest"),
+      )
+      .map(({ index, line }) => `docs/testing.md:${index + 1}: ${line.trim()}`);
+    assert.deepEqual(
+      offenders,
+      [],
+      "docs/testing.md should describe only the post-removal runners and remaining suites",
+    );
+  });
+
+  it("re-points the FakeKeyring seam at the remaining hey-api-aura-client suite", () => {
+    const testing = fs.readFileSync(path.join(repoRoot, "docs", "testing.md"), "utf-8");
+    assert.ok(
+      testing.includes("packages/shared/test/hey-api-aura-client.test.ts"),
+      "the keyring mock convention should reference the remaining hey-api-aura-client suite",
+    );
+    assert.ok(
+      testing.includes("FakeKeyring"),
+      "the keyring mock convention should name the FakeKeyring seam",
+    );
+    assert.equal(
+      fs.existsSync(
+        path.join(repoRoot, "packages", "shared", "test", "hey-api-aura-client.test.ts"),
+      ),
+      true,
+      "the re-pointed seam suite should exist on disk",
+    );
+  });
+});
+
+// root-docs-refresh: the five root docs describe the package as it now is.
+// Seam 1 (arch spec, root-docs-refresh): no digest or
+// Atlassian-provisioning mentions outside the task tree's history. The
+// task tree (docs/tasks/**) is history-adjacent and out of scope here; the
+// archived bug reports under docs/bugs/archive/ are history too.
+const ROOT_DOCS = [
+  "README.md",
+  "CONTEXT.md",
+  "AGENTS.md",
+  "docs/testing.md",
+  "docs/dev-env.md",
+];
+
+describe("no-remnants guard: root docs content", () => {
+  it("carries no digest or Atlassian-provisioning mentions in the five root docs", () => {
+    const offenders: string[] = [];
+    for (const doc of ROOT_DOCS) {
+      const lines = fs.readFileSync(path.join(repoRoot, doc), "utf-8").split("\n");
+      for (const [index, line] of lines.entries()) {
+        if (/digest|atlassian/i.test(line)) {
+          offenders.push(`${doc}:${index + 1}: ${line.trim()}`);
+        }
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "the five root docs should not mention the digest or Atlassian provisioning (the task tree's history owns those mentions)",
+    );
+  });
+});
+
+// root-docs-refresh: the stale Atlassian provisioning bug report (the bug
+// this effort fixed by deleting the guided-walkthrough path) is archived
+// with a resolution note, and no active bug report mentions the flow.
+// Seam 1's bug-report half (arch spec, root-docs-refresh).
+const ATLASSIAN_PROVISION_BUG = "atlassian-provision-test-broken-import";
+
+describe("no-remnants guard: bug archive", () => {
+  it("archives the stale Atlassian provisioning bug report with a resolution note", () => {
+    const active = path.join(repoRoot, "docs", "bugs", `${ATLASSIAN_PROVISION_BUG}.md`);
+    const archived = path.join(
+      repoRoot,
+      "docs",
+      "bugs",
+      "archive",
+      `${ATLASSIAN_PROVISION_BUG}.md`,
+    );
+    assert.equal(
+      fs.existsSync(archived),
+      true,
+      `docs/bugs/archive/${ATLASSIAN_PROVISION_BUG}.md should carry the archived report`,
+    );
+    assert.equal(
+      fs.existsSync(active),
+      false,
+      "no active copy of the report should remain under docs/bugs/",
+    );
+    const content = fs.readFileSync(archived, "utf-8");
+    assert.match(
+      content,
+      /^status:\s*(fixed|resolved)$/m,
+      "the archived report's frontmatter should carry a resolved status",
+    );
+    assert.match(
+      content,
+      /^## Resolution$/m,
+      "the archived report should carry a resolution note (the bug was fixed by deletion)",
+    );
+  });
+
+  it("keeps no active bug report mentioning Atlassian provisioning", () => {
+    const bugsDir = path.join(repoRoot, "docs", "bugs");
+    const active = fs
+      .readdirSync(bugsDir)
+      .filter((entry) => entry.endsWith(".md"));
+    const offenders = active.filter((report) =>
+      /atlassian-provision/i.test(fs.readFileSync(path.join(bugsDir, report), "utf-8")),
+    );
+    assert.deepEqual(
+      offenders,
+      [],
+      "no active bug report should mention the Atlassian provisioning flow (deleted with secrets-aura-pat-only)",
     );
   });
 });
