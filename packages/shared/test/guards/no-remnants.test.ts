@@ -635,3 +635,58 @@ describe("no-remnants guard: root docs content", () => {
     );
   });
 });
+
+// root-docs-refresh: the stale Atlassian provisioning bug report (the bug
+// this effort fixed by deleting the guided-walkthrough path) is archived
+// with a resolution note, and no active bug report mentions the flow.
+// Seam 1's bug-report half (arch spec, root-docs-refresh).
+const ATLASSIAN_PROVISION_BUG = "atlassian-provision-test-broken-import";
+
+describe("no-remnants guard: bug archive", () => {
+  it("archives the stale Atlassian provisioning bug report with a resolution note", () => {
+    const active = path.join(repoRoot, "docs", "bugs", `${ATLASSIAN_PROVISION_BUG}.md`);
+    const archived = path.join(
+      repoRoot,
+      "docs",
+      "bugs",
+      "archive",
+      `${ATLASSIAN_PROVISION_BUG}.md`,
+    );
+    assert.equal(
+      fs.existsSync(archived),
+      true,
+      `docs/bugs/archive/${ATLASSIAN_PROVISION_BUG}.md should carry the archived report`,
+    );
+    assert.equal(
+      fs.existsSync(active),
+      false,
+      "no active copy of the report should remain under docs/bugs/",
+    );
+    const content = fs.readFileSync(archived, "utf-8");
+    assert.match(
+      content,
+      /^status:\s*(fixed|resolved)$/m,
+      "the archived report's frontmatter should carry a resolved status",
+    );
+    assert.match(
+      content,
+      /^## Resolution$/m,
+      "the archived report should carry a resolution note (the bug was fixed by deletion)",
+    );
+  });
+
+  it("keeps no active bug report mentioning Atlassian provisioning", () => {
+    const bugsDir = path.join(repoRoot, "docs", "bugs");
+    const active = fs
+      .readdirSync(bugsDir)
+      .filter((entry) => entry.endsWith(".md"));
+    const offenders = active.filter((report) =>
+      /atlassian-provision/i.test(fs.readFileSync(path.join(bugsDir, report), "utf-8")),
+    );
+    assert.deepEqual(
+      offenders,
+      [],
+      "no active bug report should mention the Atlassian provisioning flow (deleted with secrets-aura-pat-only)",
+    );
+  });
+});
