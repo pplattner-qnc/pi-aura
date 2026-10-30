@@ -102,7 +102,7 @@ describe("FileKeyring SecretKey enum", () => {
 
     it("lists empty-string values (a set empty string is a string)", async () => {
       // Empty string is stored but listSecrets only includes keys where the
-      // value is a string — "" is a string, so it IS listed. This documents
+      // value is a string ("" is a string, so it IS listed). This documents
       // that behavior: a set "" value appears in listSecrets.
       const kr = makeKeyring();
       await kr.setSecret(AURA_PAT, "");
