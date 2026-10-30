@@ -1,7 +1,9 @@
 // Structural tests for ticket "dashboard-extension-removal": the
 // digest-dashboard extension is removed end to end. Absence assertions
 // only (fs reads, no imports of the deleted package), following the
-// drop-dead-shared-exports pattern in this directory.
+// drop-dead-shared-exports structural pattern. Relocated here from
+// test/digest/ by digest-core-and-build-pkg-cleanup when that directory
+// emptied; the no-remnants guard consolidates these assertions.
 //
 // Seams (arch spec, remove-digest):
 //   1. the package manifest's registered extension list
@@ -9,14 +11,14 @@
 //   (seam 3: root runner green over the remaining trees; seam 4:
 //   typecheck and build gates; both are commands, not assertions here)
 //
-// Run with: cd packages/shared && npx tsx --test test/digest/dashboard-extension-removal.test.ts
+// Run with: cd packages/shared && npx tsx --test test/guards/dashboard-extension-removal.test.ts
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-// packages/shared/test/digest -> packages/shared/test -> packages/shared
+// packages/shared/test/guards -> packages/shared/test -> packages/shared
 const testDir = import.meta.dirname;
 const sharedRoot = path.resolve(testDir, "../..");
 const repoRoot = path.resolve(sharedRoot, "../..");
