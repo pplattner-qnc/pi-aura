@@ -329,11 +329,12 @@ export default function auraSecretsExtension(pi: ExtensionAPI) {
       const parsed = parseAuraArgs(args);
       switch (parsed.command) {
         case "secrets-discover": {
-          // rule: dynamic-import-createKeyring — @pi-aura/shared/keyring uses
-          // .js extension specifiers internally, which Node's experimental
-          // strip-types loader cannot resolve. Pi's extension runtime handles
-          // static imports, so we dynamic-import createKeyring here to keep
-          // the unit-test entry point runnable with `node --experimental-strip-types`.
+          // rule: dynamic-import-createKeyring: the @pi-aura/shared/keyring
+          // module uses .js extension specifiers internally, which Node's
+          // experimental strip-types loader cannot resolve. Pi's extension
+          // runtime handles static imports, so we dynamic-import createKeyring
+          // here to keep the unit-test entry point runnable with
+          // `node --experimental-strip-types`.
           const { createKeyring } = await import("@pi-aura/shared/keyring");
           await handleDiscover(ctx.ui, createKeyring);
           return;
