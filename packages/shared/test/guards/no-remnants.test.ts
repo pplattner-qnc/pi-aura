@@ -603,3 +603,35 @@ describe("no-remnants guard: testing doc", () => {
     );
   });
 });
+
+// root-docs-refresh: the five root docs describe the package as it now is.
+// Seam 1 (arch spec, root-docs-refresh): no digest or
+// Atlassian-provisioning mentions outside the task tree's history. The
+// task tree (docs/tasks/**) is history-adjacent and out of scope here; the
+// archived bug reports under docs/bugs/archive/ are history too.
+const ROOT_DOCS = [
+  "README.md",
+  "CONTEXT.md",
+  "AGENTS.md",
+  "docs/testing.md",
+  "docs/dev-env.md",
+];
+
+describe("no-remnants guard: root docs content", () => {
+  it("carries no digest or Atlassian-provisioning mentions in the five root docs", () => {
+    const offenders: string[] = [];
+    for (const doc of ROOT_DOCS) {
+      const lines = fs.readFileSync(path.join(repoRoot, doc), "utf-8").split("\n");
+      for (const [index, line] of lines.entries()) {
+        if (/digest|atlassian/i.test(line)) {
+          offenders.push(`${doc}:${index + 1}: ${line.trim()}`);
+        }
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "the five root docs should not mention the digest or Atlassian provisioning (the task tree's history owns those mentions)",
+    );
+  });
+});
