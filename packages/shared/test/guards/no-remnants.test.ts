@@ -555,3 +555,51 @@ describe("no-remnants guard: README surface tables", () => {
     );
   });
 });
+
+// root-docs-refresh: the testing doc's runner and mock-convention
+// descriptions match the post-removal reality (no root vitest, remaining
+// suites only). Seam 1 applied to docs/testing.md.
+describe("no-remnants guard: testing doc", () => {
+  it("describes no deleted runners or test trees", () => {
+    const lines = fs
+      .readFileSync(path.join(repoRoot, "docs", "testing.md"), "utf-8")
+      .split("\n");
+    const offenders = lines
+      .map((line, index) => ({ line, index }))
+      .filter(
+        ({ line }) =>
+          /vitest/i.test(line) ||
+          line.includes("test/digest-dashboard") ||
+          line.includes("test/atlassian-keyring-auth") ||
+          line.includes("test/bitbucket-token-infra") ||
+          line.includes("test/wire-bitbucket-reader") ||
+          /atlassian-provision/i.test(line) ||
+          line.includes("test/digest"),
+      )
+      .map(({ index, line }) => `docs/testing.md:${index + 1}: ${line.trim()}`);
+    assert.deepEqual(
+      offenders,
+      [],
+      "docs/testing.md should describe only the post-removal runners and remaining suites",
+    );
+  });
+
+  it("re-points the FakeKeyring seam at the remaining hey-api-aura-client suite", () => {
+    const testing = fs.readFileSync(path.join(repoRoot, "docs", "testing.md"), "utf-8");
+    assert.ok(
+      testing.includes("packages/shared/test/hey-api-aura-client.test.ts"),
+      "the keyring mock convention should reference the remaining hey-api-aura-client suite",
+    );
+    assert.ok(
+      testing.includes("FakeKeyring"),
+      "the keyring mock convention should name the FakeKeyring seam",
+    );
+    assert.equal(
+      fs.existsSync(
+        path.join(repoRoot, "packages", "shared", "test", "hey-api-aura-client.test.ts"),
+      ),
+      true,
+      "the re-pointed seam suite should exist on disk",
+    );
+  });
+});
