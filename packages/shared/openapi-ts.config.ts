@@ -20,16 +20,21 @@
 // (when you set `plugins`, the defaults are no longer added automatically).
 //
 // --- .js import extensions (tsConfigPath) ---------------------------------
-// The generated client is imported by BOTH `scripts/` (moduleResolution:
-// bundler) and the extension suites under Node's ESM loader (the codegen
-// tsconfig `tsconfig.codegen.json` is moduleResolution: NodeNext).
+// The generated client's consumers are the `scripts/` bundler resolution
+// (moduleResolution: bundler; `scripts/src/aura.ts` imports it through
+// `@pi-aura/shared/aura-client` and esbuild bundles the same tree) and
+// the shared NodeNext codegen tsconfig `tsconfig.codegen.json` below.
+// The extension suites are not consumers: their dynamic-import seam keeps
+// the client out of the strip-types path, and the digest-dashboard
+// extension whose NodeNext tsconfig once typechecked the tree is gone
+// with the removal.
 // Under NodeNext, relative import specifiers MUST carry a `.js` extension or
 // tsc fails with TS2307/TS2834. openapi-ts reads `output.tsConfigPath` and,
 // when the resolved tsconfig has `moduleResolution: "nodenext"`, automatically
 // appends `.js` to every generated relative import (the supported mechanism
 // since openapi-ts v0.67). We point it at `tsconfig.codegen.json` so the
 // generated tree is correct out-of-the-box and survives `npm run codegen`
-// runs — no hand-patching of generated files needed. `.js`-extended
+// runs, with no hand-patching of generated files needed. `.js`-extended
 // specifiers also resolve fine under `bundler`, so the shared package's own
 // `tsc --noEmit` (bundler) is unaffected.
 //

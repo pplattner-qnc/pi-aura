@@ -63,18 +63,20 @@ task openapi-sync     # refresh packages/shared/openapi/openapi.yaml from the Au
   `scripts/esbuild.config.mjs`'s `external` array or the bundle breaks.
 - **Generated SDK imports need `.js` extensions under NodeNext** (the
   `tsConfigPath` lesson). The generated client in `packages/shared/src/generated/`
-  is consumed by BOTH `scripts/` (`moduleResolution: bundler`) and Node's
-  ESM loader (the extension suites load it dynamically; the codegen tsconfig
-  `tsconfig.codegen.json` is `moduleResolution: NodeNext`). Under NodeNext,
-  relative import specifiers MUST carry a `.js` extension or `tsc` fails with
-  TS2307/TS2834. `@hey-api/openapi-ts` (v0.67+) auto-appends `.js` to generated
-  relative imports when the resolved `output.tsConfigPath` tsconfig has
-  `moduleResolution: "nodenext"`. `packages/shared/openapi-ts.config.ts` points
-  `tsConfigPath` at `packages/shared/tsconfig.codegen.json` (a tiny NodeNext
-  tsconfig), so `npm run codegen` emits the `.js` extensions natively — the
-  generated tree is correct out-of-the-box and survives regeneration. **Do NOT
-  hand-patch `.js` extensions onto generated files** (a prior attempt did;
-  the next codegen run wiped them). `tsConfigPath` is resolved relative to the
+  is consumed by BOTH `scripts/` (`moduleResolution: bundler`) and the shared
+  NodeNext codegen tsconfig (`tsconfig.codegen.json`), which openapi-ts reads
+  via `output.tsConfigPath`; the extension suites are not consumers (their
+  dynamic-import seam keeps the client out of the strip-types path). Under
+  NodeNext, relative import specifiers MUST carry a `.js` extension or `tsc`
+  fails with TS2307/TS2834. `@hey-api/openapi-ts` (v0.67+) auto-appends `.js` to
+  generated relative imports when the resolved `output.tsConfigPath` tsconfig
+  has `moduleResolution: "nodenext"`. `packages/shared/openapi-ts.config.ts`
+  points `tsConfigPath` at `packages/shared/tsconfig.codegen.json` (a tiny
+  NodeNext tsconfig), so `npm run codegen` emits the `.js` extensions natively
+  and the generated tree is correct out-of-the-box and survives regeneration.
+  **Do NOT hand-patch `.js` extensions onto generated files** (a prior attempt
+  did; the next codegen run wiped them). `tsConfigPath` is resolved relative
+  to the
   openapi-ts package dir, not the config file, so it must be an absolute path
   (the config derives it from `import.meta.url`). `.js`-extended specifiers
   also resolve under `bundler`, so the shared package's own `tsc --noEmit` is
