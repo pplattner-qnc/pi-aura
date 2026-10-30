@@ -11,5 +11,10 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["test/**/*.test.ts"],
+    // The dev-links e2e families were deleted with the digest core
+    // (digest-core-and-build-pkg-cleanup), leaving the root test tree
+    // empty in the interim until manifest-and-infra-cleanup removes this
+    // runner; stay green over the empty tree.
+    passWithNoTests: true,
   },
 });

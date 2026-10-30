@@ -1,6 +1,6 @@
 // AuraClient interface + expressive domain types.
 //
-// This module owns the vocabulary the scripts (aura.ts, aura-digest.ts) and
+// This module owns the vocabulary the scripts (aura.ts) and
 // the /aura extension see when talking to Aura's REST API. It declares pure
 // hand-written domain types — NO imports from ./generated/* (Q8: generated
 // types never leak into the interface). Mapping to/from generated types

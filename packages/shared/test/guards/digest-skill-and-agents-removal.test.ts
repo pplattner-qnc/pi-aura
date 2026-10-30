@@ -2,7 +2,9 @@
 // aura-digest skill (doc + committed CLI bundle leftover) and the two
 // morning agents are removed end to end. Absence assertions only (fs
 // reads, no imports of deleted content), following the
-// dashboard-extension-removal pattern in this directory.
+// dashboard-extension-removal pattern. Relocated here from test/digest/
+// by digest-core-and-build-pkg-cleanup when that directory emptied; the
+// no-remnants guard consolidates these assertions.
 //
 // Seams (arch spec, remove-digest):
 //   1. the manifest's registration shape (skills scan unchanged, no
@@ -11,14 +13,14 @@
 //   (seam 3: typecheck, build, and a clean session load; these are
 //   commands and a verify smoke, not assertions here)
 //
-// Run with: cd packages/shared && npx tsx --test test/digest/digest-skill-and-agents-removal.test.ts
+// Run with: cd packages/shared && npx tsx --test test/guards/digest-skill-and-agents-removal.test.ts
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-// packages/shared/test/digest -> packages/shared/test -> packages/shared
+// packages/shared/test/guards -> packages/shared/test -> packages/shared
 const testDir = import.meta.dirname;
 const sharedRoot = path.resolve(testDir, "../..");
 const repoRoot = path.resolve(sharedRoot, "../..");
