@@ -57,3 +57,23 @@ describe("ticket: digest-skill-and-agents-removal, skill-list seam", () => {
     );
   });
 });
+
+describe("ticket: digest-skill-and-agents-removal, agents seam", () => {
+  it("has no agents directory in the tracked tree", () => {
+    const agentsDir = path.join(repoRoot, "agents");
+    assert.equal(
+      fs.existsSync(agentsDir),
+      false,
+      "agents/ should be deleted with both morning agents",
+    );
+  });
+
+  it("registers no subagents in the package manifest", () => {
+    const pi = readPiBlock();
+    assert.equal(
+      pi.subagents,
+      undefined,
+      "package.json should carry no subagents block",
+    );
+  });
+});
