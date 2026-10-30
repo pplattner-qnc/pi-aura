@@ -21,7 +21,8 @@
 //
 // --- .js import extensions (tsConfigPath) ---------------------------------
 // The generated client is imported by BOTH `scripts/` (moduleResolution:
-// bundler) and the `digest-dashboard` extension (moduleResolution: NodeNext).
+// bundler) and the extension suites under Node's ESM loader (the codegen
+// tsconfig `tsconfig.codegen.json` is moduleResolution: NodeNext).
 // Under NodeNext, relative import specifiers MUST carry a `.js` extension or
 // tsc fails with TS2307/TS2834. openapi-ts reads `output.tsConfigPath` and,
 // when the resolved tsconfig has `moduleResolution: "nodenext"`, automatically
