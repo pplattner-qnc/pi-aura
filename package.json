@@ -28,19 +28,6 @@
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-tui": "*",
-    "@fontsource/bricolage-grotesque": "^5.3.0",
-    "@lanterna-profiler/cli": "^1.17.0",
-    "@sveltejs/vite-plugin-svelte": "^6.2.4",
-    "@tailwindcss/vite": "^4.3.3",
-    "@types/node": "^26.2.0",
-    "0x": "^6.0.0",
-    "daisyui": "^5.7.19",
-    "happy-dom": "^20.11.6",
-    "svelte": "^5.56.10",
-    "tailwindcss": "^4.3.3",
-    "typescript": "^6.0.3",
-    "vite": "^7.3.6",
-    "vitest": "^4.1.11"
+    "@earendil-works/pi-tui": "*"
   }
 }

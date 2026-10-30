@@ -27,8 +27,6 @@ vars:
   SHARED_DIR: packages/shared
   AURA_DIST: skills/core/aura/dist
   # The bundled entry point build produces; verified to exist after build.
-  # (The aura-digest CLI bundle was deleted — digest tools now run
-  # in-process; only the aura skill's aura.mjs bundle remains.)
   ENTRY_OUTS:
     sh: |
       echo "{{.AURA_DIST}}/aura.mjs"
