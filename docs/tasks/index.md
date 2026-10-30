@@ -10,7 +10,6 @@ title: docs/tasks
 
 - add-capacity-subcommands
 - audit-update-aura-instructions
-- remove-digest
 
 ## Archived
 
@@ -50,6 +49,7 @@ title: docs/tasks
 - reference-task-alias
 - reference-wiki-kind
 - refine-phase-transition
+- remove-digest
 - skl-flow-rewrite
 - unified-reference-mentions
 - wire-bitbucket-guided-edit
