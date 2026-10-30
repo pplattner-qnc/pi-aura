@@ -12,6 +12,9 @@ size: m
 
 With every digest cluster deleted, the package shape catches up: the digest
 settings namespace leaves the shared settings type (its consumers are gone),
+the shared keyring secret-key union loses its three Atlassian members (dead
+type surface after the provisioning removal; routed here from the level-0
+deviation reports because the coherence pass cannot change API surfaces),
 the root vitest configuration and the now-empty root test tree are deleted,
 the root devDependency list is pruned to what remains actually used (the
 Svelte/Vite/Tailwind/daisyui/fontsource/vitest/happy-dom stack, the two
@@ -21,7 +24,8 @@ manifest resolves cleanly.
 
 ## Acceptance criteria
 
-- [ ] The shared settings type has no digest namespace and the shared suite
+- [ ] The shared settings type has no digest namespace, the keyring
+      secret-key union has no Atlassian members, and the shared suite
       stays green.
 - [ ] The root vitest configuration is gone and no root test tree remains.
 - [ ] The root manifest's devDependencies contain only deps that remaining
