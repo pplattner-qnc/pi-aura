@@ -23,11 +23,12 @@ The first two tickets' absence suites landed in
 runner, which stayed. digest-core-and-build-pkg-cleanup relocated both to
 `packages/shared/test/guards/` (preserved, not deleted with the digest
 suites) and added its own third suite there; manifest-and-infra-cleanup
-added a fourth; no-remnants-guard-and-archive ported every assertion from
-all four into the single guard
+added a fourth; no-remnants-guard-and-archive ported the surviving
+assertions from all four into the single guard
 `packages/shared/test/guards/no-remnants.test.ts` and then deleted the
-four source files, a consolidation pin inside the guard asserting they
-stay gone; root-docs-refresh appended its docs seams to the same guard.
+four source files, with a consolidation pin inside the guard asserting
+they stay gone; root-docs-refresh appended its docs seams to the same
+guard.
 
 ## Effort-wide rules
 
@@ -117,7 +118,9 @@ stay gone; root-docs-refresh appended its docs seams to the same guard.
   renamed from `aura-digest-scripts` to `aura-skill-scripts` with a
   digest-free description; the MCP SDK dependency is dropped (its only
   consumer was the deleted in-process digest MCP client), and the embed
-  stack stays because it serves rest search.
+  stack stays because it serves rest search. One comment-only touch
+  dropped the deleted `aura-digest.ts` co-reference from the
+  `packages/shared/src/aura-client.ts` header.
 - Existing abstractions to use: the shared package's exports map and
   runner; the scripts workspace manifest (its morning-fetch script and
   followup test are the digest core's scripts-side consumers); the root
@@ -127,7 +130,10 @@ stay gone; root-docs-refresh appended its docs seams to the same guard.
   touch the secrets extension; never delete the per-ticket absence
   suites.
 - Seams: (1) the shared manifest's exports map; (2) the shared runner green
-  without the digest suites; (3) the scripts manifest shape (name,
+  without the digest suites, which took
+  `drop-dead-shared-exports.test.ts` with them (its subject, the
+  `aura-digest.ts` exports, vanished; its fs-read pattern survives in
+  the guards suites); (3) the scripts manifest shape (name,
   description, dependency set); (4) the tracked tree (no digest source or
   test modules in the shared package or the scripts workspace, no e2e
   families), with the absence suites relocated out of
@@ -237,7 +243,9 @@ stay gone; root-docs-refresh appended its docs seams to the same guard.
 - Seams: (1) the guard suite green under the shared runner, failing on any
   reintroduced remnant, with the four per-ticket suites' assertions
   consolidated into it; the failure sensitivity is proven by four
-  throwaway mutations, each tripping exactly its intended assertion and
+  throwaway mutations (a digest subpath export, a digest source
+  directory, a digest-named extension registration, a svelte
+  devDependency), each tripping exactly its intended assertion and
   reverted, never committed, since a committed remnant-factory would be
   the forbidden general lint; (2) the task index no longer lists the dead
   effort (the refine-phase-transition effort): the archive is a pure git
@@ -253,4 +261,13 @@ stay gone; root-docs-refresh appended its docs seams to the same guard.
   root-docs-refresh appended its doc-seam tests to it, for 40 tests
   total. Two strict "exactly" pins, the `skills/core` directory list and
   the surviving subpath exports list, will trip on future legitimate
-  additions until the guard is extended.
+  additions until the guard is extended, and the archive seam couples
+  three shared-runner tests to docs/tasks paths. The Atlassian
+  provisioning class sits outside the guard's asserted classes: the
+  secrets module-surface test pins the extension's export surface, but
+  the provisioning module's deletion (`extensions/atlassian-provision.ts`
+  with its test, and the two Atlassian token docs) was verified by
+  command, not by any assertion, so a reintroduced provisioning module
+  would trip no assertion. The user-level settings file can still carry
+  its stale `aura.digest` block (package-external state, no longer read
+  by the shrunk settings type).

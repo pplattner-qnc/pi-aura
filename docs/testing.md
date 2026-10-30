@@ -43,6 +43,51 @@ task build            # typecheck + bundle
 task openapi-sync     # refresh packages/shared/openapi/openapi.yaml from the Aura repo
 ```
 
+## Test protocol
+
+The task-workflow `test-runner` agent reads this section. "Run these
+always" commands run on every suite gate; a "run if asked" command runs
+only when the caller passes its number. Commands run from the repo root
+with `bash` and a nonzero exit is a failure; the Run commands section
+above stays the general reference. The always set is the verification
+the effort gates ran: the shared package's runner, the per-file
+strip-types suites, and the two Taskfile gates.
+
+Run these always:
+
+- `cd packages/shared && npm test` -- the shared package's runner suite,
+  guards included (the manifest's test script globs `test/**/*.test.ts`,
+  so `test/guards/no-remnants.test.ts` runs with the rest)
+- `for f in extensions/*.test.ts; do node --experimental-strip-types "$f" || exit 1; done` -- the 7 extension logic suites, one process per
+  file (the per-file strip-types runner; no configured extension runner)
+- `for f in scripts/src/*.test.ts; do node --experimental-strip-types --test "$f" || exit 1; done` -- the 10 scripts CLI suites under the
+  same per-file strip-types rule
+- `task typecheck` -- `tsc --noEmit` over both workspaces (`scripts` and
+  `packages/shared`)
+- `task build` -- typecheck + gen-rest-doc + gen-rest-index + the esbuild
+  bundle + output verification; the slowest always-gate (~1 minute:
+  gen-rest-index embeds every operation with the real local model)
+
+Run if asked (by number):
+
+1. `task gen-rest-index && git diff --exit-code -- scripts/src/generated/rest-index.ts` -- the real-model embed gate: rebuild the committed
+   REST index with the cached local model (the `_embedRaw` lesson's
+   end-to-end demand, not just the mocked unit suites) and require the
+   committed file back byte-identical
+2. `node --experimental-strip-types extensions/aura-reference-cache.test.ts` -- the cross-process WAL concurrency driver standalone:
+   child processes race the same WAL file while the parent asserts exit
+   codes, landed rows, and `PRAGMA integrity_check` (the extension loop
+   above runs this suite as one of its 7; this item isolates it when the
+   concurrency gate is what was asked for)
+3. `task codegen && git diff --exit-code -- packages/shared/src/generated/` -- the codegen byte-stability check: regenerate the
+   typed REST client and require the committed generated tree back
+   byte-identical (the `tsConfigPath` lesson: regeneration must survive
+   without hand-patching)
+
+A single suite, for manual use only (not part of the gated protocol): run
+any one file with its documented per-file runner; the two family sections
+below list the exact commands.
+
 ## Mock conventions
 
 - Inject a fake `Keyring` (returns a test PAT) over hitting the real OS
