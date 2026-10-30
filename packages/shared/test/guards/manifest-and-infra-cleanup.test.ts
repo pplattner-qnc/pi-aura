@@ -22,6 +22,7 @@ import * as path from "node:path";
 // packages/shared/test/guards -> packages/shared/test -> packages/shared
 const testDir = import.meta.dirname;
 const sharedRoot = path.resolve(testDir, "../..");
+const repoRoot = path.resolve(sharedRoot, "../..");
 
 describe("ticket: manifest-and-infra-cleanup, settings and keyring shape seam", () => {
   it("carries no digest namespace in the shared settings type", () => {
@@ -85,5 +86,23 @@ describe("ticket: manifest-and-infra-cleanup, settings and keyring shape seam", 
         `${backend}'s known-key list should not carry Atlassian entries`,
       );
     }
+  });
+});
+
+describe("ticket: manifest-and-infra-cleanup, root vitest and test-tree seam", () => {
+  it("has no root vitest configuration", () => {
+    assert.equal(
+      fs.existsSync(path.join(repoRoot, "vitest.config.ts")),
+      false,
+      "the root vitest config should be deleted with the last root test tree (the interim passWithNoTests flag goes with it)",
+    );
+  });
+
+  it("has no root test tree", () => {
+    assert.equal(
+      fs.existsSync(path.join(repoRoot, "test")),
+      false,
+      "the root test tree should be deleted (the per-package runner convention stands)",
+    );
   });
 });
