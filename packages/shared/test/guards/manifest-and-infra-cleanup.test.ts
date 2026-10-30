@@ -24,6 +24,16 @@ const testDir = import.meta.dirname;
 const sharedRoot = path.resolve(testDir, "../..");
 const repoRoot = path.resolve(sharedRoot, "../..");
 
+interface RootPackageJson {
+  devDependencies?: Record<string, string>;
+}
+
+function readRootDevDependencies(): Record<string, string> {
+  const raw = fs.readFileSync(path.join(repoRoot, "package.json"), "utf-8");
+  const pkg = JSON.parse(raw) as RootPackageJson;
+  return pkg.devDependencies ?? {};
+}
+
 describe("ticket: manifest-and-infra-cleanup, settings and keyring shape seam", () => {
   it("carries no digest namespace in the shared settings type", () => {
     const source = fs.readFileSync(
@@ -103,6 +113,41 @@ describe("ticket: manifest-and-infra-cleanup, root vitest and test-tree seam", (
       fs.existsSync(path.join(repoRoot, "test")),
       false,
       "the root test tree should be deleted (the per-package runner convention stands)",
+    );
+  });
+});
+
+describe("ticket: manifest-and-infra-cleanup, root devDependency seam", () => {
+  it("carries no dashboard-stack, profiling, or root-runner devDependencies", () => {
+    const deps = readRootDevDependencies();
+    const dropped = [
+      "@fontsource/bricolage-grotesque",
+      "@lanterna-profiler/cli",
+      "@sveltejs/vite-plugin-svelte",
+      "@tailwindcss/vite",
+      "@types/node",
+      "0x",
+      "daisyui",
+      "happy-dom",
+      "svelte",
+      "tailwindcss",
+      "typescript",
+      "vite",
+      "vitest",
+    ];
+    const offenders = dropped.filter((dep) => dep in deps);
+    assert.deepEqual(
+      offenders,
+      [],
+      `root devDependencies should be pruned to what remaining files and flows use, found: ${offenders.join(", ")}`,
+    );
+  });
+
+  it("keeps the devDependency the extension suites still resolve", () => {
+    const deps = readRootDevDependencies();
+    assert.ok(
+      "@earendil-works/pi-tui" in deps,
+      "root devDependencies should keep @earendil-works/pi-tui (aura-feedback imports it; the strip-types extension suites resolve it from the root install)",
     );
   });
 });
