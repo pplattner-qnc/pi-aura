@@ -8,12 +8,12 @@ title: docs/tasks
 
 ## Live
 
-- add-capacity-subcommands
 - audit-update-aura-instructions
 
 ## Archived
 
 - adapt-blueprint-skills
+- add-capacity-subcommands
 - atlassian-bitbucket-token
 - atlassian-keyring-auth
 - aura-access-rewrite
