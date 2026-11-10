@@ -166,6 +166,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadRules, type Rule } from "./cursor-rules.ts";
+import { auraMcpJson, createAuraMcpInterface, type AuraMcpInterface } from "./aura-mcp-client.ts";
 
 // ---------------------------------------------------------------------------
 // Autocomplete types (minimal structural shapes matching pi-tui's interface)
@@ -830,45 +831,8 @@ export const TASK_KIND = "task";
  */
 export const MAX_TASKS = 500;
 
-/** Page size for `listTasks` (Aura's max is 100). */
+/** Page size for `searchTasks` (the live listTasks tool caps a page at 100). */
 export const PAGE_SIZE = 100;
-
-/** The subset of a task the engine reads (mirrors the shared client's Task
- *  without importing it). */
-export interface TaskSummary {
-  id: string;
-  human_key: string;
-  title: string;
-  status: string;
-}
-
-/** Query options for the structural listTasks (mirrors the shared client's
- *  ListTasksInput loosely; the real client satisfies this structurally). */
-export interface TaskListQuery {
-  status?: string;
-  /** The API takes "false"|"true"|"all"; the shared ListTasksInput still types
-   *  `archived` as boolean, so this structural copy types it unknown (the
-   *  same interface-widening the deleted `@AURA-` handling in aura-tasks.ts
-   *  made with an index-signature cast, without the cast). */
-  archived?: unknown;
-  limit?: number;
-  page?: number;
-  sort_by?: string;
-  sort_dir?: string;
-  search?: string;
-  [k: string]: unknown;
-}
-
-/**
- * The structural subset of the shared AuraClient the task adapter needs.
- * Deliberately structural (no import of `@pi-aura/shared/aura-client`): the
- * client is only imported live inside the extension factory via the
- * dynamic-import seam, which keeps `node --experimental-strip-types` runnable.
- */
-export interface TaskAuraClient {
-  listTasks(opts?: TaskListQuery): Promise<{ items: TaskSummary[]; pagination: unknown }>;
-  getTaskByHumanKey(key: string): Promise<TaskSummary>;
-}
 
 /** Escape a string for use as an XML attribute value: `"` -> `&quot;`,
  *  `&` -> `&amp;`, `<` -> `&lt;`. (The entities are spelled via
@@ -897,17 +861,31 @@ function taskKeyNumber(key: string): string {
   return dash === -1 ? key : key.slice(dash + 1);
 }
 
+/** The subset of a task the engine reads (mirrors the live listTasks /
+ *  getTaskByHumanKey payloads without importing them). */
+export interface TaskSummary {
+  id: string;
+  human_key: string;
+  title: string;
+  status: string;
+}
+
 /**
- * The task kind adapter: warmup (`listTasks` pagination into the cache) plus
- * local search (key prefix, key number prefix, and title substring,
- * case-insensitive). Aura access goes through the injectable `createClient`
- * factory: production wiring passes the dynamic-imported
- * `createDefaultAuraClient`, tests pass fakes.
+ * The task kind adapter: warmup (`searchTasks` pagination into the cache)
+ * plus local search (key prefix, key number prefix, and title substring,
+ * case-insensitive). Aura access goes through the typed aura-mcp interface
+ * via the injectable `createInterface` factory: production wiring passes the
+ * session's shared interface (constructed once per session_start with the
+ * notify hook), tests pass fakes. Every server path is silent on failure and
+ * maps `AuraMcpToolUnavailableError` (a core-drift unavailable tool path)
+ * onto its cache-only answer exactly like any other failure: a failed search
+ * returns nothing fresh, a failed targeted resolution leaves the mention as
+ * typed, and a failed warmup keeps whatever pages landed.
  */
 export function createTaskAdapter(options: {
-  createClient: () => Promise<TaskAuraClient>;
+  createInterface: () => Promise<AuraMcpInterface>;
 }): KindAdapter {
-  const { createClient } = options;
+  const { createInterface } = options;
 
   const toReferenceItem = (task: TaskSummary): ReferenceItem => ({
     kind: TASK_KIND,
@@ -916,6 +894,33 @@ export function createTaskAdapter(options: {
     title: task.title,
     status: task.status,
   });
+
+  /** The task list of a searchTasks payload (its JSON `items`, or nothing
+   *  when the payload carries no list). */
+  const taskItemsOf = (payload: unknown): TaskSummary[] => {
+    const items = (payload as { items?: unknown } | undefined)?.items;
+    return Array.isArray(items) ? (items as TaskSummary[]) : [];
+  };
+
+  /** The task object of a getTaskByHumanKey payload, validated lightly: a
+   *  payload without its identity fields is unresolvable, not a crash. */
+  const taskPayloadOf = (payload: unknown): TaskSummary | null => {
+    if (payload === null || typeof payload !== "object") return null;
+    const candidate = payload as Partial<TaskSummary>;
+    if (
+      typeof candidate.id !== "string" ||
+      typeof candidate.human_key !== "string" ||
+      typeof candidate.title !== "string"
+    ) {
+      return null;
+    }
+    return {
+      id: candidate.id,
+      human_key: candidate.human_key,
+      title: candidate.title,
+      status: typeof candidate.status === "string" ? candidate.status : "",
+    };
+  };
 
   const formatRow = (item: ReferenceItem): AutocompleteItem => ({
     // The value doubles as the inserted token: `#task:` plus the canonical
@@ -946,20 +951,26 @@ export function createTaskAdapter(options: {
 
     async searchServer(partial, searchOptions = {}) {
       try {
-        const client = await createClient();
-        const res = await client.listTasks({
-          search: partial,
-          status: "ALL",
-          archived: "all",
-          limit: searchOptions.limit ?? MAX_SUGGESTIONS,
-          sort_by: "updated_at",
-          sort_dir: "desc",
-        });
+        const ai = await createInterface();
+        // The live listTasks contract: full-text `q`, archived visibility
+        // ("all" spans open + archived), paging, sorting. The stale
+        // `search`/`status` keys the REST call once sent are gone: the live
+        // server does not accept them.
+        const payload = auraMcpJson(
+          await ai.searchTasks({
+            q: partial,
+            archived: "all",
+            limit: searchOptions.limit ?? MAX_SUGGESTIONS,
+            sort_by: "updated_at",
+            sort_dir: "desc",
+          }),
+        );
         if (searchOptions.signal?.aborted) return [];
-        return res.items.map(toReferenceItem);
+        return taskItemsOf(payload).map(toReferenceItem);
       } catch {
-        // Missing credentials or a failed search: the SWR merge gets nothing
-        // fresh and skips the write; the session is never disturbed.
+        // A failed call, an unavailable tool path (contract drift), or
+        // missing credentials: the SWR merge gets nothing fresh and skips
+        // the write; the session is never disturbed.
         return [];
       }
     },
@@ -977,46 +988,52 @@ export function createTaskAdapter(options: {
       if (hit) return hit;
       // ...then via the targeted by-key lookup (matches case-insensitively).
       try {
-        const client = await createClient();
-        return toReferenceItem(await client.getTaskByHumanKey(token));
+        const ai = await createInterface();
+        const task = taskPayloadOf(auraMcpJson(await ai.getTaskByHumanKey(token)));
+        return task === null ? null : toReferenceItem(task);
       } catch {
-        // Missing credentials, 404/403, or network: leave the reference as
-        // typed so the agent can resolve it via the `aura` skill.
+        // Missing credentials, an unavailable tool path (contract drift),
+        // 404/403, or network: leave the reference as typed so the agent can
+        // resolve it via the `aura` skill.
         return null;
       }
     },
 
     async warmup(cache, warmupOptions = {}) {
       try {
-        const client = await createClient();
+        const ai = await createInterface();
         let page = 1;
         let collected = 0;
         while (collected < MAX_TASKS) {
           if (warmupOptions.signal?.aborted) return;
-          // `status: "ALL"` spans open + archived statuses; `archived: "all"`
-          // also surfaces archived tasks (see TaskListQuery on the typing).
-          const res = await client.listTasks({
-            status: "ALL",
-            archived: "all",
-            limit: PAGE_SIZE,
-            page,
-            sort_by: "updated_at",
-            sort_dir: "desc",
-          });
-          const mapped = res.items.map(toReferenceItem);
+          // The live wire contract: `archived: "all"` surfaces archived
+          // tasks (the archived-visibility parameter; the live tool has no
+          // status filter at all, and there is no full-text filter on a
+          // warmup page).
+          const payload = auraMcpJson(
+            await ai.searchTasks({
+              archived: "all",
+              limit: PAGE_SIZE,
+              page,
+              sort_by: "updated_at",
+              sort_dir: "desc",
+            }),
+          );
+          const mapped = taskItemsOf(payload).map(toReferenceItem);
           // Write page by page so partial progress (later page failure or an
           // abort mid-flight) still lands.
           cache.write(TASK_KIND, mapped);
           collected += mapped.length;
-          if (res.items.length < PAGE_SIZE) return;
+          if (mapped.length < PAGE_SIZE) return;
           page += 1;
         }
       } catch {
-        // Missing credentials (createDefaultAuraClient throws) or a failed
-        // page: warmup is best-effort. Whatever pages landed stay cached; the
-        // session is never disturbed and the provider keeps deferring until
-        // data exists. Credentials appearing later in the session do not
-        // retry: warmup is one-shot at session_start (this slice's contract).
+        // Missing credentials (the interface construction rejects), a failed
+        // page, or an unavailable tool path: warmup is best-effort. Whatever
+        // pages landed stay cached; the session is never disturbed and the
+        // provider keeps deferring until data exists. Credentials appearing
+        // later in the session do not retry: warmup is one-shot at
+        // session_start (this slice's contract).
       }
     },
   };
@@ -1949,7 +1966,7 @@ export function createReferenceAutocompleteProvider(
  * imports, so we dynamic-import the client factory here to keep the
  * unit-test entry point runnable with `node --experimental-strip-types`.
  */
-async function createDefaultClient(): Promise<TaskAuraClient & ArtifactAuraClient & WikiAuraClient> {
+async function createDefaultClient(): Promise<ArtifactAuraClient & WikiAuraClient> {
   const { createDefaultAuraClient } = await import("@pi-aura/shared/aura-client");
   return createDefaultAuraClient();
 }
@@ -2019,7 +2036,22 @@ async function createSessionCache(): Promise<{
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI): void {
-  const taskAdapter = createTaskAdapter({ createClient: createDefaultClient });
+  // The session's typed aura-mcp interface: constructed once per session_start
+  // (its construction runs the contract self-check; the notify hook surfaces
+  // drift warnings through the UI). A failed construction — missing
+  // credentials, unreachable server — stays rejected for the whole session and
+  // every lookup degrades to cache-only, the established no-credentials
+  // behavior; a /reload re-emits session_start and re-arms everything. The
+  // adapters receive this accessor (not the promise) so a session swap is
+  // visible to every lookup; before the first session_start it rejects.
+  let sessionInterface: Promise<AuraMcpInterface> | null = null;
+  const createInterface = (): Promise<AuraMcpInterface> => {
+    if (sessionInterface === null) {
+      return Promise.reject(new Error("the aura-mcp interface is not built yet"));
+    }
+    return sessionInterface;
+  };
+  const taskAdapter = createTaskAdapter({ createInterface });
   // The rule kind (local-only): the rules ride engine memory, never the
   // reference cache (they are cwd-local; persisting rows would
   // cross-contaminate repos). The factory loads them per session and hands
@@ -2073,22 +2105,30 @@ export default function (pi: ExtensionAPI): void {
     // credential-less state must not keep the previous session's latch, or
     // every mention would attempt a doomed (swallowed) targeted fetch.
     clientAvailable = false;
-    // The SWR refresh gate: off until one client build succeeds in this
-    // session. Detection is the same createDefaultAuraClient() throw the
-    // warmup relies on, probed once here: without credentials (no baseUrl or
-    // no PAT in the keyring) no refresh is fired at all. Like the warmup,
-    // this is one-shot: credentials appearing later in the session do not
-    // re-arm the gate until a /reload re-emits session_start. The same
-    // success latches `clientAvailable` for the expansion lookup.
+    // The SWR refresh gate: off until one interface construction succeeds in
+    // this session. The construction reads settings + keyring and runs the
+    // contract self-check; its notify hook surfaces drift warnings through the
+    // UI (cosmetic drift warns and keeps the path; core drift names what
+    // broke, and that tool's path fails fast — the adapters map the thrown
+    // `AuraMcpToolUnavailableError` onto their cache-only answers). Detection
+    // is the construction rejection itself, probed once here: without
+    // credentials (no baseUrl or no PAT in the keyring) no refresh is fired
+    // at all. Like the warmup, this is one-shot: a failed construction is
+    // not retried within the session until a /reload re-emits session_start.
+    // The same success latches `clientAvailable` for the expansion lookup.
     let refreshAllowed = false;
-    void createDefaultClient()
+    sessionInterface = createAuraMcpInterface({
+      notify: (message, type) => ctx.ui.notify(message, type ?? "warning"),
+    });
+    void sessionInterface
       .then(() => {
         refreshAllowed = true;
         clientAvailable = true;
       })
       .catch(() => {
-        // No credentials: the gate stays off for the whole session; the
-        // provider defers on the empty cache exactly as in slice 1.
+        // No credentials (or no reachable server): the gates stay off for the
+        // whole session; the provider defers on the empty cache exactly as
+        // before, and every mention stays as typed.
       });
 
     ctx.ui.addAutocompleteProvider((current) =>

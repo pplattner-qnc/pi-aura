@@ -74,6 +74,12 @@ import auraReferences, {
   type WikiTreeNode,
 } from "./aura-references.ts";
 import type { Rule } from "./cursor-rules.ts";
+import { createAuraMcpInterface, type AuraMcpCaller } from "./aura-mcp-client.ts";
+import {
+  SHIPPED_AURA_MCP_TOOLS,
+  type AuraMcpLiveTool,
+  type ShippedToolContract,
+} from "./aura-mcp-contract.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,6 +102,119 @@ function stubAdapter(kind: string) {
     formatExpansion: (item: { key: string }) => `<${kind}-ref key="${item.key}"></${kind}-ref>`,
     resolveFullToken: async () => null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// The aura-mcp-dev fake caller (the typed interface's caller seam): the
+// adapters under test are fed through a real createAuraMcpInterface built
+// over this fake, so every server-facing test exercises the tool envelope,
+// the payload extraction, and the self-check exactly as the live server
+// feeds them (the arch spec's caller seam, the mention ticket's "fake
+// caller" requirement).
+// ---------------------------------------------------------------------------
+
+/** Convert a shipped contract into the live-shaped tool the server would
+ *  report for it (no drift) — the fake `listTools` baseline. */
+function toLiveTool(shipped: ShippedToolContract): AuraMcpLiveTool {
+  const lines = shipped.description.split("\n");
+  const hasTitleLine = lines.length > 1;
+  const properties: Record<string, unknown> = {};
+  const required: string[] = [];
+  for (const [name, param] of Object.entries(shipped.params)) {
+    properties[name] = {
+      type: param.type === "number" ? "integer" : param.type,
+      description: param.description,
+      ...(param.enum !== undefined ? { enum: [...param.enum] } : {}),
+      ...(param.default !== undefined ? { default: param.default } : {}),
+    };
+    if (param.required) required.push(name);
+  }
+  return {
+    name: shipped.name,
+    ...(hasTitleLine ? { title: lines[0] } : {}),
+    description: hasTitleLine ? lines.slice(1).join("\n").replace(/^\n+/, "") : lines[0],
+    inputSchema: { type: "object", properties, ...(required.length > 0 ? { required } : {}) },
+  };
+}
+
+/** Wrap a tool's JSON payload in the MCP result envelope. */
+function okResult(payload: unknown) {
+  return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+}
+
+/** A fake aura-mcp-dev caller: per-tool payload handlers, each handed the
+ *  call's args and returning the tool's JSON payload (the envelope is
+ *  wrapped here). A tool without a handler rejects (the natural error
+ *  shape). `calls` records only callTool invocations (never listTools, so
+ *  the construction-time self-check stays invisible to the assertions). */
+function fakeAuraCaller(handlers: Record<string, (args: Record<string, unknown>) => unknown> = {}) {
+  const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+  const caller: AuraMcpCaller = {
+    async callTool(tool, args) {
+      calls.push({ tool, args });
+      const handler = handlers[tool];
+      if (handler === undefined) throw new Error(`no fake handler for ${tool}`);
+      return okResult(await handler(args));
+    },
+    async listTools() {
+      return SHIPPED_AURA_MCP_TOOLS.map(toLiveTool);
+    },
+  };
+  return { caller, calls };
+}
+
+/** The typed interface over a fake caller: what every adapter under test
+ *  consumes through its `createInterface` seam. */
+async function interfaceOverCaller(caller: AuraMcpCaller) {
+  return createAuraMcpInterface({ caller });
+}
+
+/** A never-available interface factory (the no-credentials/degraded seam):
+ *  construction rejects, so every server lookup fails and the adapter
+ *  degrades to its cache-only answers. */
+async function noopInterface(): Promise<never> {
+  throw new Error("no credentials");
+}
+
+/** A promise with its resolve/reject exposed, so tests decide when (and how)
+ *  the server answers. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** A controllable aura-mcp-dev caller for the SWR seam: every callTool is a
+ *  deferred promise the test resolves (with the tool's JSON payload) or
+ *  rejects, never answering on its own. Calls are recorded with their tool
+ *  and args; the deferred handles are handed back in call order. */
+function controllableCaller() {
+  const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+  const pending: Array<ReturnType<typeof deferred<unknown>>> = [];
+  const caller: AuraMcpCaller = {
+    async callTool(tool, args) {
+      calls.push({ tool, args });
+      const d = deferred<unknown>();
+      pending.push(d);
+      return okResult(await d.promise);
+    },
+    async listTools() {
+      return SHIPPED_AURA_MCP_TOOLS.map(toLiveTool);
+    },
+  };
+  return { caller, calls, pending };
+}
+
+/** Let every pending microtask drain before asserting on a started call: the
+ *  typed interface adds awaits (the construction's self-check, the tool
+ *  envelope) between the refresh start and the fake caller's record. A
+ *  macrotask boundary guarantees the whole pending microtask chain ran. */
+async function settle(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 // ---------------------------------------------------------------------------
@@ -392,11 +511,7 @@ console.log("filterReferenceItems: ok");
 // ---------------------------------------------------------------------------
 
 {
-  const adapter = createTaskAdapter({
-    createClient: async () => {
-      throw new Error("no credentials in this test");
-    },
-  });
+  const adapter = createTaskAdapter({ createInterface: noopInterface });
 
   assert.equal(adapter.kind, "task");
 
@@ -466,7 +581,10 @@ console.log("filterReferenceItems: ok");
 console.log("createTaskAdapter searchLocal + formatRow: ok");
 
 // ---------------------------------------------------------------------------
-// createTaskAdapter: warmup (listTasks pagination into the cache)
+// createTaskAdapter: warmup (searchTasks pagination into the cache) — over
+// the typed interface: the wire parameters are the live listTasks contract
+// (full-text `q` plus archived visibility), and the stale `search`/`status`
+// keys the old REST call sent are gone.
 // ---------------------------------------------------------------------------
 
 interface FakeTask {
@@ -485,59 +603,53 @@ function fakeTasks(count: number, offset = 0): FakeTask[] {
   }));
 }
 
-/** Fake AuraClient: one array of pages; options to fail or abort on a page. */
-function fakeClient(pages: FakeTask[][], behavior?: {
-  failOnPage?: number;
-  abortOnPage?: (signal: AbortSignal) => void;
-}) {
+/** Fake aura-mcp-dev task surface: one array of pages served by the listTasks
+ *  handler (paged by the `page` arg), with call recording (the full args of
+ *  every call) and a failure switch. */
+function fakeTaskCaller(pages: FakeTask[][], behavior?: { failOnPage?: number }) {
   const pageCalls: number[] = [];
-  const searches: string[] = [];
-  return {
-    client: {
-      listTasks: async (query?: { page?: number; search?: string }) => {
-        const page = query?.page ?? 1;
-        pageCalls.push(page);
-        if (query?.search !== undefined) searches.push(query.search);
-        if (behavior?.failOnPage === page) throw new Error("network down");
-        behavior?.abortOnPage?.(new AbortController().signal);
-        return { items: pages[page - 1] ?? [], pagination: {} };
-      },
-      getTaskByHumanKey: async () => {
-        throw new Error("not used here");
-      },
+  const argLog: Array<Record<string, unknown>> = [];
+  const { caller } = fakeAuraCaller({
+    listTasks: (args) => {
+      const page = typeof args.page === "number" ? args.page : 1;
+      pageCalls.push(page);
+      argLog.push(args);
+      if (behavior?.failOnPage === page) throw new Error("network down");
+      return { items: pages[page - 1] ?? [], pagination: {} };
     },
-    pageCalls,
-    searches,
-  };
+  });
+  return { caller, pageCalls, argLog };
+}
+
+/** The exact wire parameters the adapter must send for a warmup page. */
+function warmupPageArgs(page: number): Record<string, unknown> {
+  return { archived: "all", limit: 100, page, sort_by: "updated_at", sort_dir: "desc" };
 }
 
 {
   // Multi-page pagination: page 1 full (100 items), page 2 partial. Writes
   // land page by page so partial progress stays cached.
-  const { client, pageCalls } = fakeClient([fakeTasks(100), fakeTasks(3, 100)]);
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, pageCalls, argLog } = fakeTaskCaller([fakeTasks(100), fakeTasks(3, 100)]);
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   await adapter.warmup(cache);
   assert.equal(cache.read("task").length, 103);
   assert.deepEqual(pageCalls, [1, 2], "stops after a partial page");
+  assert.deepEqual(argLog, [warmupPageArgs(1), warmupPageArgs(2)], "the live wire contract: full-text-free paging with archived visibility; no stale `search`/`status` keys");
   assert.equal(cache.fetchedAt("task") !== null, true);
 
   // Cap: at most MAX_TASKS tasks are pulled (5 full pages of 100 reach the
   // 500 cap, so a 6th page is never requested). The cache keeps the head.
-  const big = fakeClient([fakeTasks(100, 0), fakeTasks(100, 100), fakeTasks(100, 200), fakeTasks(100, 300), fakeTasks(100, 400), fakeTasks(100, 500), fakeTasks(100, 600)]);
-  const capped = createTaskAdapter({ createClient: async () => big.client });
+  const big = fakeTaskCaller([fakeTasks(100, 0), fakeTasks(100, 100), fakeTasks(100, 200), fakeTasks(100, 300), fakeTasks(100, 400), fakeTasks(100, 500), fakeTasks(100, 600)]);
+  const capped = createTaskAdapter({ createInterface: async () => interfaceOverCaller(big.caller) });
   const cappedCache = createInMemoryReferenceCache();
   await capped.warmup(cappedCache);
   assert.equal(cappedCache.read("task").length, 500);
   assert.deepEqual(big.pageCalls, [1, 2, 3, 4, 5], "stops at the cap without a surplus page");
 
-  // Missing credentials: createDefaultAuraClient throws. Warmup no-ops
+  // Missing credentials: the interface construction rejects. Warmup no-ops
   // (resolves, empty cache, nothing thrown into the session).
-  const noCreds = createTaskAdapter({
-    createClient: async () => {
-      throw new Error("missing PAT");
-    },
-  });
+  const noCreds = createTaskAdapter({ createInterface: noopInterface });
   const emptyCache = createInMemoryReferenceCache();
   await noCreds.warmup(emptyCache);
   assert.deepEqual(emptyCache.read("task"), []);
@@ -547,34 +659,31 @@ function fakeClient(pages: FakeTask[][], behavior?: {
   // and nothing throws into the session.
   const controller = new AbortController();
   const abortPageCalls: number[] = [];
-  const aborting = {
-    listTasks: async (query?: { page?: number }) => {
-      const page = query?.page ?? 1;
+  const { caller: abortCaller } = fakeAuraCaller({
+    listTasks: (args) => {
+      const page = typeof args.page === "number" ? args.page : 1;
       abortPageCalls.push(page);
       if (page >= 2) controller.abort();
       return { items: fakeTasks(100, (page - 1) * 100), pagination: {} };
     },
-    getTaskByHumanKey: async () => {
-      throw new Error("not used here");
-    },
-  };
-  const abortAdapter = createTaskAdapter({ createClient: async () => aborting });
+  });
+  const abortAdapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(abortCaller) });
   const abortCache = createInMemoryReferenceCache();
   await abortAdapter.warmup(abortCache, { signal: controller.signal });
   assert.deepEqual(abortPageCalls, [1, 2], "pagination stops after the abort");
   assert.equal(abortCache.read("task").length, 200, "landed pages stay cached");
 
   // A page fetch that rejects: warmup resolves (no throw), earlier pages stay.
-  const failing = fakeClient([fakeTasks(100), fakeTasks(100, 100)], { failOnPage: 2 });
-  const failAdapter = createTaskAdapter({ createClient: async () => failing.client });
+  const failing = fakeTaskCaller([fakeTasks(100), fakeTasks(100, 100)], { failOnPage: 2 });
+  const failAdapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(failing.caller) });
   const failCache = createInMemoryReferenceCache();
   await failAdapter.warmup(failCache);
   assert.equal(failCache.read("task").length, 100, "page 1 survived the page 2 failure");
 
   // A warmup into an already-populated cache merges (upsert) rather than
   // replacing: a re-warmup keeps ids stable.
-  const { client: single } = fakeClient([fakeTasks(2)]);
-  const mergeAdapter = createTaskAdapter({ createClient: async () => single });
+  const single = fakeTaskCaller([fakeTasks(2)]);
+  const mergeAdapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(single.caller) });
   const mergeCache = createInMemoryReferenceCache();
   await mergeAdapter.warmup(mergeCache);
   await mergeAdapter.warmup(mergeCache);
@@ -584,53 +693,23 @@ function fakeClient(pages: FakeTask[][], behavior?: {
 console.log("createTaskAdapter warmup: ok");
 
 // ---------------------------------------------------------------------------
-// refreshReferenceKind (SWR orchestration: injected fetch + cache)
+// refreshReferenceKind (SWR orchestration: injected fetch + cache). The
+// adapter's server search runs over the typed interface (built once over the
+// controllable fake caller), so the deferred answers and the wire args the
+// tests observe are the live tool call's.
 // ---------------------------------------------------------------------------
-
-/** A promise with its resolve/reject exposed, so tests decide when (and how)
- *  the server answers. */
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-/** What one `listTasks` search eventually answers with. */
-type SearchReply = { items: FakeTask[]; pagination: unknown };
-type SearchCall = ReturnType<typeof deferred<SearchReply>> & { search: string | undefined };
-
-/** A controllable AuraClient for the SWR seam: every `listTasks` search is a
- *  deferred promise the test resolves, rejects, or leaves hanging. Each call
- *  is recorded with its query (the typed partial lands in `search`). */
-function controllableSearchClient() {
-  const calls: SearchCall[] = [];
-  return {
-    client: {
-      listTasks: (query?: { search?: string }) => {
-        const d = deferred<SearchReply>();
-        calls.push({ ...d, search: query?.search });
-        return d.promise;
-      },
-      getTaskByHumanKey: async () => {
-        throw new Error("not used here");
-      },
-    },
-    calls,
-  };
-}
 
 {
   // A completed refresh writes through to the cache (the next query sees fresh
   // data): a cached item with a stale title plus a server result carrying the
   // corrected title. The server result replaces its cached twin in place
-  // (dedupe by id) and stamps a fresh fetchedAt.
+  // (dedupe by id) and stamps a fresh fetchedAt. The wire parameters are the
+  // live listTasks contract: full-text `q` plus archived visibility, capped
+  // and sorted; the stale `search` and `status` keys the old REST call sent
+  // are gone.
   let ts = 0;
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache(() => {
     ts += 1000;
     return ts;
@@ -638,13 +717,19 @@ function controllableSearchClient() {
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
 
   const refresh = refreshReferenceKind(cache, adapter, "42");
-  // One microtask hop: the refresh starts its search asynchronously (the
-  // adapter awaits its client factory), so the call record exists only after
-  // the hop. Deterministic: the search start was queued before this await.
-  await Promise.resolve();
+  // Let the refresh start settle: the adapter awaits its interface factory
+  // (whose construction runs the self-check) before the tool call, so the
+  // call record exists only after those awaits drain. Deterministic: the
+  // search start was queued before this await.
+  await settle();
   assert.equal(calls.length, 1, "the refresh fired exactly one server search");
-  assert.equal(calls[0]?.search, "42", "the typed partial is the listTasks search");
-  calls[0]!.resolve({
+  assert.equal(calls[0]?.tool, "listTasks", "the search runs over the typed interface's listTasks tool");
+  assert.deepEqual(
+    calls[0]?.args,
+    { q: "42", archived: "all", limit: MAX_SUGGESTIONS, sort_by: "updated_at", sort_dir: "desc" },
+    "the live wire contract: full-text `q` plus archived visibility, capped and sorted; no stale `search`/`status` keys",
+  );
+  pending[0]!.resolve({
     items: [{ id: "u1", human_key: "AURA-42", title: "Fix the renamed login bug", status: "OPEN" }],
     pagination: {},
   });
@@ -665,14 +750,14 @@ console.log("refreshReferenceKind write-through: ok");
 {
   // A server-only match (a task outside the local cache window) is added to
   // the cache, so the next query can find it by title substring.
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
 
   const refresh = refreshReferenceKind(cache, adapter, "obscure");
-  await Promise.resolve(); // let the async search start reach listTasks
-  calls[0]!.resolve({
+  await settle(); // let the interface construction and the tool call reach the fake
+  pending[0]!.resolve({
     items: [{ id: "u2", human_key: "AURA-999", title: "The obscure story point spike", status: "OPEN" }],
     pagination: {},
   });
@@ -691,8 +776,8 @@ console.log("refreshReferenceKind server-only match: ok");
   // Merge semantics: a server page carrying one corrected twin and one new
   // task merges over the cache (upsert by id; cached order preserved for the
   // kept entries).
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   cache.write("task", [
     { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" },
@@ -700,8 +785,8 @@ console.log("refreshReferenceKind server-only match: ok");
   ]);
 
   const refresh = refreshReferenceKind(cache, adapter, "42");
-  await Promise.resolve(); // let the async search start reach listTasks
-  calls[0]!.resolve({
+  await settle(); // let the interface construction and the tool call reach the fake
+  pending[0]!.resolve({
     items: [
       { id: "u1", human_key: "AURA-42", title: "Fix the renamed login bug", status: "DONE" },
       { id: "u3", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" },
@@ -726,8 +811,8 @@ console.log("refreshReferenceKind merge over local: ok");
   // Abort guards. A hung fetch that resolves after the request was aborted
   // must not write (no write after abort), and an already-aborted request
   // fires no fetch at all: aborted queries stop their work.
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
   const stampBefore = cache.fetchedAt("task");
@@ -742,10 +827,10 @@ console.log("refreshReferenceKind merge over local: ok");
   // dropped, the cache stays exactly as it was.
   const controller = new AbortController();
   const hung = refreshReferenceKind(cache, adapter, "42", { signal: controller.signal });
-  await Promise.resolve(); // let the async search start reach listTasks
+  await settle(); // let the interface construction and the tool call reach the fake
   assert.equal(calls.length, 1);
   controller.abort(); // pi-tui superseded this request mid-flight
-  calls[0]!.resolve({
+  pending[0]!.resolve({
     items: [{ id: "u1", human_key: "AURA-42", title: "Fix the late renamed title", status: "OPEN" }],
     pagination: {},
   });
@@ -761,20 +846,20 @@ console.log("refreshReferenceKind abort guards: ok");
 {
   // Rapid successive queries: pi-tui aborts the earlier request when the
   // later starts, so only the later query's results may land.
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
 
   const earlier = new AbortController();
   const later = new AbortController();
   const first = refreshReferenceKind(cache, adapter, "42", { signal: earlier.signal });
   const second = refreshReferenceKind(cache, adapter, "42", { signal: later.signal });
-  await Promise.resolve(); // let both async searches reach listTasks
+  await settle(); // let both interface constructions and tool calls reach the fake
   assert.equal(calls.length, 2, "each query fired its own search");
 
   earlier.abort(); // the later request superseded the earlier one
-  calls[0]!.resolve({ items: [{ id: "ua", human_key: "AURA-11", title: "Earlier query result", status: "OPEN" }], pagination: {} });
-  calls[1]!.resolve({ items: [{ id: "ub", human_key: "AURA-22", title: "Later query result", status: "OPEN" }], pagination: {} });
+  pending[0]!.resolve({ items: [{ id: "ua", human_key: "AURA-11", title: "Earlier query result", status: "OPEN" }], pagination: {} });
+  pending[1]!.resolve({ items: [{ id: "ub", human_key: "AURA-22", title: "Later query result", status: "OPEN" }], pagination: {} });
   await Promise.all([first, second]);
 
   assert.deepEqual(
@@ -791,8 +876,8 @@ console.log("refreshReferenceKind rapid queries (later aborts earlier): ok");
   // mid-search) and the refresh resolves without throwing, leaving the cache
   // exactly as it was (items and stamp). Cached suggestions still return.
   let ts = 0;
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache(() => {
     ts += 1000;
     return ts;
@@ -800,8 +885,8 @@ console.log("refreshReferenceKind rapid queries (later aborts earlier): ok");
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
 
   const refresh = refreshReferenceKind(cache, adapter, "42");
-  await Promise.resolve(); // let the async search start reach listTasks
-  calls[0]!.reject(new Error("connection reset mid-search"));
+  await settle(); // let the interface construction and the tool call reach the fake
+  pending[0]!.reject(new Error("connection reset mid-search"));
   await refresh; // resolves, never throws into the session
   const after = cache.read("task");
   assert.equal(after.length, 1);
@@ -833,14 +918,14 @@ console.log("refreshReferenceKind never rejects: ok");
 {
   // The server answers with an empty result: local items are kept (and the
   // cache keeps its stamp, since nothing new was fetched to write).
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache(() => 7000);
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
 
   const refresh = refreshReferenceKind(cache, adapter, "zzz-nothing-matches");
-  await Promise.resolve(); // let the async search start reach listTasks
-  calls[0]!.resolve({ items: [], pagination: {} });
+  await settle(); // let the interface construction and the tool call reach the fake
+  pending[0]!.resolve({ items: [], pagination: {} });
   await refresh;
   const after = cache.read("task");
   assert.deepEqual(after.map((e) => e.key), ["AURA-42"], "local items kept on an empty server result");
@@ -852,13 +937,13 @@ console.log("refreshReferenceKind empty server result: ok");
 {
   // Edge: server results with unknown extra fields. The adapter maps a task
   // to its reference fields; extra fields never reach the cache entries.
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache(() => 9000);
 
   const refresh = refreshReferenceKind(cache, adapter, "42");
-  await Promise.resolve(); // let the async search start reach listTasks
-  calls[0]!.resolve({
+  await settle(); // let the interface construction and the tool call reach the fake
+  pending[0]!.resolve({
     items: [
       {
         id: "u1",
@@ -888,12 +973,12 @@ console.log("refreshReferenceKind unknown extra fields: ok");
 /** A provider wired over a controllable-search task adapter: exposes the
  *  search-call recorder so tests observe the background refreshes. */
 function swrProvider(cache: ReturnType<typeof createInMemoryReferenceCache>) {
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const registry = createReferenceRegistry([adapter]);
   const current = fakeCurrent();
   const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache);
-  return { provider, calls, current };
+  return { provider, calls, pending, current };
 }
 
 {
@@ -903,12 +988,12 @@ function swrProvider(cache: ReturnType<typeof createInMemoryReferenceCache>) {
   // background.
   const cache = createInMemoryReferenceCache();
   cache.write("task", taskItems());
-  const { provider, calls } = swrProvider(cache);
+  const { provider, calls, pending } = swrProvider(cache);
 
   const suggestions = await suggestAt(provider, "#task:42", 8);
   assert.deepEqual(suggestions?.items.map((i) => i.value), ["#task:AURA-42", "#task:AURA-424"]);
   assert.equal(suggestions?.prefix, "#task:42");
-  await Promise.resolve(); // one hop: the background refresh reaches listTasks
+  await settle(); // the background refresh reaches the fake caller
   assert.equal(calls.length, 1, "the same query fired the background refresh");
   // The fetch is left hanging forever: the provider never awaited it.
 }
@@ -921,15 +1006,15 @@ console.log("provider SWR: instant cache answer, background refresh fired: ok");
   // provider (that is how a task outside the cache window becomes findable).
   const cache = createInMemoryReferenceCache();
   cache.write("task", taskItems());
-  const { provider, calls, current } = swrProvider(cache);
+  const { provider, calls, pending, current } = swrProvider(cache);
 
   await suggestAt(provider, "#task:", 6); // empty partial: the cache head
   await suggestAt(provider, "#task:42", 8); // key partial
   await suggestAt(provider, "#task:login", 11); // title partial
   const deferBase = current.calls.suggestions;
   await suggestAt(provider, "#task:zzz", 9); // zero-match: defers, still refreshes
-  await Promise.resolve(); // let the last refresh reach listTasks
-  assert.deepEqual(calls.map((c) => c.search), ["", "42", "login", "zzz"]);
+  await settle(); // let the last refresh reach the fake caller
+  assert.deepEqual(calls.map((c) => c.args.q), ["", "42", "login", "zzz"]);
   assert.equal(current.calls.suggestions, deferBase + 1, "zero-match still defers to the built-in provider");
 
   // A non-reference token (deferred from the start) fires no refresh.
@@ -945,15 +1030,15 @@ console.log("provider SWR: every reference query refreshes with its partial: ok"
   // aborts superseded requests, and a late server answer must never land.
   const cache = createInMemoryReferenceCache();
   cache.write("task", taskItems());
-  const { provider, calls } = swrProvider(cache);
+  const { provider, calls, pending } = swrProvider(cache);
   const controller = new AbortController();
 
   const suggestions = await provider.getSuggestions(["#task:login"], 0, 11, { signal: controller.signal });
   assert.equal(suggestions?.items[0]?.value, "#task:AURA-42", "the cache answered instantly");
-  await Promise.resolve(); // the refresh is now in flight
+  await settle(); // the refresh is now in flight
   assert.equal(calls.length, 1);
   controller.abort(); // pi-tui superseded this request
-  calls[0]!.resolve({
+  pending[0]!.resolve({
     items: [{ id: "late", human_key: "AURA-555", title: "Late server answer", status: "OPEN" }],
     pagination: {},
   });
@@ -974,8 +1059,8 @@ console.log("provider SWR: the request abort signal guards the write: ok");
   // still answer from the cache but fire no server search.
   const cache = createInMemoryReferenceCache();
   cache.write("task", taskItems());
-  const gated = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => gated.client });
+  const gated = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(gated.caller) });
   const registry = createReferenceRegistry([adapter]);
   const current = fakeCurrent();
   const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache, {
@@ -985,7 +1070,7 @@ console.log("provider SWR: the request abort signal guards the write: ok");
   await suggestAt(provider, "#task:42", 8);
   await suggestAt(provider, "#task:", 6);
   await suggestAt(provider, "#task:zzz", 9); // zero-match: defers, and no refresh either
-  await Promise.resolve(); // a fired refresh would have reached listTasks by now
+  await settle(); // a fired refresh would have reached the fake caller by now
   assert.equal(gated.calls.length, 0, "no refresh fired without credentials");
   // The cached answers still come out.
   const suggestions = await suggestAt(provider, "#task:42", 8);
@@ -1001,12 +1086,12 @@ console.log("provider SWR: no refresh without credentials (canRefresh gate): ok"
   // keystroke) sees the fresh title.
   const cache = createInMemoryReferenceCache();
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
-  const { provider, calls } = swrProvider(cache);
+  const { provider, calls, pending } = swrProvider(cache);
 
   const stale = await suggestAt(provider, "#task:login", 11);
   assert.equal(stale?.items[0]?.description, "[OPEN] Fix the login bug", "query 1: the stale cached row");
-  await Promise.resolve(); // the refresh is in flight
-  calls[0]!.resolve({
+  await settle(); // the refresh is in flight
+  pending[0]!.resolve({
     items: [{ id: "u1", human_key: "AURA-42", title: "Fix the renamed login bug", status: "OPEN" }],
     pagination: {},
   });
@@ -1025,13 +1110,13 @@ console.log("provider SWR end-to-end: renamed title visible one keystroke later:
   // query 2 offers it as a reference row.
   const cache = createInMemoryReferenceCache();
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
-  const { provider, calls, current } = swrProvider(cache);
+  const { provider, calls, pending, current } = swrProvider(cache);
 
   const deferredFirst = await suggestAt(provider, "#task:unpronounceable", 21);
   assert.equal(deferredFirst?.items[0]?.value, "file.txt", "query 1: no local match, deferred");
-  await Promise.resolve(); // the refresh is in flight
-  assert.equal(calls[0]?.search, "unpronounceable");
-  calls[0]!.resolve({
+  await settle(); // the refresh is in flight
+  assert.equal(calls[0]?.args.q, "unpronounceable");
+  pending[0]!.resolve({
     items: [{ id: "u2", human_key: "AURA-888", title: "The unpronounceable wiki slug", status: "OPEN" }],
     pagination: {},
   });
@@ -1069,15 +1154,11 @@ function lookupOver(items: ReferenceItem[]): {
   };
 }
 
-/** The production-shaped registry (task kind only); the injected client
- *  factory throws so a test can never reach Aura through it. */
+/** The production-shaped registry (task kind only); the injected interface
+ *  factory rejects so a test can never reach Aura through it. */
 function expansionRegistry() {
   return createReferenceRegistry([
-    createTaskAdapter({
-      createClient: async () => {
-        throw new Error("no credentials in this test");
-      },
-    }),
+    createTaskAdapter({ createInterface: noopInterface }),
   ]);
 }
 
@@ -1211,11 +1292,7 @@ console.log("expandReferenceMentions: multiple + duplicate + case-insensitive: o
 // ---------------------------------------------------------------------------
 
 {
-  const adapter = createTaskAdapter({
-    createClient: async () => {
-      throw new Error("no credentials in this test");
-    },
-  });
+  const adapter = createTaskAdapter({ createInterface: noopInterface });
 
   // The format: key and status as attributes, title as element text.
   assert.equal(
@@ -1320,7 +1397,7 @@ function taskItems(): ReferenceItem[] {
 
 function wiredProvider(cache: ReturnType<typeof createInMemoryReferenceCache> | null) {
   const current = fakeCurrent();
-  const adapter = createTaskAdapter({ createClient: noopClient });
+  const adapter = createTaskAdapter({ createInterface: noopInterface });
   const registry = createReferenceRegistry([adapter]);
   const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache);
   return { current, provider, registry };
@@ -1411,7 +1488,7 @@ console.log("provider suggestions + deferral: ok");
   const bare = fakeCurrent();
   const bareProvider = { ...bare.provider } as Record<string, unknown>;
   delete bareProvider.shouldTriggerFileCompletion;
-  const adapter = createTaskAdapter({ createClient: noopClient });
+  const adapter = createTaskAdapter({ createInterface: noopInterface });
   const registry = createReferenceRegistry([adapter]);
   const overlay = createReferenceAutocompleteProvider(
     bareProvider as unknown as Parameters<typeof createReferenceAutocompleteProvider>[0],
@@ -1441,7 +1518,7 @@ console.log("provider failure modes (defer, no throw): ok");
     searchLocal: () => [{ value: "#wiki:row", label: "#wiki:row" }],
   };
   const registry = createReferenceRegistry([
-    createTaskAdapter({ createClient: noopClient }),
+    createTaskAdapter({ createInterface: noopInterface }),
     declining,
   ]);
   const provider = createReferenceAutocompleteProvider(current.provider, registry, () =>
@@ -1535,7 +1612,7 @@ console.log("alias registry registration + expansion routing: ok");
  *  adapter's client factory always throws, so a test can never reach Aura
  *  through it. */
 function auraAliasRegistry() {
-  const adapter = createTaskAdapter({ createClient: noopClient });
+  const adapter = createTaskAdapter({ createInterface: noopInterface });
   const registry = createReferenceRegistry([adapter]);
   registry.registerAlias(createAuraTaskAlias(adapter));
   return registry;
@@ -1631,18 +1708,18 @@ console.log("production @AURA- alias autocomplete: ok");
   // cached; AURA-1337 must come from the targeted fallback; AURA-999 is
   // unknown everywhere.
   const keyLookups: string[] = [];
-  const adapter = createTaskAdapter({
-    createClient: async () => ({
-      listTasks: async () => ({ items: [], pagination: {} }),
-      getTaskByHumanKey: async (key: string) => {
-        keyLookups.push(key);
-        if (key.toLowerCase() === "aura-1337") {
-          return { id: "u2", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" };
-        }
-        throw new Error("404 not found");
-      },
-    }),
+  const { caller } = fakeAuraCaller({
+    listTasks: () => ({ items: [], pagination: {} }),
+    getTaskByHumanKey: (args) => {
+      const key = String(args.human_key);
+      keyLookups.push(key);
+      if (key.toLowerCase() === "aura-1337") {
+        return { id: "u2", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" };
+      }
+      throw new Error("404 not found");
+    },
   });
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const registry = createReferenceRegistry([adapter]);
   registry.registerAlias(createAuraTaskAlias(adapter));
   const cache = createInMemoryReferenceCache();
@@ -1772,21 +1849,23 @@ console.log("once-per-session deprecation-warning decision: ok");
 // ---------------------------------------------------------------------------
 
 {
-  // A counting client factory: a cache hit must build no client at all (no
-  // targeted fetch); only the fallback reaches Aura.
-  let clientBuilds = 0;
+  // A counting interface factory: a cache hit must build no interface at all
+  // (no targeted fetch); only the fallback reaches Aura.
+  let interfaceBuilds = 0;
+  const { caller } = fakeAuraCaller({
+    listTasks: () => ({ items: [], pagination: {} }),
+    getTaskByHumanKey: (args) => {
+      const key = String(args.human_key);
+      if (key.toUpperCase() === "AURA-1337") {
+        return { id: "u2", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" };
+      }
+      throw new Error("404 not found");
+    },
+  });
   const adapter = createTaskAdapter({
-    createClient: async () => {
-      clientBuilds += 1;
-      return {
-        listTasks: async () => ({ items: [], pagination: {} }),
-        getTaskByHumanKey: async (key: string) => {
-          if (key.toUpperCase() === "AURA-1337") {
-            return { id: "u2", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" };
-          }
-          throw new Error("404 not found");
-        },
-      };
+    createInterface: async () => {
+      interfaceBuilds += 1;
+      return interfaceOverCaller(caller);
     },
   });
   const cache = createInMemoryReferenceCache(() => 5000);
@@ -1798,7 +1877,7 @@ console.log("once-per-session deprecation-warning decision: ok");
     await adapter.resolveFullToken("aura-42", cache),
     { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN", fetchedAt: 5000 },
   );
-  assert.equal(clientBuilds, 0, "a cache hit builds no client");
+  assert.equal(interfaceBuilds, 0, "a cache hit builds no interface");
 
   // Cache miss: the targeted getTaskByHumanKey fallback resolves (typed
   // casing differs; the expansion carries the canonical server key).
@@ -1806,7 +1885,7 @@ console.log("once-per-session deprecation-warning decision: ok");
     await adapter.resolveFullToken("aura-1337", cache),
     { kind: "task", id: "u2", key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" },
   );
-  assert.equal(clientBuilds, 1, "the fallback built exactly one client");
+  assert.equal(interfaceBuilds, 1, "the fallback built exactly one interface");
 
   // Targeted fetch miss (unknown key): null, so the mention stays as typed.
   assert.equal(await adapter.resolveFullToken("AURA-999", cache), null);
@@ -1814,7 +1893,7 @@ console.log("once-per-session deprecation-warning decision: ok");
   // Targeted fetch throws (network failure, missing credentials): null, and
   // nothing throws into the session.
   assert.equal(await adapter.resolveFullToken("AURA-404", cache), null);
-  assert.equal(clientBuilds, 3, "each fallback attempt built one client");
+  assert.equal(interfaceBuilds, 3, "each fallback attempt built one interface");
 }
 
 console.log("resolveFullToken cache-first + targeted fallback: ok");
@@ -2057,7 +2136,7 @@ console.log("createRuleAdapter resolveFullToken: ok");
 {
   const current = fakeCurrent();
   const registry = createReferenceRegistry([
-    createTaskAdapter({ createClient: noopClient }),
+    createTaskAdapter({ createInterface: noopInterface }),
     createRuleAdapter({ getRules: () => testRules() }),
   ]);
   const provider = createReferenceAutocompleteProvider(current.provider, registry, () => createInMemoryReferenceCache());
@@ -2105,7 +2184,7 @@ console.log("provider rule suggestions + deferral: ok");
 {
   const ruleAdapter = createRuleAdapter({ getRules: () => testRules() });
   const registry = createReferenceRegistry([
-    createTaskAdapter({ createClient: noopClient }),
+    createTaskAdapter({ createInterface: noopInterface }),
     ruleAdapter,
   ]);
   // The factory's per-kind lookup wiring, verbatim: local kinds resolve
@@ -2155,7 +2234,7 @@ console.log("rule expansion end-to-end: ok");
  *  adapters and both production aliases (`@AURA-`, `@rule:`), exactly as the
  *  extension factory registers them. */
 function ruleAliasRegistry(rules: Rule[] = testRules()) {
-  const taskAdapter = createTaskAdapter({ createClient: noopClient });
+  const taskAdapter = createTaskAdapter({ createInterface: noopInterface });
   const ruleAdapter = createRuleAdapter({ getRules: () => rules });
   const registry = createReferenceRegistry([taskAdapter, ruleAdapter]);
   registry.registerAlias(createAuraTaskAlias(taskAdapter));
@@ -3988,7 +4067,7 @@ console.log("factory: ok");
 {
   // A registry with all four production adapters, mirroring the factory.
   const registry = createReferenceRegistry([
-    createTaskAdapter({ createClient: noopClient }),
+    createTaskAdapter({ createInterface: noopInterface }),
     createRuleAdapter({ getRules: () => [] }),
     createArtifactAdapter({ createClient: noopClient }),
     createWikiAdapter({ createClient: noopClient }),
