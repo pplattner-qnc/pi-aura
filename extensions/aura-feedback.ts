@@ -3,8 +3,8 @@
  *
  * Registers an unadvertised `aura_feedback` tool the LLM can call to *propose*
  * a feedback submission to the Aura maintainers. Unlike the raw
- * `aura-mcp-dev_createFeedback` MCP tool — which submits directly with no
- * human sign-off — this tool always shows an interactive prompt first so the
+ * `mcp__aura_mcp_dev__createFeedback` MCP tool (which submits directly with no
+ * human sign-off), this tool always shows an interactive prompt first so the
  * user reviews what the agent wants to send and decides how to proceed.
  *
  * Tool parameters mirror the `POST /feedback` body (`FeedbackCreate` in
@@ -253,9 +253,9 @@ export default function (pi: ExtensionAPI): void {
     name: "aura_feedback",
     label: "Aura Feedback",
     description:
-      "Propose a feedback submission to the Aura maintainers (bugs, missing features, or workflow friction caused by Aura itself — not by how it is used). " +
+      "Propose a feedback submission to the Aura maintainers (bugs, missing features, or workflow friction caused by Aura itself, not by how it is used). " +
       "Shows the user an interactive prompt to sign off on the title, body, anonymous, and notify-me fields before anything is sent to Aura. " +
-      "Do not use the aura-mcp-dev_createFeedback MCP tool for this — it submits directly with no human sign-off.",
+      "Do not use the mcp__aura_mcp_dev__createFeedback MCP tool for this: it submits directly with no human sign-off.",
     // Deliberately no promptSnippet/promptGuidelines: the tool is available at
     // all times but not advertised in the system prompt. The `aura` skill's
     // feedback section is the only thing that tells the agent this exists.

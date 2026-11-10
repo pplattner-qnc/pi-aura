@@ -13,9 +13,11 @@
  */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   buildLogEntry,
   buildSendPayload,
+  default as auraFeedback,
   formatCreatedResultText,
   formatEditedResultText,
   formatRejectedResultText,
@@ -180,6 +182,81 @@ function createdRow(overrides: Partial<FeedbackDetail> = {}): FeedbackDetail {
     refineWithComment.includes("aura_feedback"),
     "refine-with-comment points at aura_feedback",
   );
+}
+
+// ---------------------------------------------------------------------------
+// Factory wiring: the registered tool, captured over a fake pi
+// ---------------------------------------------------------------------------
+
+/** The tool the factory registers, as tests drive it: the name, the
+ *  model-facing description, and `execute` returning the tool result. */
+interface RegisteredTool {
+  name: string;
+  description: string;
+  execute(
+    toolCallId: string,
+    params: Record<string, unknown>,
+    signal: unknown,
+    onUpdate: unknown,
+    ctx: unknown,
+  ): Promise<{ content: Array<{ type: string; text?: string }>; details?: AuraFeedbackDetailsShape }>;
+}
+
+/** The `details` payload the tool result carries (structural view). */
+interface AuraFeedbackDetailsShape {
+  outcome: "created" | "rejected" | "refined";
+  sentPayload?: Record<string, unknown>;
+  created?: Record<string, unknown>;
+  comment?: string;
+  edited?: boolean;
+}
+
+/** Run the extension factory over a fake pi and return the tool it
+ *  registered, so tests can assert the model-facing surface and drive
+ *  `execute` directly. */
+function captureRegisteredTool(options: Record<string, unknown> = {}): RegisteredTool {
+  let registered: RegisteredTool | undefined;
+  const fakePi = {
+    registerTool(tool: RegisteredTool) {
+      registered = tool;
+    },
+  };
+  auraFeedback(fakePi as never, options as never);
+  if (!registered) throw new Error("the feedback extension registered no tool");
+  return registered;
+}
+
+// ---------------------------------------------------------------------------
+// Criterion 3: the injected warning names the current full tool name and
+// still forbids direct model calls without sign-off
+// ---------------------------------------------------------------------------
+
+{
+  const tool = captureRegisteredTool();
+  assert.equal(tool.name, "aura_feedback", "the tool keeps its identity");
+  assert.ok(
+    tool.description.includes("mcp__aura_mcp_dev__createFeedback"),
+    "the warning names the current full tool name (pi's mcp__<server>__<tool> naming)",
+  );
+  assert.ok(
+    !tool.description.includes("aura-mcp-dev_createFeedback"),
+    "the stale token from the retired naming scheme is gone",
+  );
+  assert.ok(
+    tool.description.includes("Do not use") && tool.description.includes("no human sign-off"),
+    "the warning still forbids direct model calls without sign-off",
+  );
+  console.log("warning text: corrected tool naming, sign-off requirement kept: ok");
+}
+
+{
+  // The stale token is gone from the whole module (doc comments included).
+  const source = readFileSync(new URL("./aura-feedback.ts", import.meta.url), "utf8");
+  assert.ok(
+    !source.includes("aura-mcp-dev_createFeedback"),
+    "no stale tool-name token anywhere in the module",
+  );
+  console.log("module source: stale token gone: ok");
 }
 
 console.log("all aura-feedback tests passed");
