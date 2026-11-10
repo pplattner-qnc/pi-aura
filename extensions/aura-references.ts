@@ -2171,6 +2171,15 @@ export default function (pi: ExtensionAPI): void {
     // not retried within the session until a /reload re-emits session_start.
     // The same success latches `clientAvailable` for the expansion lookup.
     let refreshAllowed = false;
+    // A /reload re-emits session_start: release the previous session's held
+    // connection (the typed interface owns one, unlike the per-call REST
+    // client this engine replaced). Fire-and-forget; a failed close never
+    // disturbs the session, and an in-flight old-session lookup fails into
+    // its own catch and degrades to cache-only.
+    const previousInterface = sessionInterface;
+    if (previousInterface !== null) {
+      void previousInterface.then((ai) => ai.close()).catch(() => {});
+    }
     sessionInterface = createAuraMcpInterface({
       notify: (message, type) => ctx.ui.notify(message, type ?? "warning"),
     });
