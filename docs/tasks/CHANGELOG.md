@@ -146,6 +146,11 @@ Added a `rest` command group to the `aura` CLI that exposes every Aura REST oper
 
 
 
+
+## 2026-11-10, Usecase resources current (usecase-resources-current)
+
+All twelve usecase resources teach the live server again: the capacity file is rewritten around readCapacity's four scopes and the two member-commitment tools with their consent rules (settings and the cross-member view stay UI pointers), the stale uuid parameter names are swept from five files, the wiki file covers the frontmatter and version contracts, task-management gains the ten placed family sections (owner and crew, blocked, story points, the priority queue, progress, activity, user groups, repository linking, the workflow variant, the neighborhood read), and the code-search, unified-search, artifact-management, memory-graph, and feedback files take their grounded corrections. The flagged planning-hub phrasing was verified against a live full-tier payload and kept, scoped to the full tier. Forty new guard tests pin the corrections per file (the parameter names, the em-dash ban, the taught facts), so a retired claim reappearing fails the suite. The full gate (147 shared tests, ten extension suites, typecheck) is green on the landed state.
+
 ## 2026-11-10, Rewrite the aura skill file (aura-skill-rewrite)
 
 The aura skill file teaches the live server again: the 120-tool count with the build identity cited once as the drift anchor, the corrected tool list (the opinion artifact kind, the base64 upload with its size limit, the whole mode with its character limits and the expected-version and full-replace gates), the leave-and-return scorecard replacing the false "left MCP entirely" paragraph, the response-format contract with the permission exclusion, and the new tool families at bullet level, with the two expected-dead tools absent and the codemode-plus-write pattern as the taught file workflow. Eight content guards in the remnants suite pin the rewrite's load-bearing facts so the next drift fails the suite instead of teaching agents stale facts. The development-process paragraph now defers the split status series to the process resource that ticket rewrites next, and the codemode walkthrough pointer waits on the usecase resource. Full suite green on the landed state (107 shared tests, ten extension suites, typecheck).
