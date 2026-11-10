@@ -1356,6 +1356,70 @@ describe("no-remnants guard: usecase resources current (skills)", () => {
   });
 });
 
+describe("no-remnants guard: usecase resources current (unified search)", () => {
+  it("lists FEEDBACK in the source_types enum", () => {
+    const file = readUsecase("unified-search.md");
+    const enumLine = file.split("source_types` (array, required)")[1]?.split("\n- ")[0] ?? "";
+    assert.match(enumLine, /FEEDBACK/, "the enum should include FEEDBACK");
+    for (const kind of ["TASK", "ARTIFACT", "GLOSSARY", "TOOL"]) {
+      assert.ok(enumLine.includes(kind), `the enum should keep ${kind}`);
+    }
+  });
+
+  it("documents the per-source-type limit semantics", () => {
+    const file = readUsecase("unified-search.md");
+    assert.match(
+      file,
+      /per source type/i,
+      "the limit should be documented as per source type",
+    );
+    assert.match(
+      file,
+      /1.{0,3}20|1 to 20/,
+      "the limit bounds (1 to 20) should be stated",
+    );
+    assert.match(file, /default 5/, "the limit default (5) should be stated");
+  });
+
+  it("resolves search hits with id-keyed get tools", () => {
+    const file = readUsecase("unified-search.md");
+    assert.match(
+      file,
+      /getTask\(\{ id:/,
+      "getTask should be called with id in the example workflow",
+    );
+    assert.doesNotMatch(file, /getTask\(\{ uuid:/, "getTask takes no uuid");
+  });
+
+  it("documents the mention-candidate tool with its required keys", () => {
+    const file = readUsecase("unified-search.md");
+    assert.match(
+      file,
+      /listMentionCandidates/,
+      "the mention-candidate tool should be documented",
+    );
+    assert.match(
+      file,
+      /entity_type[\s\S]{0,120}ARTIFACT[\s\S]{0,10}TASK|ARTIFACT[\s\S]{0,10}\|[\s\S]{0,10}TASK/,
+      "the candidate tool's entity types should be named",
+    );
+    assert.match(
+      file,
+      /has_access/,
+      "the candidate flag should be named",
+    );
+  });
+
+  it("carries a find-feedback scenario", () => {
+    const file = readUsecase("unified-search.md");
+    assert.match(
+      file,
+      /FEEDBACK.*\|/,
+      "the scenario table should include a FEEDBACK row",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package

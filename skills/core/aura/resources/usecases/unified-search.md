@@ -5,7 +5,7 @@ Aura provides a single search tool for cross-entity semantic search:
 ## `unifiedSearch`
 
 Searches across one or more source types in a single request. Per-type
-authorization is enforced silently — unauthorized types are excluded from
+authorization is enforced silently: unauthorized types are excluded from
 results without returning 403.
 
 **Parameters:**
@@ -13,8 +13,22 @@ results without returning 403.
 - `source_types` (array, required) — one or more of: `TASK`,
   `UPLOAD_DOCUMENT`, `ARTIFACT`, `GLOSSARY`, `QUESTION`, `JIRA_ISSUE`,
   `KNOWLEDGE_DOCUMENT`, `SKILL`, `TEAMS_THREAD`, `CHAT_ASSERTION`,
-  `ASANA_TASK`, `TOOL`
-- `limit` (number, optional) — max results
+  `ASANA_TASK`, `TOOL`, `FEEDBACK`
+- `limit` (number, optional) — maximum number of hits **per source type**;
+  an integer from 1 to 20, default 5. Searching three types with the
+  default returns up to 15 hits.
+
+## Mention candidates
+
+`listMentionCandidates` returns the users that can be @-mentioned in a
+comment on an entity, each with a `has_access` flag relative to that
+entity. `entity_type` is required and is `ARTIFACT` | `TASK`; `entity_id`
+is the entity's UUID; the optional `q` filters candidates by display name
+or LDAP UID (omit it to list all candidates).
+
+```
+listMentionCandidates({ entity_type: "TASK", entity_id: "<task-uuid>" })
+```
 
 ## Common scenarios
 
@@ -24,6 +38,7 @@ results without returning 403.
 | Find a document/artifact | `["ARTIFACT", "KNOWLEDGE_DOCUMENT"]` |
 | Find anything related to a topic | `["TASK", "ARTIFACT", "KNOWLEDGE_DOCUMENT"]` |
 | Find Jira issues | `["JIRA_ISSUE"]` |
+| Find feedback about Aura | `["FEEDBACK"]` |
 | Broad search across everything | All types |
 
 ## Best practices
@@ -43,6 +58,6 @@ results without returning 403.
 
 ```
 1. unifiedSearch({ query: "user onboarding flow", source_types: ["TASK", "ARTIFACT"] })
-2. getTask({ uuid: "<uuid-from-search>" })
+2. getTask({ id: "<uuid-from-search>" })
 3. getArtifact({ id: "<uuid-from-search>" })
 ```
