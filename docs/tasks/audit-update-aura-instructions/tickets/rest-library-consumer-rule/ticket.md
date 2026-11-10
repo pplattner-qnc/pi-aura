@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Apply the consumer rule to the internal REST library
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by:
 - mention-machinery-mcp
 - feedback-mcp-submission
