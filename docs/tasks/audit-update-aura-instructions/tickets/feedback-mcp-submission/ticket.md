@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Feedback submission on MCP
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by:
 - aura-mcp-interface
 size: m
@@ -28,3 +28,11 @@ With this ticket, the extension layer's only remaining Aura access outside the m
 ## Blocked by
 
 - aura-mcp-interface
+
+## Implementation notes
+
+Landed as merge b19c7fc on task/feedback-mcp-submission (731 insertions, 90 deletions, exactly the feedback extension and its test). The submission path is the typed interface's createFeedback method, driven by the confirmed sign-off flow; the JSONL record body is byte-identical to the REST-era one; the injected warning carries the corrected tool naming; and no production extension file imports the shared REST client anymore (pinned test-side).
+
+Durable facts: the extension factory accepts an options object with three injectable seams (loadCredentials, createInterface, logPath), production-wired by default, the same convention the reference engine uses; the JSONL path is overridable so hermetic tests never touch the real audit file. The interface is constructed per submission from freshly loaded credentials with the session's notify hook and closed after the send, so the contract self-check runs per submission. A malformed tool result (missing id or status on the JSON) maps to a user-visible error. The suite verified criterion 1 hermetically against a loopback fake MCP server over real HTTP with the real loader and default caller; no live-server submission is made by the tests, leaving the live send as the pi-runtime handoff. The failed-send outcome stays the pre-existing "rejected" wording, matching the base behavior exactly.
+
+Handoff to ticket 5 (rest-library-consumer-rule): the feedback test file retains two type-only imports from the shared REST client for fixtures; count them as an in-package consumer and inline the fixture types if the library is removed. The stale tool-name token in the aura skill file and the feedback usecase resource remains ticket 7's worklist item, correctly untouched here.

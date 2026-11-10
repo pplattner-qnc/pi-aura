@@ -3,18 +3,19 @@
  *
  * Registers an unadvertised `aura_feedback` tool the LLM can call to *propose*
  * a feedback submission to the Aura maintainers. Unlike the raw
- * `aura-mcp-dev_createFeedback` MCP tool — which submits directly with no
- * human sign-off — this tool always shows an interactive prompt first so the
+ * `mcp__aura_mcp_dev__createFeedback` MCP tool (which submits directly with no
+ * human sign-off), this tool always shows an interactive prompt first so the
  * user reviews what the agent wants to send and decides how to proceed.
  *
- * Tool parameters mirror the `POST /feedback` body (`FeedbackCreate` in
- * `openapi.yaml`) **minus** `source`: the extension always sends
- * `source: "MCP"` so the row records its true origin. The `is_anonymous` and
+ * Tool parameters mirror the aura-mcp-dev server's `createFeedback` tool
+ * schema (the same fields the retired REST-era `FeedbackCreate` body
+ * carried) **minus** `source`: the extension always sends `source: "MCP"`
+ * so the row records its true origin. The `is_anonymous` and
  * `notify_author` fields are exposed as checkboxes in the prompt.
  *
  * Interactive flow (TUI only; non-interactive modes get a clear error result):
  *
- *   1. Confirm screen — shows the proposed `title` + `body` as text and two
+ *   1. Confirm screen: shows the proposed `title` + `body` as text and two
  *      checkboxes (`is_anonymous`, `notify_author`) below. Four actions:
  *        - Yes     → submit as-is, append to the local log, return the UUID.
  *        - No      → do not send; user may add an optional comment; the LLM
@@ -24,18 +25,20 @@
  *                    should lead to another `aura_feedback` call).
  *        - Edit    → open the edit screen.
  *
- *   2. Edit screen — all four fields editable (title/body text inputs, the two
+ *   2. Edit screen: all four fields editable (title/body text inputs, the two
  *      flags as checkboxes), Submit + Cancel at the bottom.
  *        - Submit  → same as Yes, but with the edited payload, and the result
  *                    names the edited fields so the LLM knows what changed.
  *        - Cancel  → same as No without a comment.
  *
  * On a successful submit the extension:
- *   - POSTs to `/feedback` via the shared AuraClient (baseUrl + PAT from
- *     settings.json + keyring, the same path every other Aura call uses);
- *   - appends one JSON line to `~/.pi/aura/feedback.jsonl` containing the sent
- *     payload, the created row (full `FeedbackDetail`), a local-timestamp
- *     string, and the created UUID; and
+ *   - submits through the typed aura-mcp interface's `createFeedback`
+ *     method (server tool `createFeedback`), built for this one submission
+ *     from the settings.json + keyring credentials with the session's
+ *     notify hook, and released afterwards;
+ *   - appends one JSON line to `~/.pi/aura/feedback.jsonl` containing the
+ *     sent payload, the created row as the server returned it, a
+ *     local-timestamp string, and the created UUID; and
  *   - returns a tool result naming the UUID and that it was created.
  *
  * The tool is deliberately not advertised in the system prompt (no
@@ -44,7 +47,7 @@
  * See `skills/core/aura/SKILL.md` → "Submitting feedback about Aura" and
  * `skills/core/aura/resources/usecases/feedback-submission.md`.
  *
- * One concern per extension — this file owns the feedback-proposal tool and
+ * One concern per extension: this file owns the feedback-proposal tool and
  * its interactive sign-off; it does not touch the reference engine
  * (`aura-references.ts`, which also owns the legacy `@AURA-<number>` alias),
  * the reachability probe (`aura-tasks.ts`), or the skill reminder
@@ -65,10 +68,16 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import type {
-  CreateFeedbackInput,
-  FeedbackDetail,
-} from "@pi-aura/shared/aura-client";
+import {
+  auraMcpJson,
+  createAuraMcpInterface,
+  loadAuraMcpCredentials,
+  AuraMcpToolUnavailableError,
+  type AuraMcpCredentials,
+  type AuraMcpInterface,
+  type AuraMcpToolResult,
+  type CreateFeedbackParams,
+} from "./aura-mcp-client.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -79,10 +88,10 @@ import type {
  *  rewritten, so concurrent sessions don't clobber each other. */
 const FEEDBACK_LOG_PATH = join(homedir(), ".pi", "aura", "feedback.jsonl");
 
-/** The tool always sends `source: "MCP"` regardless of the caller — the row
+/** The tool always sends `source: "MCP"` regardless of the caller: the row
  *  records its true origin. This constant is the single source of truth for
- *  that decision so the parameter schema, the confirm screen, and the API
- *  call can't drift apart. */
+ *  that decision so the parameter schema, the confirm screen, and the
+ *  submission call can't drift apart. */
 const FEEDBACK_SOURCE: "MCP" = "MCP";
 
 /** The four actions on the confirm screen. The order is fixed so the
@@ -94,11 +103,20 @@ type ConfirmAction = (typeof CONFIRM_ACTIONS)[number];
 // Pure helpers (exported for unit tests)
 // ---------------------------------------------------------------------------
 
-/** The payload the extension sends to `POST /feedback`, derived from the
- *  (possibly user-edited) tool parameters. `source` is forced to `"MCP"`. */
+/** The created feedback row as the aura-mcp-dev server returned it. The
+ *  extension reads `id` and `status`; the full row rides on the runtime
+ *  object and is logged verbatim. */
+export interface FeedbackCreated {
+  id: string;
+  status: string;
+}
+
+/** The payload the extension sends through the typed interface's
+ *  `createFeedback` method, derived from the (possibly user-edited) tool
+ *  parameters. `source` is forced to `"MCP"`. */
 export function buildSendPayload(
-  input: CreateFeedbackInput,
-): CreateFeedbackInput {
+  input: CreateFeedbackParams,
+): CreateFeedbackParams {
   return {
     title: input.title,
     body: input.body,
@@ -109,7 +127,7 @@ export function buildSendPayload(
 }
 
 /** Validate the payload the agent proposed against the same hard limits the
- *  API enforces (`title` 1–120, `body` ≥ 50). Returns `null` when valid, or
+ *  server enforces (`title` 1–120, `body` ≥ 50). Returns `null` when valid, or
  *  the first failing constraint as a human-readable string. Exported so the
  *  tool can fail fast before opening the interactive prompt. */
 export function validatePayload(input: {
@@ -129,8 +147,8 @@ export function validatePayload(input: {
  *  is greppable without UTC arithmetic; the full created row is included so
  *  the log is self-contained for later triage. */
 export function buildLogEntry(
-  payload: CreateFeedbackInput,
-  created: FeedbackDetail,
+  payload: CreateFeedbackParams,
+  created: FeedbackCreated,
   now: Date = new Date(),
 ): Record<string, unknown> {
   return {
@@ -157,7 +175,7 @@ export function serializeLogEntry(entry: Record<string, unknown>): string {
 /** The tool-result text returned to the LLM on a successful submission.
  *  Names the UUID and that the row was created, and notes the local log path
  *  so the agent can point the user at it. */
-export function formatCreatedResultText(created: FeedbackDetail): string {
+export function formatCreatedResultText(created: FeedbackCreated): string {
   return [
     `Feedback created in Aura (UUID ${created.id}, status ${created.status}).`,
     `Logged to ${FEEDBACK_LOG_PATH}.`,
@@ -186,9 +204,9 @@ export function formatRejectedResultText(
  *  payload and then submitted. Same as the created text, plus a note that
  *  the payload was edited, so the agent doesn't assume its original
  *  proposal was sent verbatim. */
-export function formatEditedResultText(created: FeedbackDetail): string {
+export function formatEditedResultText(created: FeedbackCreated): string {
   return [
-    `Feedback created in Aura (UUID ${created.id}, status ${created.status}) — the user edited the payload before submitting.`,
+    `Feedback created in Aura (UUID ${created.id}, status ${created.status}); the user edited the payload before submitting.`,
     `Logged to ${FEEDBACK_LOG_PATH}.`,
   ].join("\n");
 }
@@ -235,9 +253,9 @@ interface AuraFeedbackInput {
 interface AuraFeedbackDetails {
   outcome: "created" | "rejected" | "refined";
   /** The payload actually sent (after any user edits). Present on `created`. */
-  sentPayload?: CreateFeedbackInput;
+  sentPayload?: CreateFeedbackParams;
   /** The created row. Present on `created`. */
-  created?: FeedbackDetail;
+  created?: FeedbackCreated;
   /** The user's comment. Present on `rejected`/`refined` when given. */
   comment?: string;
   /** Whether the user edited the payload before submitting. */
@@ -248,14 +266,31 @@ interface AuraFeedbackDetails {
 // Extension factory
 // ---------------------------------------------------------------------------
 
-export default function (pi: ExtensionAPI): void {
+/** Test seams for the extension factory (the same convention the reference
+ *  engine uses): inject the credential read, the typed interface, or the
+ *  JSONL log path. Production passes nothing. */
+export interface AuraFeedbackExtensionOptions {
+  /** Inject the credential read (test hook; defaults to
+   *  {@link loadAuraMcpCredentials} over the package's dynamic-import
+   *  seams). */
+  loadCredentials?: () => Promise<AuraMcpCredentials>;
+  /** Inject the typed interface (test hook; defaults to the real
+   *  construction from the loaded credentials with the session's notify
+   *  hook, so drift warnings reach the user). */
+  createInterface?: (ctx: ExtensionContext) => Promise<AuraMcpInterface>;
+  /** Override the JSONL log path (test hook; defaults to
+   *  {@link FEEDBACK_LOG_PATH}). */
+  logPath?: string;
+}
+
+export default function (pi: ExtensionAPI, options: AuraFeedbackExtensionOptions = {}): void {
   pi.registerTool({
     name: "aura_feedback",
     label: "Aura Feedback",
     description:
-      "Propose a feedback submission to the Aura maintainers (bugs, missing features, or workflow friction caused by Aura itself — not by how it is used). " +
+      "Propose a feedback submission to the Aura maintainers (bugs, missing features, or workflow friction caused by Aura itself, not by how it is used). " +
       "Shows the user an interactive prompt to sign off on the title, body, anonymous, and notify-me fields before anything is sent to Aura. " +
-      "Do not use the aura-mcp-dev_createFeedback MCP tool for this — it submits directly with no human sign-off.",
+      "Do not use the mcp__aura_mcp_dev__createFeedback MCP tool for this: it submits directly with no human sign-off.",
     // Deliberately no promptSnippet/promptGuidelines: the tool is available at
     // all times but not advertised in the system prompt. The `aura` skill's
     // feedback section is the only thing that tells the agent this exists.
@@ -266,7 +301,7 @@ export default function (pi: ExtensionAPI): void {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const input = params as AuraFeedbackInput;
 
-      // Fail fast on validation before opening the prompt — saves the user a
+      // Fail fast on validation before opening the prompt: it saves the user a
       // round-trip and keeps the API's hard limits as a local guard.
       const validationError = validatePayload(input);
       if (validationError) {
@@ -292,7 +327,7 @@ export default function (pi: ExtensionAPI): void {
         };
       }
 
-      // The working payload — the confirm screen reads from this, the edit
+      // The working payload: the confirm screen reads from this, the edit
       // screen mutates it. Starts as the agent's proposal.
       const payload: AuraFeedbackInput = {
         title: input.title,
@@ -305,7 +340,7 @@ export default function (pi: ExtensionAPI): void {
       // also carries the (possibly edited) payload.
       const decision = await runFeedbackPrompt(ctx, payload);
       if (!decision) {
-        // Escaped at the top level — treat as a No without a comment.
+        // Escaped at the top level: treat as a No without a comment.
         return {
           content: [
             { type: "text", text: formatRejectedResultText("no", undefined) },
@@ -333,17 +368,18 @@ export default function (pi: ExtensionAPI): void {
         };
       }
 
-      // decision.action === "submit" — send to Aura.
+      // decision.action === "submit": send to Aura.
       const sendPayload = buildSendPayload(decision.payload);
+      const logPath = options.logPath ?? FEEDBACK_LOG_PATH;
       try {
-        const created = await createFeedbackInAura(sendPayload);
+        const created = await createFeedbackViaMcp(sendPayload, ctx, options);
 
         // Append to the local JSONL log (best-effort: a log failure must not
         // turn a successful submission into an error result for the LLM).
         try {
-          await appendFeedbackLog(sendPayload, created);
+          await appendFeedbackLog(sendPayload, created, logPath);
         } catch (logErr) {
-          // Surface in the result text but do not fail the tool — the row
+          // Surface in the result text but do not fail the tool: the row
           // exists in Aura either way.
           const logNote = ` (WARNING: failed to log locally: ${
             logErr instanceof Error ? logErr.message : String(logErr)
@@ -384,18 +420,20 @@ export default function (pi: ExtensionAPI): void {
           } as AuraFeedbackDetails,
         };
       } catch (err) {
-        // The API call failed — report it to the LLM as an error so it can
-        // surface the failure to the user. Do not throw (throwing marks the
-        // whole tool execution as failed, which is fine, but we want the
-        // message to be specific about what went wrong).
+        // The submission failed: interface construction, the MCP call, an
+        // application error inside an HTTP 200 result, or a drifted
+        // (unavailable) feedback path. Report it to the LLM as an error so
+        // it can surface the failure to the user. The unavailable-path error
+        // (core drift on the feedback path) gets its own wording naming what
+        // broke. Do not throw (throwing marks the whole tool execution as
+        // failed, which is fine, but we want the message to be specific
+        // about what went wrong).
         const msg = err instanceof Error ? err.message : String(err);
+        const text = err instanceof AuraMcpToolUnavailableError
+          ? `Feedback submission is unavailable: ${msg} The user had approved the submission, but nothing was sent to Aura and nothing was logged locally.`
+          : `Failed to submit feedback to Aura: ${msg}. The user had already approved the submission; nothing was logged locally.`;
         return {
-          content: [
-            {
-              type: "text",
-              text: `Failed to submit feedback to Aura: ${msg}. The user had already approved the submission; nothing was logged locally.`,
-            },
-          ],
+          content: [{ type: "text", text }],
           details: {
             outcome: "rejected",
             sentPayload: sendPayload,
@@ -477,7 +515,7 @@ async function runFeedbackPrompt(
 }
 
 // ---------------------------------------------------------------------------
-// Confirm screen — Yes / No / Refine / Edit
+// Confirm screen: Yes / No / Refine / Edit
 // ---------------------------------------------------------------------------
 
 async function confirmScreen(
@@ -590,7 +628,7 @@ const CONFIRM_ACTION_DESCRIPTIONS: Record<ConfirmAction, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Edit screen — title / body / anonymous / notify + Submit / Cancel
+// Edit screen: title / body / anonymous / notify + Submit / Cancel
 // ---------------------------------------------------------------------------
 
 /** The editable field that currently has focus. */
@@ -664,7 +702,7 @@ async function editScreen(
     }
 
     titleEditor.onSubmit = () => {
-      // Enter in the title field moves to the body rather than submitting —
+      // Enter in the title field moves to the body rather than submitting:
       // a single-line field shouldn't end the whole form.
       commit();
       field = "body";
@@ -765,7 +803,7 @@ async function editScreen(
         return; // no text input for checkbox fields
       }
 
-      // Text field — route to the editor.
+      // Text field: route to the editor.
       activeEditor().handleInput(data);
       refresh();
     }
@@ -877,7 +915,7 @@ async function editScreen(
 }
 
 // ---------------------------------------------------------------------------
-// Comment screen — free text the user leaves on No / Refine
+// Comment screen: free text the user leaves on No / Refine
 // ---------------------------------------------------------------------------
 
 async function commentScreen(
@@ -887,8 +925,8 @@ async function commentScreen(
 ): Promise<string | undefined> {
   const prompt =
     action === "refine"
-      ? "Refine requested — leave a comment for the agent (required to refine the proposal):"
-      : "Rejected — leave an optional comment for the agent (or submit empty):";
+      ? "Refine requested. Leave a comment for the agent (required to refine the proposal):"
+      : "Rejected. Leave an optional comment for the agent (or submit empty):";
 
   return ctx.ui.custom<string | undefined>((tui, theme, _kb, done) => {
     let cachedLines: string[] | undefined;
@@ -912,7 +950,7 @@ async function commentScreen(
     editor.onSubmit = (value) => {
       const trimmed = value.trim();
       if (action === "refine" && !trimmed) {
-        // Refuse an empty refine comment — keep the user in the editor so
+        // Refuse an empty refine comment: keep the user in the editor so
         // they can type one. (No action; just don't call done.)
         refresh();
         return;
@@ -925,7 +963,7 @@ async function commentScreen(
         // Esc from the comment screen: for `no` this is "no comment"; for
         // `refine` we still need a comment, so treat Esc as "stay" unless the
         // editor is empty (then allow exit with a prompt to the caller that
-        // refinement needs input — the caller's result text already tells the
+        // refinement needs input; the caller's result text already tells the
         // agent to ask the user).
         if (action === "refine") {
           // Keep the requirement: Esc does nothing here. The user must type
@@ -984,34 +1022,82 @@ async function commentScreen(
 }
 
 // ---------------------------------------------------------------------------
-// Aura client + local log (dynamic-import seams, mirroring aura-references.ts)
+// Aura MCP submission + local log (dynamic-import seams, mirroring
+// aura-references.ts)
 // ---------------------------------------------------------------------------
 
-/** Submit the payload via the shared AuraClient. The client is built from
- *  `~/.pi/agent/settings.json` (`aura.baseUrl`) + the OS keyring PAT — the
- *  same path every other Aura call uses — so this extension never handles
- *  credentials directly. Throws on auth/network/API errors (the caller
- *  turns the message into a tool result). */
-async function createFeedbackInAura(payload: CreateFeedbackInput): Promise<FeedbackDetail> {
-  // Dynamic import: @pi-aura/shared/aura-client uses .js extension specifiers
-  // internally, which Node's experimental strip-types loader cannot resolve.
-  // Pi's extension runtime handles static imports; the dynamic seam keeps the
-  // unit-test entry point free of the client dependency (the same seam
-  // aura-references.ts uses for its task adapter).
-  const { createDefaultAuraClient } = await import("@pi-aura/shared/aura-client");
-  const client = await createDefaultAuraClient();
-  return client.createFeedback(payload);
+/** Build the production interface for one submission: credentials loaded
+ *  through the package's seams (settings + keyring, the same read the
+ *  registration extension does), the typed construction with the session's
+ *  notify hook (cosmetic drift warns the user; core drift surfaces again at
+ *  call time as the unavailable-path error). Throws on missing credentials
+ *  or an unreachable server (the caller turns the message into a tool
+ *  result; nothing was sent). */
+async function createDefaultFeedbackInterface(
+  ctx: ExtensionContext,
+  loadCredentials: () => Promise<AuraMcpCredentials>,
+): Promise<AuraMcpInterface> {
+  const credentials = await loadCredentials();
+  return createAuraMcpInterface({
+    ...(credentials.baseUrl !== undefined ? { baseUrl: credentials.baseUrl } : {}),
+    ...(credentials.pat !== null ? { pat: credentials.pat } : {}),
+    notify: (message, type) => ctx.ui.notify(message, type ?? "warning"),
+  });
 }
 
-/** Append one JSON line to `~/.pi/aura/feedback.jsonl`, creating the parent
- *  directory if needed. Never throws into the caller's success path — the
- *  tool caller wraps this in try/catch and degrades to a warning. */
+/** Pull the created feedback row out of the MCP tool result (the JSON
+ *  payload: `structuredContent` or the first text block). Throws when the
+ *  payload does not carry the row, so a malformed result surfaces as a
+ *  user-visible failure instead of a log entry with a missing uuid. */
+export function extractCreatedFeedback(result: AuraMcpToolResult): FeedbackCreated {
+  const json = auraMcpJson(result) as { id?: unknown; status?: unknown } | undefined;
+  if (
+    json !== null &&
+    typeof json === "object" &&
+    typeof json.id === "string" &&
+    json.id !== "" &&
+    typeof json.status === "string" &&
+    json.status !== ""
+  ) {
+    return json as unknown as FeedbackCreated;
+  }
+  throw new Error(
+    "the aura-mcp-dev createFeedback result did not contain the created feedback row (id, status)",
+  );
+}
+
+/** Submit the payload through the typed aura-mcp interface's
+ *  `createFeedback` method (server tool `createFeedback`). The interface is
+ *  built for this one submission (the sign-off already happened; a
+ *  construction failure means nothing was sent and nothing is logged) and
+ *  released afterwards. Throws on construction, call, and extraction
+ *  failures (the caller turns the message into a tool result). */
+async function createFeedbackViaMcp(
+  payload: CreateFeedbackParams,
+  ctx: ExtensionContext,
+  options: AuraFeedbackExtensionOptions,
+): Promise<FeedbackCreated> {
+  const ai = options.createInterface
+    ? await options.createInterface(ctx)
+    : await createDefaultFeedbackInterface(ctx, options.loadCredentials ?? loadAuraMcpCredentials);
+  try {
+    const result = await ai.createFeedback(payload);
+    return extractCreatedFeedback(result);
+  } finally {
+    await ai.close().catch(() => {});
+  }
+}
+
+/** Append one JSON line to the JSONL log, creating the parent directory if
+ *  needed. Never throws into the caller's success path: the tool caller
+ *  wraps this in try/catch and degrades to a warning. */
 async function appendFeedbackLog(
-  payload: CreateFeedbackInput,
-  created: FeedbackDetail,
+  payload: CreateFeedbackParams,
+  created: FeedbackCreated,
+  logPath: string,
 ): Promise<void> {
   const entry = buildLogEntry(payload, created);
   const line = serializeLogEntry(entry) + "\n";
-  await mkdir(dirname(FEEDBACK_LOG_PATH), { recursive: true });
-  await appendFile(FEEDBACK_LOG_PATH, line, "utf8");
+  await mkdir(dirname(logPath), { recursive: true });
+  await appendFile(logPath, line, "utf8");
 }
