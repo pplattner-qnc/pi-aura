@@ -1833,6 +1833,660 @@ describe("no-remnants guard: usecase resources current (prose)", () => {
   });
 });
 
+// process-resources-current: the seven process resource files repoint to
+// the way-of-working 1.x pages that replaced the archived single article
+// (process-resources-source report, part a) and teach the live process
+// canon. The audit's load-bearing corrections are pinned here in the
+// existing guard style; a retired claim reappearing in a process file
+// fails the suite.
+const PROCESS_DIR = "skills/core/aura/resources/process";
+
+function readProcess(file: string): string {
+  return fs.readFileSync(path.join(repoRoot, PROCESS_DIR, file), "utf-8");
+}
+
+// The dead citation and the archived article node (the pre-2026-09-23
+// canon); no process file may cite either, and the June repository mirror
+// is never citable as current.
+const DEAD_PROCESS_PATH = "prozesse/how-we-work-in-aura-a-practical-guide";
+const ARCHIVED_GUIDE_NODE = "2a6d4f32";
+const JUNE_REPO_MIRROR = "bitbucket-anwaltde-aura";
+
+// process file -> its replacement page under way-of-working-and-structures
+// (the report's 1:1 mapping, live-probed 2026-10-29).
+const PROCESS_CANONICAL: Record<string, string> = {
+  "INDEX.md": "way-of-working-and-structures/1-how-we-work-together-purpose-principles",
+  "roles.md": "way-of-working-and-structures/1-1-roles",
+  "workflow-phases.md": "way-of-working-and-structures/1-2-workflow-phases",
+  "capacity.md": "way-of-working-and-structures/1-3-capacity-resourcing",
+  "review-modes.md": "way-of-working-and-structures/1-4-alignment-review-escalation",
+  "escalation.md": "way-of-working-and-structures/1-4-alignment-review-escalation",
+  "integrations.md": "way-of-working-and-structures/1-5-tooling-aura-jira-asana",
+};
+
+describe("no-remnants guard: process resources current (canonical references)", () => {
+  it("cites the replacement 1.x page in every process file, never the dead path", () => {
+    for (const [file, page] of Object.entries(PROCESS_CANONICAL)) {
+      const content = readProcess(file);
+      assert.ok(
+        content.includes(page),
+        `${file} should cite its replacement page ${page}`,
+      );
+      assert.ok(
+        content.includes("getKnowledgeNodeByPath"),
+        `${file}'s canonical reference should be the fetch call for its page`,
+      );
+      assert.ok(
+        !content.includes(DEAD_PROCESS_PATH),
+        `${file} still cites the dead pre-archival path ${DEAD_PROCESS_PATH}`,
+      );
+      assert.ok(
+        !content.includes(ARCHIVED_GUIDE_NODE),
+        `${file} still cites the archived guide node ${ARCHIVED_GUIDE_NODE}`,
+      );
+    }
+  });
+
+  it("never cites the June repository mirror as current", () => {
+    for (const file of Object.keys(PROCESS_CANONICAL)) {
+      const content = readProcess(file);
+      assert.ok(
+        !content.includes(JUNE_REPO_MIRROR),
+        `${file} cites the June repo mirror, which is a staleness trap (pre-v14)`,
+      );
+    }
+  });
+});
+
+describe("no-remnants guard: process resources current (workflow phases)", () => {
+  it("teaches the three series resolved by level and workflow variant", () => {
+    const file = readProcess("workflow-phases.md");
+    assert.match(
+      file,
+      /workflow variant|workflowVariant/i,
+      "the series resolution should name the workflow variant",
+    );
+    assert.match(
+      file,
+      /STANDARD/,
+      "the STANDARD variant should be named",
+    );
+    assert.match(
+      file,
+      /DISCOVERY/,
+      "the DISCOVERY variant should be named",
+    );
+    assert.match(
+      file,
+      /set at creation[\s\S]{0,80}immutable|immutable[\s\S]{0,80}set at creation/i,
+      "the variant should be documented as immutable and set at creation",
+    );
+    assert.match(
+      file,
+      /LEAN|lean series/i,
+      "the lean series for sagas and subtasks should be named",
+    );
+  });
+
+  it("shows the standard series without the two retired waiting statuses", () => {
+    const file = readProcess("workflow-phases.md");
+    for (const status of [
+      "OPEN",
+      "READY_FOR_REFINEMENT",
+      "IN_REFINEMENT",
+      "IN_ALIGNMENT",
+      "READY_FOR_DEVELOPMENT",
+      "IN_DEVELOPMENT",
+      "IN_REVIEW",
+      "READY_FOR_DEPLOYMENT",
+      "IN_DEPLOYMENT",
+      "DONE",
+    ]) {
+      assert.ok(
+        file.includes(status),
+        `the standard series should include ${status}`,
+      );
+    }
+    assert.doesNotMatch(
+      file,
+      /READY_FOR_ALIGNMENT\s*→\s*IN_ALIGNMENT[\s\S]{0,200}READY_FOR_REVIEW/,
+      "the retired flat series (waiting statuses before both gates) should be gone",
+    );
+  });
+
+  it("documents the lean series and the discovery series' alignment ending", () => {
+    const file = readProcess("workflow-phases.md");
+    assert.match(
+      file,
+      /READY_FOR_DEVELOPMENT[\s\S]{0,40}IN_DEVELOPMENT[\s\S]{0,40}READY_FOR_REVIEW/,
+      "the lean series (sagas and subtasks) should start at READY_FOR_DEVELOPMENT",
+    );
+    assert.match(
+      file,
+      /IN_ALIGNMENT\s*→?\s*DONE|IN_ALIGNMENT[\s\S]{0,120}DONE/,
+      "the discovery series should end after alignment",
+    );
+  });
+
+  it("documents the quality gates with verdicts and the rejected-gate reason rule", () => {
+    const file = readProcess("workflow-phases.md");
+    assert.match(
+      file,
+      /Alignment Gate|ALIGNMENT gate/i,
+      "the Alignment Gate should be named",
+    );
+    assert.match(
+      file,
+      /Review Gate|REVIEW gate/i,
+      "the Review Gate should be named",
+    );
+    assert.match(
+      file,
+      /disciplines?/i,
+      "the discipline sign-offs should be described",
+    );
+    assert.match(file, /APPROVED/, "the approved verdict should be named");
+    assert.match(file, /REJECTED/, "the rejected verdict should be named");
+    assert.match(
+      file,
+      /status_change_reason[\s\S]{0,120}rejected( quality)? gate|rejected( quality)? gate[\s\S]{0,120}status_change_reason/,
+      "leaving a rejected gate should require a status_change_reason",
+    );
+  });
+
+  it("carries the live status-change contract (id, not uuid; one-step walk)", () => {
+    const file = readProcess("workflow-phases.md");
+    assert.match(
+      file,
+      /updateTask\(\{\s*id:/,
+      "updateTask should be keyed by id (the live parameter)",
+    );
+    assert.doesNotMatch(
+      file,
+      /updateTask\(\{\s*uuid:/,
+      "updateTask must not be keyed by uuid (retired parameter name)",
+    );
+    assert.match(
+      file,
+      /one (task )?status at a time|one-step walk|one status at a time/i,
+      "the one-step walk discipline (tracker-aura) should be carried",
+    );
+    assert.match(
+      file,
+      /override a disallowed status jump|disallowed status jump/,
+      "the status_change_reason contract should follow the live description",
+    );
+  });
+
+  it("carries the v19 contributor phase starts and the live discard and reopen contracts", () => {
+    const file = readProcess("workflow-phases.md");
+    assert.match(
+      file,
+      /contributor[\s\S]{0,120}start[\s\S]{0,120}phase|start the next phase/i,
+      "contributors starting the next phase themselves (v19) should be documented",
+    );
+    assert.match(
+      file,
+      /deploy[\s\S]{0,120}not|not[\s\S]{0,80}deployment/i,
+      "the deployment exception should be stated",
+    );
+    assert.match(
+      file,
+      /discardTask[\s\S]{0,120}owner-only|owner-only[\s\S]{0,120}discardTask/i,
+      "discardTask's owner-only rule should be documented",
+    );
+    assert.match(
+      file,
+      /reopenTask/,
+      "reopenTask should be documented",
+    );
+  });
+
+  it("keeps the overview's gate principle matching the live gate mechanics", () => {
+    const index = readProcess("INDEX.md");
+    assert.doesNotMatch(
+      index,
+      /Do not move a task past Alignment without stakeholder approval/,
+      "the retired gate principle wording should be gone (gates are sign-offs with verdicts)",
+    );
+    assert.match(
+      index,
+      /gate|verdict/i,
+      "the overview should teach the gate mechanics",
+    );
+  });
+});
+
+describe("no-remnants guard: process resources current (review modes)", () => {
+  it("teaches opinions as the successor flow with the graded scale", () => {
+    const file = readProcess("review-modes.md");
+    assert.match(
+      file,
+      /opinion/i,
+      "the opinions flow should be taught as the successor of artifact reviews",
+    );
+    assert.match(
+      file,
+      /Looks good/,
+      "the graded scale's positive end should be named",
+    );
+    assert.match(
+      file,
+      /Rethink the approach/,
+      "the graded scale's critical end should be named",
+    );
+    assert.match(
+      file,
+      /Neutral/,
+      "the neutral option should be named",
+    );
+  });
+
+  it("teaches the opinions flow's shape: no locks, no rounds, edit after submit", () => {
+    const file = readProcess("review-modes.md");
+    assert.match(
+      file,
+      /nothing is locked|no locks|not locked/i,
+      "the no-locks property should be stated",
+    );
+    assert.match(
+      file,
+      /no rounds|there are no rounds|no approval rounds/i,
+      "the no-rounds property should be stated",
+    );
+    assert.match(
+      file,
+      /edit[^\n]{0,60}submit|submitted opinion[^\n]{0,60}edit|edit a submitted opinion/i,
+      "the edit-after-submit capability (v19) should be stated",
+    );
+  });
+
+  it("names the MCP visibility of opinions and the UI pointer", () => {
+    const file = readProcess("review-modes.md");
+    assert.match(
+      file,
+      /opinion_requested/,
+      "the listing filter should be named as the flow's MCP trace",
+    );
+    assert.match(
+      file,
+      /listArtifacts/,
+      "the filter's tool should be named",
+    );
+    assert.match(
+      file,
+      /Aura UI/,
+      "opinion management should carry a UI pointer",
+    );
+  });
+
+  it("carries no CLI review command and no dead review tool names", () => {
+    const file = readProcess("review-modes.md");
+    assert.doesNotMatch(
+      file,
+      /aura\.mjs/,
+      "no CLI command should appear",
+    );
+    for (const dead of [
+      "requestArtifactReview",
+      "getArtifactReview",
+      "submitArtifactDecision",
+      "startArtifactReview",
+      "reopenArtifactReview",
+      "getArtifactApprovals",
+      "review-request",
+    ]) {
+      assert.ok(
+        !file.includes(dead),
+        `the dead review surface ${dead} should be gone`,
+      );
+    }
+  });
+
+  it("keeps the three modes with the async-solo default and the AI flag", () => {
+    const file = readProcess("review-modes.md");
+    assert.match(file, /Mode 1/, "mode 1 should stay");
+    assert.match(file, /Mode 2/, "mode 2 should stay");
+    assert.match(file, /Mode 3/, "mode 3 should stay");
+    assert.match(
+      file,
+      /Default to Mode 1/,
+      "the async-solo default should stay",
+    );
+    assert.match(
+      file,
+      /is_ai_generated: true/,
+      "the AI-comment flag should stay",
+    );
+  });
+});
+
+describe("no-remnants guard: process resources current (capacity)", () => {
+  it("teaches the placeholder epic for non-task work", () => {
+    const file = readProcess("capacity.md");
+    assert.match(
+      file,
+      /AURA-1686/,
+      "the placeholder epic should be named",
+    );
+    assert.match(
+      file,
+      /Non Core-Team activities|placeholder epic/i,
+      "the epic's role should be described",
+    );
+    assert.match(
+      file,
+      /meetings[\s\S]{0,200}AURA-1686|AURA-1686[\s\S]{0,200}(meetings|reviews|absence|education)/i,
+      "the non-task categories should be listed against the epic",
+    );
+  });
+
+  it("teaches rough steps, the 5% soft floor, and the honest 100% landing", () => {
+    const file = readProcess("capacity.md");
+    assert.match(
+      file,
+      /10\/20\/30|rough(ly)? (10%|10 percent) steps|10% steps/,
+      "the rough-step guidance should be stated",
+    );
+    assert.match(
+      file,
+      /not 17%|no 17%/i,
+      "the not-17% example should anchor the rough-step rule",
+    );
+    assert.match(
+      file,
+      /5% soft floor|soft floor/,
+      "the soft floor should be stated",
+    );
+    assert.match(
+      file,
+      /100%/,
+      "the honest full landing should be stated",
+    );
+  });
+
+  it("carries the daily rhythm and the 04:00 reset", () => {
+    const file = readProcess("capacity.md");
+    assert.match(
+      file,
+      /04:00/,
+      "the daily reset time should be stated",
+    );
+    assert.match(
+      file,
+      /0% every morning|reset to 0%|resets? to 0%/i,
+      "the reset semantics should be stated",
+    );
+    assert.match(
+      file,
+      /09:00/,
+      "the morning set-by time should be stated",
+    );
+    assert.match(
+      file,
+      /09:30/,
+      "the clean-picture time should be stated",
+    );
+  });
+
+  it("keeps finished work counted and drops the structural reserve", () => {
+    const file = readProcess("capacity.md");
+    assert.match(
+      file,
+      /finished[\s\S]{0,120}(still|no longer lowers)|no longer lowers[\s\S]{0,80}utilization/i,
+      "finished work should still count toward the day (v19)",
+    );
+    assert.doesNotMatch(
+      file,
+      /80% task capacity|structural reserve/i,
+      "the retired 80/20 structural-reserve model should be gone",
+    );
+    assert.doesNotMatch(
+      file,
+      /accounts for vacation and public holidays automatically/,
+      "the unverifiable holiday-automation claim should be gone",
+    );
+  });
+
+  it("teaches the MCP tools as the access path with the corrected scopes", () => {
+    const file = readProcess("capacity.md");
+    for (const tool of [
+      "readCapacity",
+      "updateTaskMemberCapacity",
+      "updateTaskMemberParticipation",
+    ]) {
+      assert.ok(file.includes(tool), `the capacity file should name ${tool}`);
+    }
+    assert.match(
+      file,
+      /readCapacity[\s\S]{0,160}company|company[\s\S]{0,160}readCapacity/,
+      "the leadership overview should be reachable via readCapacity scope company",
+    );
+    assert.match(
+      file,
+      /capacity settings/,
+      "company capacity settings should keep their UI pointer",
+    );
+    assert.doesNotMatch(
+      file,
+      /leadership overview[\s\S]{0,120}not on MCP|all capacity tools are gone/i,
+      "the false blanket absence claims should be gone",
+    );
+    assert.match(
+      file,
+      /usecases\/capacity-planning\.md/,
+      "the usecase pointer should stay",
+    );
+  });
+
+  it("keeps the consent warning and the escalation routing", () => {
+    const file = readProcess("capacity.md");
+    assert.match(
+      file,
+      /Only adjust your own capacity/,
+      "the own-capacity-only warning should stay",
+    );
+    assert.match(
+      file,
+      /Owner agreement|Owner's agreement/i,
+      "shifting capacity should require owner agreement",
+    );
+    assert.match(
+      file,
+      /direct manager[\s\S]{0,40}MAK|MAK/,
+      "the disagreement escalation path should stay",
+    );
+  });
+});
+
+describe("no-remnants guard: process resources current (integrations)", () => {
+  it("teaches Asana create-from-Aura with auto-link and the manual reverse link", () => {
+    const file = readProcess("integrations.md");
+    assert.match(
+      file,
+      /create[n]? an Asana task (directly )?from (an|the) Aura task|created from the Aura task/i,
+      "the Asana create-from-Aura flow should be taught",
+    );
+    assert.match(
+      file,
+      /linked automatically at creation|auto-?linked/i,
+      "the auto-link at creation should be stated",
+    );
+    assert.match(
+      file,
+      /reverse[\s\S]{0,120}manually|manually[\s\S]{0,120}description|link added manually/i,
+      "the reverse direction's manual link should be stated",
+    );
+  });
+
+  it("teaches the Asana level split (sagas, epics, milestones; selected stories; no subtasks)", () => {
+    const file = readProcess("integrations.md");
+    assert.match(
+      file,
+      /Saga[\s\S]{0,80}Epic[\s\S]{0,80}milestone/i,
+      "the portfolio-level split should be stated",
+    );
+    assert.match(
+      file,
+      /selected Stories/i,
+      "the selected-Stories rule should be stated",
+    );
+    assert.match(
+      file,
+      /Sub-?Tasks?[^\n]{0,80}not/i,
+      "the no-Sub-Tasks rule should be stated",
+    );
+  });
+
+  it("teaches the deliberate Jira creation and drops the blanket no-create rule", () => {
+    const file = readProcess("integrations.md");
+    assert.doesNotMatch(
+      file,
+      /Do not create tasks in JIRA or Asana directly/,
+      "the blanket no-create rule should be gone (Jira creation is deliberate)",
+    );
+    assert.match(
+      file,
+      /Create JIRA tasks when you need|deliberate/i,
+      "the deliberate Jira creation should be taught",
+    );
+    assert.match(
+      file,
+      /source of truth/,
+      "Aura-stays-the-source-of-truth should stay",
+    );
+  });
+
+  it("carries the every-task-needs-a-parent rule", () => {
+    const file = readProcess("integrations.md");
+    assert.match(
+      file,
+      /Every task needs a parent/i,
+      "the parenting rule should be taught",
+    );
+    assert.match(
+      file,
+      /5 operational[\s\S]{0,60}11 goal-oriented|11 goal-oriented/,
+      "the saga split (5 operational, 11 goal-oriented) should be stated",
+    );
+  });
+
+  it("keeps the live mirror-read tools", () => {
+    const file = readProcess("integrations.md");
+    for (const tool of ["getTaskByJiraKey", "listAsanaTasks", "getAsanaTask"]) {
+      assert.ok(file.includes(tool), `the integrations file should keep ${tool}`);
+    }
+  });
+});
+
+describe("no-remnants guard: process resources current (roles)", () => {
+  it("teaches the live membership tools and drops the false MCP absence claim", () => {
+    const file = readProcess("roles.md");
+    for (const tool of [
+      "addTaskMember",
+      "setTaskMemberRoles",
+      "updateTaskMemberCapacity",
+      "updateTaskMemberParticipation",
+    ]) {
+      assert.ok(file.includes(tool), `roles.md should name ${tool}`);
+    }
+    assert.doesNotMatch(
+      file,
+      /assignment is not available via MCP|not available via MCP after the overhaul/,
+      "the false blanket MCP-absence claim should be gone",
+    );
+    assert.match(
+      file,
+      /Aura UI/,
+      "the owner/crew search flows should carry a UI pointer",
+    );
+  });
+
+  it("teaches the handover handshake and the Leadership veto", () => {
+    const file = readProcess("roles.md");
+    assert.match(
+      file,
+      /handshake|a status field changing who's assigned is not enough/i,
+      "the handover handshake should be taught",
+    );
+    assert.match(
+      file,
+      /veto/i,
+      "the Leadership veto on unsuitable owner pairings should be taught",
+    );
+    assert.match(
+      file,
+      /mutual confirmation/i,
+      "the mutual-confirmation rule should stay",
+    );
+  });
+
+  it("points assignment content at the capacity page (its wiki home is 1.3)", () => {
+    const file = readProcess("roles.md");
+    assert.match(
+      file,
+      /capacity\.md/,
+      "the assignment-and-boards content should cross-reference capacity.md",
+    );
+  });
+});
+
+describe("no-remnants guard: process resources current (escalation)", () => {
+  it("teaches the state-not-person starting point and the de-escalation sequence", () => {
+    const file = readProcess("escalation.md");
+    assert.match(
+      file,
+      /state of the task[^\n]{0,80}not a judgment of a person/i,
+      "the starting point principle should be carried",
+    );
+    assert.match(
+      file,
+      /coaching|support[\s\S]{0,120}reassign/i,
+      "the de-escalation sequence (talk, support, reassign, transparent transition) should be carried",
+    );
+    assert.match(
+      file,
+      /transparent transition/i,
+      "the transparent transition step should be carried",
+    );
+  });
+
+  it("carries the leadership review of overdue tasks and the handshake rule", () => {
+    const file = readProcess("escalation.md");
+    assert.match(
+      file,
+      /overdue[\s\S]{0,120}Leadership|Leadership[\s\S]{0,120}overdue/i,
+      "the overdue-task Leadership review should be carried",
+    );
+    assert.match(
+      file,
+      /handshake/i,
+      "the active-handshake rule for handovers should be carried",
+    );
+  });
+});
+
+describe("no-remnants guard: process resources current (prose)", () => {
+  it("carries no em-dash in any process file", () => {
+    const offenders: string[] = [];
+    for (const file of Object.keys(PROCESS_CANONICAL)) {
+      const content = readProcess(file);
+      content
+        .split("\n")
+        .forEach((line, index) => {
+          if (line.includes("\u2014")) {
+            offenders.push(`${PROCESS_DIR}/${file}:${index + 1}: ${line.trim()}`);
+          }
+        });
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "the process files should carry no em-dash (the repo's prose rule)",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
