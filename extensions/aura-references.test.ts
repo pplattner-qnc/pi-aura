@@ -21,17 +21,27 @@
  * kind end-to-end (the first metadata-driven kind: item mapping whose
  * extras carry the artifact kind and latest version, title-labeled rows
  * with the uuid in the description and the full uuid token as the value,
- * uuid-prefix + title-substring local filtering, the listArtifacts warmup
- * pagination with its q-based server search, and the SWR write-through
- * for server-only matches and renames), the artifact-ref expansion (the
- * metadata-driven id/kind/version attributes, cache-first resolution gated
- * on complete cached metadata with the targeted getArtifact fallback,
- * unknown mentions left as typed, and the escaping), and the instruction
- * block's artifact-ref shape. The provider wiring
+ * uuid-prefix + title-substring local filtering, the searchArtifacts
+ * warmup pagination with its q-based server search, and the SWR
+ * write-through for server-only matches and renames), the artifact-ref
+ * expansion (the metadata-driven id/kind/version attributes, cache-first
+ * resolution gated on complete cached metadata with the targeted
+ * getArtifact fallback, unknown mentions left as typed, and the
+ * escaping), the instruction block's artifact-ref shape (the live kind
+ * set), and the wiki kind end-to-end (slim-tree candidates derived from
+ * title and slug, searchKnowledge with the tree join, the space-listed
+ * warmup, and resolutions whose version loads lazily from the node
+ * read). Every server-facing suite runs over the typed aura-mcp
+ * interface built on a fake caller (the arch spec's caller seam): the
+ * tool envelopes, the payload extraction, and the self-check verdicts
+ * are exercised exactly as the live server feeds them, and a degraded
+ * tool path (the self-check's unavailable set) pins the cache-only
+ * degradation. The provider wiring
  * that defers to the built-in
  * provider for non-reference tokens is tested at its
- * pure wrapper seam. The extension factory (which reaches Aura through the
- * dynamic-import seam and surfaces the deprecation warning via `ctx.ui.notify`)
+ * pure wrapper seam. The extension factory (which constructs the typed
+ * interface once per session with the notify hook and surfaces the
+ * deprecation warning via `ctx.ui.notify`)
  * is exercised by the pi runtime once credentials are configured, mirroring
  * the `aura-tasks` test file.
  */
