@@ -5,7 +5,7 @@
 //
 // dtype handling: if the index dtype is "i8" and the query is a Float32Array,
 // the query is quantized to Int8Array before computing cosine. This ensures
-// the runtime query vector is compatible with the build-time op vectors.
+// the runtime query vector is compatible with i8-indexed op vectors.
 //
 // Cosine similarity = dot(a,b) / (|a| * |b|). Zero vectors → 0 (not NaN).
 

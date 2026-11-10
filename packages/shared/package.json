@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "codegen": "openapi-ts -f openapi-ts.config.ts",
     "test": "tsx --test 'test/**/*.test.ts'"
   },
   "dependencies": {
@@ -15,7 +14,6 @@
     "onnxruntime-node": "^1.20.0"
   },
   "devDependencies": {
-    "@hey-api/openapi-ts": "0.99.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.0",
     "tsx": "^4.23.0",
@@ -24,7 +22,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./keyring": "./src/keyring/index.ts",
-    "./aura-client": "./src/aura-client.ts",
     "./*": "./src/*.ts"
   }
 }

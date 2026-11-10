@@ -33,19 +33,36 @@ import {
   loadAuraMcpCredentials,
   type AuraMcpCaller,
   type AuraMcpToolResult,
+  type CreateFeedbackParams,
 } from "./aura-mcp-client.ts";
 import {
   SHIPPED_AURA_MCP_TOOLS,
   type AuraMcpLiveTool,
   type ShippedToolContract,
 } from "./aura-mcp-contract.ts";
-import type { CreateFeedbackInput, FeedbackDetail } from "@pi-aura/shared/aura-client";
+
+// Local fixture types: the REST library's CreateFeedbackInput/FeedbackDetail
+// went with the library removal (rest-library-consumer-rule). The send
+// payload is the typed interface's CreateFeedbackParams; the created row
+// mirrors the shape the fake tool result carries (the fields the extension
+// reads plus those it logs verbatim).
+interface CreatedFeedbackRow {
+  id: string;
+  title: string;
+  body: string;
+  source: "UI" | "AGENT" | "MCP";
+  status: string;
+  is_anonymous: boolean;
+  notify_author: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function validInput(overrides: Partial<CreateFeedbackInput> = {}): CreateFeedbackInput {
+function validInput(overrides: Partial<CreateFeedbackParams> = {}): CreateFeedbackParams {
   return {
     title: "A short feedback title",
     body: "x".repeat(50), // meets the 50-char floor
@@ -55,7 +72,7 @@ function validInput(overrides: Partial<CreateFeedbackInput> = {}): CreateFeedbac
   };
 }
 
-function createdRow(overrides: Partial<FeedbackDetail> = {}): FeedbackDetail {
+function createdRow(overrides: Partial<CreatedFeedbackRow> = {}): CreatedFeedbackRow {
   return {
     id: "11111111-2222-3333-4444-555555555555",
     title: "A short feedback title",
@@ -108,7 +125,7 @@ function createdRow(overrides: Partial<FeedbackDetail> = {}): FeedbackDetail {
   assert.equal(out.notify_author, false, "notify_author preserved");
 
   // Even if the caller tried to set a different source, it is overwritten.
-  const sneaky = buildSendPayload({ ...validInput(), source: "UI" } as CreateFeedbackInput);
+  const sneaky = buildSendPayload({ ...validInput(), source: "UI" });
   assert.equal(sneaky.source, "MCP", "caller's source overwritten to MCP");
 }
 

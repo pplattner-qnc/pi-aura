@@ -1,23 +1,20 @@
 version: "3"
 
-# Taskfile — codegen, spec-sync, and typecheck targets for the pi-aura repo.
+# Taskfile — install and typecheck targets for the pi-aura repo.
 #
 # The agent-facing CLI and REST reference build surface is removed (the
-# remove-cli-rest-surface retirement): there is no bundle step and nothing
-# writes into the skill directories anymore. What remains is the shared
-# package's typed-client codegen, the OpenAPI spec sync, and typecheck.
+# remove-cli-rest-surface retirement), and the internal REST library followed
+# the consumer rule (the rest-library-consumer-rule ticket): there is no
+# bundle step, no typed-client codegen, and no OpenAPI spec sync anymore.
+# What remains is the shared package's install and typecheck flow.
 #
-# The @pi-aura/shared workspace package (packages/shared/) holds the
-# AuraClient interface, the HeyApi client, keyring, and settings.
+# The @pi-aura/shared workspace package (packages/shared/) holds the keyring,
+# settings, and embed modules the extensions resolve at runtime.
 #
 # Common flows:
 #   task                       # install build deps, typecheck
 #   task install               # install build deps (root npm install)
 #   task typecheck             # tsc --noEmit (assumes deps are installed)
-#   task codegen               # regenerate the typed Aura REST client from the spec
-#   task gen                   # codegen + typecheck (after touching the spec)
-#   task openapi-sync          # refresh packages/shared/openapi/openapi.yaml from the Aura repo
-#   task openapi-sync-and-codegen  # refresh the spec, then regenerate the typed client
 
 vars:
   SHARED_DIR: packages/shared
@@ -36,39 +33,8 @@ tasks:
     cmds:
       - npm install
 
-  # Regenerate the typed Aura REST client from openapi/openapi.yaml into
-  # src/generated/ (committed — rebuild after changing the spec).
-  codegen:
-    desc: Regenerate the typed Aura REST client from the OpenAPI spec
-    cmds:
-      - cd {{.SHARED_DIR}} && npm run codegen
-
-  # Regenerate the client, then typecheck. Use this after touching the spec.
-  gen:
-    desc: Regenerate the client, then typecheck (after touching the spec)
-    cmds:
-      - task: codegen
-      - task: typecheck
-
   # tsc --noEmit for the shared package (assumes deps are installed).
   typecheck:
     desc: Typecheck packages/shared (tsc --noEmit)
     cmds:
       - cd {{.SHARED_DIR}} && npm run typecheck
-
-  # Pull the canonical OpenAPI spec from the Aura source repo and copy it
-  # over packages/shared/openapi/openapi.yaml when it changed. Idempotent.
-  # See scripts/openapi-sync.sh for the full flow (clone → hash-compare →
-  # copy → cleanup). Requires SSH access to git@bitbucket.org:anwaltde/aura.git.
-  openapi-sync:
-    desc: Refresh packages/shared/openapi/openapi.yaml from the Aura repo
-    cmds:
-      - ./scripts/openapi-sync.sh
-
-  # Convenience: refresh the spec and regenerate the client in one go.
-  # Runs openapi-sync first; if the spec changed, codegen rebuilds the client.
-  openapi-sync-and-codegen:
-    desc: Refresh the OpenAPI spec and regenerate the typed client
-    cmds:
-      - task: openapi-sync
-      - task: codegen
