@@ -3,31 +3,32 @@
 ## How to start
 
 ```bash
-# Clone + install build deps
+# Clone + install build deps (the root workspace populates packages/shared)
 git clone <repo>
-cd pi-aura/scripts
+cd pi-aura
 npm install
 
 # Regenerate the Aura REST client from the spec (after touching openapi/openapi.yaml)
-npm run codegen
-
-# Build the skill bundles into skills/*/dist/
-task build
+cd packages/shared && npm run codegen
 ```
 
 ## Aura instance + PAT
 
-The scripts talk to an Aura instance. For local development point the client
-at a local Aura server (`http://localhost:3000/api`, the spec's default server)
-or your hosted instance. The PAT/bearer token is currently read from
+The extensions and the shared package talk to an Aura instance. For local
+development point the client at a local Aura server
+(`http://localhost:3000/api`, the spec's default server) or your hosted
+instance. The PAT/bearer token is currently read from
 `~/.config/mcp/mcp.json` (`mcpServers.aura-mcp-dev`); the in-flight
 `aura-access-rewrite` map is changing this.
 
 ## Reproduction
 
 ```bash
-# Run the aura skill CLI against a workdir (artifact/wiki workflows):
-node skills/core/aura/dist/aura.mjs artifact get <uuid>
+# Run the shared package's suite (the main verification; guards included):
+cd packages/shared && npm test
+
+# Run one extension suite:
+node --experimental-strip-types extensions/aura-references.test.ts
 ```
 
 ## Do-not-attempt-AI-reproduction

@@ -53,7 +53,6 @@ Best for: breaking async ping-pong that has gone on too long.
 > available via MCP), `getArtifactReview` (not available via MCP),
 > `submitArtifactDecision` (not available via MCP), `startArtifactReview`
 > (not available via MCP), `reopenArtifactReview` (not available via MCP),
-> `getArtifactApprovals` (not available via MCP) — have REST endpoints in
-> `openapi-new.yaml`. Use `aura.mjs artifact review-*` subcommands, or the
-> REST endpoints (`/artifacts/{id}/review-request`, `/artifacts/{id}/review`,
-> `/artifacts/{id}/decisions`, `/artifacts/{id}/approvals`).
+> `getArtifactApprovals` (not available via MCP) — are no longer on the
+> live server, and the CLI subcommands that wrapped them are removed with
+> no successor. Manage artifact reviews in the **Aura UI**.

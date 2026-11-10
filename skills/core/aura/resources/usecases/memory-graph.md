@@ -63,8 +63,7 @@ Graph expansion (`getMemoryGraph`/`getMemoryMap`) is not available via MCP
 after the overhaul. Use `listMemoryEntities` for the faceted entity list,
 `getMemoryEntitySource` to resolve an entity's source, and
 `reportMemoryEntityQuestion` to flag questionable entities. For
-anchor→depth expansion, use the REST endpoints `/memory/graph` and
-`/memory/map` (see `openapi-new.yaml`).
+anchor→depth expansion, use the Aura UI.
 
 ### `listMemoryEntities` — faceted entity list
 
@@ -82,7 +81,7 @@ listMemoryEntities({
 
 Returns a faceted list of entities matching the query, optionally filtered
 by type, status, and provenance. Use this to find entities of interest
-before resolving their sources or expanding the graph via REST.
+before resolving their sources or expanding the graph further.
 
 ### `getMemoryEntitySource` — resolve entity source
 
