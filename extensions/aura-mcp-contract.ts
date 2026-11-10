@@ -123,6 +123,49 @@ export function auraMcpEndpointFromBaseUrl(baseUrl: string): string {
   return `${withoutApi}/mcp`;
 }
 
+/**
+ * Run the contract self-check: compare every shipped contract against the
+ * live tool list and aggregate the verdicts into user-visible strings. Each
+ * warning and failure names the tool and the difference; the `unavailable`
+ * set is exactly the core-drifted tools whose path the wrapper fails fast.
+ */
+export function runContractSelfCheck(
+  shipped: readonly ShippedToolContract[],
+  liveTools: readonly AuraMcpLiveTool[],
+): ContractSelfCheck {
+  const warnings: string[] = [];
+  const failures: string[] = [];
+  const unavailable: string[] = [];
+  const liveByName = new Map(liveTools.map((tool) => [tool.name, tool]));
+  for (const contract of shipped) {
+    const live = liveByName.get(contract.name);
+    if (live === undefined) {
+      failures.push(
+        `aura-mcp-dev tool "${contract.name}" is gone from the live server; its path is unavailable`,
+      );
+      unavailable.push(contract.name);
+      continue;
+    }
+    const verdict = compareShippedTool(contract, live);
+    if (verdict.verdict === "ok") continue;
+    const differences = verdict.issues.join("; ");
+    if (verdict.verdict === "core") {
+      failures.push(
+        `aura-mcp-dev tool "${contract.name}" drifted from the shipped contract (core): ${differences}. Its path is unavailable; callers degrade to cached data.`,
+      );
+      unavailable.push(contract.name);
+    } else {
+      warnings.push(`aura-mcp-dev tool "${contract.name}" drifted from the shipped contract (cosmetic): ${differences}`);
+    }
+  }
+  return {
+    status: unavailable.length > 0 ? "core" : warnings.length > 0 ? "cosmetic" : "ok",
+    warnings,
+    failures,
+    unavailable,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Shipped tool contracts (transcribed from the introspection dump)
 // ---------------------------------------------------------------------------

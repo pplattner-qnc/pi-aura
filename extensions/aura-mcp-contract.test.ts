@@ -19,6 +19,7 @@ import {
   SHIPPED_AURA_MCP_TOOLS,
   auraMcpEndpointFromBaseUrl,
   compareShippedTool,
+  runContractSelfCheck,
   type ShippedToolContract,
 } from "./aura-mcp-contract.ts";
 
@@ -194,4 +195,183 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
   console.log("compareShippedTool changed default: ok");
 }
 
-console.log("\nall aura-mcp-contract tests passed (cycle 1a)");
+// ---------------------------------------------------------------------------
+// compareShippedTool: core drift
+// ---------------------------------------------------------------------------
+
+{
+  // A parameter the wrapper sends that the live schema no longer has is
+  // core drift (renamed or removed).
+  const live = liveTool("listTasks", {
+    archived: { type: "string", enum: ["false", "true", "all"], description: SHIPPED_LIST_TASKS.params.archived.description },
+    limit: { type: "integer", default: 20 },
+    page: { type: "integer", default: 1 },
+    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
+    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
+  });
+  const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
+  assert.equal(verdict.verdict, "core");
+  assert.ok(
+    verdict.issues.join("; ").includes('"q"') && verdict.issues.join("; ").includes("renamed"),
+    `the core failure names the renamed parameter, got: ${JSON.stringify(verdict)}`,
+  );
+  console.log("compareShippedTool renamed parameter: ok");
+}
+
+{
+  // A retyped parameter (string -> number) is core drift.
+  const live = liveTool("listTasks", {
+    q: { type: "number" },
+    archived: { type: "string", enum: ["false", "true", "all"], description: SHIPPED_LIST_TASKS.params.archived.description },
+    limit: { type: "integer", default: 20 },
+    page: { type: "integer", default: 1 },
+    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
+    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
+  });
+  const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
+  assert.equal(verdict.verdict, "core");
+  assert.ok(verdict.issues.join("; ").includes('"q"') && verdict.issues.join("; ").includes("retyped"));
+  console.log("compareShippedTool retyped parameter: ok");
+}
+
+{
+  // An enum that drops values the wrapper sends is core drift (retyped).
+  const live = liveTool("listTasks", {
+    q: { type: "string" },
+    archived: { type: "string", enum: ["false", "true"], description: SHIPPED_LIST_TASKS.params.archived.description },
+    limit: { type: "integer", default: 20 },
+    page: { type: "integer", default: 1 },
+    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
+    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
+  });
+  const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
+  assert.equal(verdict.verdict, "core");
+  assert.ok(
+    verdict.issues.join("; ").includes('"archived"') && verdict.issues.join("; ").includes('"all"'),
+    `the core failure names the narrowed enum, got: ${JSON.stringify(verdict)}`,
+  );
+  console.log("compareShippedTool narrowed enum: ok");
+}
+
+{
+  // A shipped-optional parameter that becomes required is core drift.
+  const live = liveTool("listTasks", {
+    q: { type: "string" },
+    archived: { type: "string", enum: ["false", "true", "all"], description: SHIPPED_LIST_TASKS.params.archived.description },
+    limit: { type: "integer", default: 20 },
+    page: { type: "integer", default: 1 },
+    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
+    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
+  }, { required: ["q"] });
+  const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
+  assert.equal(verdict.verdict, "core");
+  assert.ok(verdict.issues.join("; ").includes('"q"') && verdict.issues.join("; ").includes("newly required"));
+  console.log("compareShippedTool newly required parameter: ok");
+}
+
+{
+  // A brand-new required parameter the wrapper does not send is core drift
+  // (every call would fail validation).
+  const live = liveTool("listTasks", {
+    q: { type: "string" },
+    archived: { type: "string", enum: ["false", "true", "all"], description: SHIPPED_LIST_TASKS.params.archived.description },
+    limit: { type: "integer", default: 20 },
+    page: { type: "integer", default: 1 },
+    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
+    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
+    project_slug: { type: "string", description: "new mandatory scope" },
+  }, { required: ["project_slug"] });
+  const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
+  assert.equal(verdict.verdict, "core");
+  assert.ok(
+    verdict.issues.join("; ").includes('"project_slug"') && verdict.issues.join("; ").includes("required"),
+    `the core failure names the new required parameter, got: ${JSON.stringify(verdict)}`,
+  );
+  console.log("compareShippedTool new required parameter: ok");
+}
+
+{
+  // The enum-lenient comparison: a shipped string param whose live schema
+  // widened to more values is not drift at all (a pure relaxation; the
+  // wrapper's sends stay valid and neither enumerated drift class fires).
+  const live = liveTool("listTasks", {
+    q: { type: "string" },
+    archived: { type: "string", enum: ["false", "true", "all", "only-mine"], description: SHIPPED_LIST_TASKS.params.archived.description },
+    limit: { type: "integer", default: 20 },
+    page: { type: "integer", default: 1 },
+    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
+    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
+  });
+  const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
+  assert.equal(verdict.verdict, "ok", `enum widening must not read as drift, got: ${JSON.stringify(verdict)}`);
+  console.log("compareShippedTool widened enum is not drift: ok");
+}
+
+// ---------------------------------------------------------------------------
+// runContractSelfCheck: aggregation
+// ---------------------------------------------------------------------------
+
+{
+  // One clean live list yields status ok with no warnings and no
+  // unavailable paths.
+  const clean = liveTool("listTasks", {
+    q: { type: "string", description: SHIPPED_LIST_TASKS.params.q.description },
+    archived: { type: "string", enum: ["false", "true", "all"], description: SHIPPED_LIST_TASKS.params.archived.description },
+    limit: { type: "integer", default: 20, description: SHIPPED_LIST_TASKS.params.limit.description },
+    page: { type: "integer", default: 1, description: SHIPPED_LIST_TASKS.params.page.description },
+    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at", description: SHIPPED_LIST_TASKS.params.sort_by.description },
+    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc", description: SHIPPED_LIST_TASKS.params.sort_dir.description },
+  }, { title: "Tasks: List (paginated)", description: SHIPPED_LIST_TASKS.description.replace(/^Tasks: List \(paginated\)\n\n/, "") });
+  const check = runContractSelfCheck(SHIPPED_AURA_MCP_TOOLS, [clean]);
+  assert.equal(check.status, "core"); // the other nine tools are gone from this live list
+  assert.ok(check.failures.join("\n").includes("getTaskByHumanKey"), "a missing tool is named as a core failure");
+  assert.ok(check.unavailable.includes("getTaskByHumanKey"), "missing tools are unavailable paths");
+  console.log("runContractSelfCheck missing tool: ok");
+}
+
+{
+  // The title/description leniency: a shipped block that starts with the
+  // tool title matches a live tool that reports title and description as
+  // separate fields.
+  const shipped: ShippedToolContract = {
+    name: "listKnowledgeSpaces",
+    description: ["List knowledge spaces", "", "Returns all knowledge spaces (topics). Accessible to all authenticated users."].join("\n"),
+    params: {},
+  };
+  const live = liveTool("listKnowledgeSpaces", {}, {
+    title: "List knowledge spaces",
+    description: "Returns all knowledge spaces (topics). Accessible to all authenticated users.",
+  });
+  const verdict = compareShippedTool(shipped, live);
+  assert.equal(verdict.verdict, "ok", `title/description split must not read as drift, got: ${JSON.stringify(verdict)}`);
+  console.log("compareShippedTool title/description leniency: ok");
+}
+
+{
+  // Whitespace-only formatting differences are not drift.
+  const shipped: ShippedToolContract = {
+    name: "listKnowledgeSpaces",
+    description: "List knowledge spaces\nReturns  all knowledge spaces (topics). Accessible to all authenticated users.",
+    params: {},
+  };
+  const live = liveTool("listKnowledgeSpaces", {}, {
+    description: "List knowledge spaces\n\nReturns all knowledge spaces (topics). Accessible to\nall authenticated users.",
+  });
+  const verdict = compareShippedTool(shipped, live);
+  assert.equal(verdict.verdict, "ok", `whitespace-only differences must not read as drift, got: ${JSON.stringify(verdict)}`);
+  console.log("compareShippedTool whitespace leniency: ok");
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint derivation
+// ---------------------------------------------------------------------------
+
+{
+  assert.equal(auraMcpEndpointFromBaseUrl("https://aura.dev-anwalt.de/api"), "https://aura.dev-anwalt.de/mcp");
+  assert.equal(auraMcpEndpointFromBaseUrl("https://aura.dev-anwalt.de/api/"), "https://aura.dev-anwalt.de/mcp");
+  assert.equal(auraMcpEndpointFromBaseUrl("https://aura.example.com"), "https://aura.example.com/mcp");
+  assert.equal(auraMcpEndpointFromBaseUrl("https://aura.example.com/"), "https://aura.example.com/mcp");
+  console.log("auraMcpEndpointFromBaseUrl: ok");
+}
+
+console.log("\nall aura-mcp-contract tests passed");
