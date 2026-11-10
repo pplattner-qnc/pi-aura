@@ -118,7 +118,7 @@ describe("LocalEmbedProvider — E5 prefix convention", () => {
     );
   });
 
-  it("embedPassages() applies 'passage: ' prefix (build-time convenience)", async () => {
+  it("embedPassages() applies 'passage: ' prefix (caller convenience)", async () => {
     const { pipelineFn, calls } = makeFakePipeline();
     const provider = await createLocalEmbedProvider({ pipeline: pipelineFn });
     await (provider as any).embedPassages(["op one", "op two"]);

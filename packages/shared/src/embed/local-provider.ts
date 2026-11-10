@@ -12,9 +12,8 @@
 // - E5 PREFIX CONVENTION: E5 models require queries prefixed with "query: "
 //   and passages prefixed with "passage: " for best retrieval quality. This
 //   is baked into the provider: embed() (the EmbedProvider interface method)
-//   applies the "query: " prefix; embedPassages() applies "passage: ". The
-//   build-time op texts get "passage: " prefix; the runtime query gets
-//   "query: " prefix. Callers don't have to remember.
+//   applies the "query: " prefix; embedPassages() applies "passage: ".
+//   Callers don't have to remember.
 // - Mean-pool + L2-normalize: the feature-extraction pipeline returns
 //   last_hidden_state [seq_len, hidden_dim]. We mean-pool over the token
 //   dimension, then L2-normalize the result.
@@ -33,7 +32,7 @@ import type { EmbedProvider } from "./provider.js";
 // Constants
 // ---------------------------------------------------------------------------
 
-/** The model id (matches the build-time recorded id so the runtime guard passes). */
+/** The model id of the local CPU model this provider runs. */
 export const LOCAL_MODEL_ID = "Xenova/multilingual-e5-base";
 
 /** Default cache dir for the Hugging Face model. */
@@ -90,9 +89,8 @@ export interface LocalEmbedProviderOptions {
  * degradation if the model can't be loaded.
  *
  * E5 PREFIX CONVENTION: E5 models require queries prefixed with "query: "
- *   and passages prefixed with "passage: " for best retrieval quality. This
- *   is baked into the CALL SITES (buildSemanticVectors applies "passage: ",
- *   restSearch applies "query: "), NOT the provider itself. The provider's
+ *   and passages prefixed with "passage: " for best retrieval quality. The
+ *   prefixing convention is NOT baked into embed() itself. The provider's
  *   embed() method embeds texts as-is (same as the cloud provider), so both
  *   local and cloud providers behave consistently. embedPassages() is a
  *   convenience that applies the prefix internally.
@@ -164,8 +162,7 @@ export class LocalEmbedProvider implements EmbedProvider {
 
   /**
    * Embed texts as-is (no prefix). This is the EmbedProvider interface
-   * method, used by callers that handle E5 prefixing themselves
-   * (buildSemanticVectors applies "passage:", restSearch applies "query:").
+   * method, used by callers that handle E5 prefixing themselves.
    * Returns L2-normalized Float32Array[] (one per text).
    */
   async embed(texts: string[]): Promise<Float32Array[]> {
@@ -173,7 +170,7 @@ export class LocalEmbedProvider implements EmbedProvider {
   }
 
   /**
-   * Embed passage texts with the "passage: " prefix applied (build-time path).
+   * Embed passage texts with the "passage: " prefix applied.
    * Convenience method — callers can also apply the prefix themselves and
    * call embed().
    * Returns L2-normalized Float32Array[] (one per text).
