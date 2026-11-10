@@ -30,17 +30,15 @@ Aura (source of truth)
   up an Aura task by its Jira key.
 - **Do not create tasks in JIRA or Asana directly** — create them in Aura
   and let the sync handle propagation.
-- **When a task comes from JIRA**, bring it into Aura via the REST endpoint
-  `/tasks/{uuid}/jira-issues` (see `openapi-new.yaml`), then manage it in Aura
-  going forward.
+- **When a task comes from JIRA**, it is brought into Aura by the Jira
+  integration; manage it in Aura going forward.
 
 ## Relevant MCP tools
 
 `getTaskByJiraKey` survives for Jira key lookup. Jira/Asana **linking** is
 not available via MCP after the overhaul — the linking tools
-(`getAsanaStatus`/`confirmAsanaLink`) are gone (REST-ONLY); use the REST
-endpoints in `openapi-new.yaml` (`/tasks/{uuid}/jira-issues*`, `/jira-issues`,
-`/integrations/asana/*`) or the Aura UI. Asana task **read**, however, is now
+(`getAsanaStatus`/`confirmAsanaLink`) are gone. Use the Aura UI for
+linking. Asana task **read**, however, is now
 exposed via two MCP tools that read the locally-mirrored Asana task rows (no
 Asana account required):
 

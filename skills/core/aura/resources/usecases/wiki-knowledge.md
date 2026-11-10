@@ -15,31 +15,20 @@ searchKnowledge({ query: "deployment pipeline", limit: 10 })
 searchKnowledge({ query: "deployment pipeline", space_slug: "engineering", limit: 5 })
 ```
 
-Via `aura.mjs` (inline results — search returns small summaries, safe on stdout):
-
-```bash
-node skills/core/aura/dist/aura.mjs wiki search "capacity management" --limit 5
-node skills/core/aura/dist/aura.mjs wiki search "deployment pipeline" --space engineering --limit 5
-```
-
 Hybrid search combining literal (German full-text + trigram fallback) and
 semantic search, merged via reciprocal rank fusion. Restricted to the caller's
 readable spaces.
 
 ### Fetch a document by path
 
-Via `aura.mjs` (workdir model — keeps the body out of LLM context):
-
-```bash
-WD=$(node skills/core/aura/dist/aura.mjs wiki get --slug "knowledge-hub/prozesse/how-we-work-in-aura-a-practical-guide" | sed -n 's/^workdir: //p' | sed 's|/$||')
-# body is at $WD/body.md; id/version at $WD/meta.json
-```
-
-Via MCP (only for short documents where context cost is negligible):
+Via MCP:
 
 ```
 getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "prozesse/how-we-work-in-aura-a-practical-guide" })
 ```
+
+For long documents, write the returned body to a local file with the
+`write` tool so follow-up work reads from disk instead of the context.
 
 ### Browse the tree
 
@@ -52,12 +41,6 @@ getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "prozesse/how-we-work-in-a
 | List files in a space | `listKnowledgeFiles` | FILE nodes only |
 | Get specific version | `getKnowledgeNodeVersion` | Historical version |
 | List versions | `listKnowledgeNodeVersions` | Version history |
-
-Via `aura.mjs`:
-
-```bash
-node skills/core/aura/dist/aura.mjs wiki tree --slug "knowledge-hub"
-```
 
 ### Cross-entity search
 
@@ -76,29 +59,13 @@ knowledge spaces.
 > others — unapproved changes can break links, confuse readers, or
 > overwrite someone else's work.
 >
-> **Local file hygiene:** the `aura.mjs` workdir model enforces this for you —
-> each `wiki get` creates a fresh `/tmp/aura-wiki-<hex>/` dir pairing the node
-> id with the body file, and `wiki save` removes it on upload. No stale files
-> can linger; to edit again, re-fetch (a fresh workdir guarantees you start
-> from the server's current version).
+> **Fresh-copy hygiene:** always re-fetch a node before editing it, so you
+> start from the server's current version and never overwrite a newer save
+> with a stale copy.
 
 ### Create a document
 
-**Via `aura.mjs` (workdir model for large bodies):**
-
-```bash
-# Step 1: Create the node (prints the new node uuid)
-node skills/core/aura/dist/aura.mjs wiki create \
-  --space engineering --title "Authentication Overview" --slug auth-overview
-
-# Step 2: Write the body to a local file, then fetch-into-workdir + edit + save
-# (use the returned uuid to fetch a workdir, write body.md, then save)
-WD=$(node skills/core/aura/dist/aura.mjs wiki get --uuid "<node-uuid>" | sed -n 's/^workdir: //p' | sed 's|/$||')
-write({ path: "$WD/body.md", content: "# Authentication Overview\n\n..." })
-node skills/core/aura/dist/aura.mjs wiki save "$WD" --summary "Initial version"
-```
-
-**Via MCP (only for small bodies):**
+Create the node, then save its body:
 
 ```
 createKnowledgeNode({
@@ -117,6 +84,10 @@ saveKnowledgeNodeBody({
 })
 ```
 
+For a large body, compose it in a local file with the `write` tool first,
+then read it back with `read` for the `saveKnowledgeNodeBody` call, so the
+file on disk stays the ground truth.
+
 ### Create a folder
 
 ```
@@ -130,24 +101,21 @@ createKnowledgeNode({
 
 ### Update a document body
 
-**Via `aura.mjs` (workdir model for large bodies):**
+For large edits, download first, edit on disk, then send the edited body
+back:
 
-```bash
-# Step 1: Download current version into a fresh workdir
-WD=$(node skills/core/aura/dist/aura.mjs wiki get --uuid "<node-uuid>" | sed -n 's/^workdir: //p' | sed 's|/$||')
-
-# Step 2: Edit the body locally (only diffs flow through context)
-read({ path: "$WD/body.md" })
-edit({ path: "$WD/body.md", edits: [...] })
-
-# Step 3: Upload; the script reads id+body from the workdir and removes it
-node skills/core/aura/dist/aura.mjs wiki save "$WD" --summary "Description of changes"
+```
+getKnowledgeNode({ uuid: "<node-uuid>" })   // read the body from the result
+write({ path: "/tmp/wiki-body.md", content: "<the body you read>" })
+// edit the file locally with `read` and `edit` (only diffs flow through context)
+saveKnowledgeNodeBody({
+  uuid: "<node-uuid>",
+  body: "<the edited body read from /tmp/wiki-body.md>",
+  summary: "Description of changes"
+})
 ```
 
-The workdir is gone after upload — no stale local file can linger. To edit
-again, re-fetch (Step 1) for a fresh copy.
-
-**Via MCP (only for small edits):**
+For small edits, call `saveKnowledgeNodeBody` directly:
 
 ```
 saveKnowledgeNodeBody({
@@ -218,11 +186,8 @@ fields (all optional) — `editor_user_ids` is a full replacement list
 ### Upload files and images
 
 > **Not available via MCP.** File and image uploads are REST-only — use
-> REST (`POST /knowledge/nodes/{uuid}/file` for files,
-> `POST /knowledge/nodes/{uuid}/images` for node images) or the Aura UI.
-> The MCP surface covers reading and editing document bodies/frontmatter
-> via `saveKnowledgeNodeBody`/`saveKnowledgeNodeFrontmatter`, but binary
-> uploads require the REST endpoints above.
+> the Aura UI. The MCP surface covers reading and editing document
+> bodies/frontmatter via `saveKnowledgeNodeBody`/`saveKnowledgeNodeFrontmatter`.
 
 ## Best practices
 

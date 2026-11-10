@@ -52,7 +52,7 @@ _Avoid_: the vault, secrets store
   `HeyApiAuraClient` is the production implementation; a fake is the test
   seam.
 - **mcp\* tools** are the preferred MCP surface; capabilities with no
-  `mcp*` variant use the REST API or Aura UI.
+  `mcp*` variant use the Aura UI.
 - A **PAT** authenticates every **aura-mcp-dev** call and is stored in the
   **Keyring**.
 

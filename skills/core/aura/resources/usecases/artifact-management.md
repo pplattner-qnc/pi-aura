@@ -31,16 +31,16 @@ tool result — three problems occur:
    The file on disk is the ground truth — the LLM's re-generation of it is
    an approximation.
 
-The file-based workflow via the `aura` skill's `aura.mjs` script avoids all
-three: content travels from disk to server without entering the LLM context
-as a tool argument. The script owns a **workdir** per round-trip (a fresh
-`/tmp/aura-artifact-<hex>/` dir pairing the artifact id with its body file), so
-id↔body mismatch is impossible and the dir is removed on upload — no stale
-files to forget, no manual delete step.
+Access is MCP-first: read artifact content through `getArtifact` and write
+it to a local file with the `write` tool when you need it on disk; edit the
+file locally and send the updated content back with `mcpUpdateArtifact`.
+The body still travels through the MCP tool arguments, so keep reads
+targeted and prefer section-mode edits over whole-body rewrites.
 
 **Rule of thumb:** if the body or the edit is more than a short paragraph
-(~500 characters), use the file-based workflow. Below that threshold, the
-overhead of the file round-trip isn't worth it.
+(~500 characters), work from a local file (download through MCP, edit on
+disk) instead of composing in context. Below that threshold, the file
+round-trip isn't worth it.
 
 ## Creating artifacts
 
@@ -55,7 +55,7 @@ mcpCreateArtifact({
 })
 ```
 
-### Large content (> ~500 chars) — file-based via `aura.mjs`
+### Large content (> ~500 chars) — compose locally, create via MCP
 
 **Step 1:** Write the content to a local file using the `write` tool.
 
@@ -63,15 +63,17 @@ mcpCreateArtifact({
 write({ path: "/tmp/artifact-body.md", content: "# Full document..." })
 ```
 
-**Step 2:** Create the artifact, uploading the body from the file. The script
-removes the body file on success.
+**Step 2:** Create the artifact, passing the body you wrote. Read it back
+from the file with `read` rather than recomposing it from memory, so the
+file on disk stays the ground truth:
 
-```bash
-node skills/core/aura/dist/aura.mjs artifact create \
-  --title "Authentication Redesign Plan" \
-  --kind PLAN \
-  --body-file /tmp/artifact-body.md \
-  --summary "Initial full version"
+```
+mcpCreateArtifact({
+  title: "Authentication Redesign Plan",
+  kind: "PLAN",
+  body: "<the body read from /tmp/artifact-body.md>",
+  summary: "Initial full version"
+})
 ```
 
 Note the returned artifact `id`.
@@ -90,46 +92,50 @@ mcpUpdateArtifact({
 })
 ```
 
-### Large edits (> ~500 chars changed) — file-based via `aura.mjs`
+### Large edits (> ~500 chars changed) — download, edit on disk, update via MCP
 
-**Step 1:** Download the current version into a fresh workdir. The script
-prints the workdir path (holding `body.md` + `meta.json` with the id + version).
+**Step 1:** Download the current version through MCP and write its body to
+a local file (the codemode download pattern — no CLI involved):
 
-```bash
-WD=$(node skills/core/aura/dist/aura.mjs artifact get <artifact-uuid> | sed -n 's/^workdir: //p' | sed 's|/$||')
+```
+getArtifact({ id: "<artifact-uuid>" })   // read the body from the result
+write({ path: "/tmp/artifact-body.md", content: "<the body you read>" })
 ```
 
 **Step 2:** Edit the body file locally with `read` and `edit` (only diffs
 flow through context).
 
 ```
-read({ path: "$WD/body.md" })
-edit({ path: "$WD/body.md", edits: [...] })
+read({ path: "/tmp/artifact-body.md" })
+edit({ path: "/tmp/artifact-body.md", edits: [...] })
 ```
 
-**Step 3:** Upload the edited body from the workdir. The script reads the id
-from `meta.json` + the body from `body.md`, uploads, and removes the workdir.
+**Step 3:** Send the edited body back with `mcpUpdateArtifact` in `whole`
+mode (or a `section` edit when only one heading's content changed):
 
-```bash
-node skills/core/aura/dist/aura.mjs artifact update "$WD" --summary "Description of changes"
+```
+mcpUpdateArtifact({
+  id: "<artifact-uuid>",
+  mode: "whole",
+  body: "<the edited body read from /tmp/artifact-body.md>",
+  summary: "Description of changes"
+})
 ```
 
-The workdir is gone after upload — no stale local file can linger. To edit
-again, re-run Step 1 (a fresh fetch guarantees you start from the server's
-current version).
+To edit again, re-download first (a fresh fetch guarantees you start from
+the server's current version).
 
 ## Direct MCP tools (compact reference)
 
 These tools are available for quick operations where the content is small
-enough to pass through context without issues. **Avoid using them for
-bodies or edits larger than a short paragraph** — use the file-based
-workflow instead.
+enough to pass through context without issues. **Prefer section-mode edits
+for large documents** — they keep the unchanged body out of the tool call.
 
 | Tool | Use for |
 |---|---|
 | `mcpCreateArtifact` | Create with small body (≤ ~500 chars) |
 | `mcpUpdateArtifact` mode `section` | Small targeted edit to one section |
-| `mcpUpdateArtifact` mode `whole` | Small full replacement (≤ ~500 chars) |
+| `mcpUpdateArtifact` mode `whole` | Full body replacement (read from a local file for large bodies) |
 | `getArtifact` | Read artifact detail (body included) |
 | `linkArtifactToTask` | Link artifact to task |
 
@@ -146,39 +152,17 @@ linkArtifactToTask({ id: "<task-uuid>", artifact_id: "<artifact-uuid>" })
 
 The review-flow MCP tools (request, start, submit decision, reopen, read
 review state, read approvals) are **no longer available via MCP** — they are
-gone from the live `aura-mcp-dev` server. Instead, use the `aura.mjs`
-`artifact review-*` subcommands, which call the REST endpoints directly via
-the shared `restClient`.
-
-```bash
-# 1. Request a review
-node skills/core/aura/dist/aura.mjs artifact review-request <artifact-uuid>
-
-# 2. Check review status (compact: version, per-reviewer status, deadline, initiator)
-node skills/core/aura/dist/aura.mjs artifact review-get <artifact-uuid>
-
-# 3. Submit a decision (APPROVED or REJECTED, version-bound, idempotent)
-node skills/core/aura/dist/aura.mjs artifact review-decide <artifact-uuid> \
-  --version <version> --decision APPROVED
-
-# 4. Start a formal review (assign roles + reviewers + optional deadline)
-node skills/core/aura/dist/aura.mjs artifact review-start <artifact-uuid> \
-  --version <version> --roles <role1,role2> --user-ids <user1,user2> \
-  --deadline <iso-deadline>
-
-# 5. Reopen an approved review
-node skills/core/aura/dist/aura.mjs artifact review-reopen <artifact-uuid> --version <version>
-
-# 6. Check approval status (decisions + decided/total counts)
-node skills/core/aura/dist/aura.mjs artifact review-approvals <artifact-uuid>
-```
+gone from the live `aura-mcp-dev` server, and the CLI subcommands that
+called their endpoints are removed with no successor. Manage artifact
+reviews in the **Aura UI**. The successor opinions flow is described in
+[resources/process/review-modes.md](../process/review-modes.md).
 
 ## Access control
 
 | Action | Tool |
 |---|---|
-| Grant/update access | `grantArtifactAccess` — not available via MCP; use Aura UI / REST |
-| View access overview | `getArtifactAccessOverview` — not available via MCP; use Aura UI / REST |
+| Grant/update access | `grantArtifactAccess` — not available via MCP; use the Aura UI |
+| View access overview | `getArtifactAccessOverview` — not available via MCP; use the Aura UI |
 | Accept into memory | `acceptArtifactMemory` |
 
 ## Comments

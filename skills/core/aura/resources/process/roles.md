@@ -54,5 +54,4 @@ Reviews plans (Alignment) or results (Review). Does not implement.
 ## Relevant MCP tools
 
 Owner/crew assignment is not available via MCP after the overhaul. Use the
-Aura UI, or the REST endpoints in `openapi-new.yaml` (`/tasks/{uuid}/owner-search*`,
-`/tasks/{uuid}/crew-search*`).
+Aura UI.

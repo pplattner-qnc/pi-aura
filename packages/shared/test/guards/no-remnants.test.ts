@@ -56,26 +56,13 @@ interface RootPackageJson {
     skills?: string[];
     subagents?: { agents?: string[] };
   };
+  workspaces?: string[];
   devDependencies?: Record<string, string>;
 }
 
 function readRootPackageJson(): RootPackageJson {
   const raw = fs.readFileSync(path.join(repoRoot, "package.json"), "utf-8");
   return JSON.parse(raw) as RootPackageJson;
-}
-
-interface ScriptsPackageJson {
-  name?: string;
-  description?: string;
-  dependencies?: Record<string, string>;
-}
-
-function readScriptsPackageJson(): ScriptsPackageJson {
-  const raw = fs.readFileSync(
-    path.join(repoRoot, "scripts", "package.json"),
-    "utf-8",
-  );
-  return JSON.parse(raw) as ScriptsPackageJson;
 }
 
 interface SharedPackageJson {
@@ -248,35 +235,39 @@ describe("no-remnants guard: shared digest core", () => {
   });
 });
 
-// digest-core-and-build-pkg-cleanup: the scripts workspace is digest-free
-// (manifest shape, digest-era files, the e2e families the digest clients
-// had).
-describe("no-remnants guard: scripts workspace", () => {
-  it("carries no digest-era package name", () => {
-    const pkg = readScriptsPackageJson();
-    assert.ok(
-      pkg.name !== undefined && !pkg.name.includes("digest"),
-      `scripts package name should not mention digest, found: ${pkg.name ?? "none"}`,
+// digest-core-and-build-pkg-cleanup, then remove-cli-rest-surface: the
+// scripts workspace carried the digest-era CLI first and the aura skill's
+// CLI bundle afterwards; the remove-cli-rest-surface effort retired the
+// bundled CLI and its build surface, leaving only the two shell scripts
+// that serve the shared package (spec sync, release). The workspace
+// itself is gone: no package.json/tsconfig/esbuild config, no src/ tree.
+// The former per-file assertions on the deleted package manifest
+// (digest-free name, description, no MCP SDK dependency) are superseded
+// by the absence assertions below.
+describe("no-remnants guard: scripts workspace removal", () => {
+  it("has no scripts npm workspace manifests or build config", () => {
+    const gone = [
+      "package.json",
+      "package-lock.json",
+      "tsconfig.json",
+      "esbuild.config.mjs",
+    ];
+    const offenders = gone.filter((file) =>
+      fs.existsSync(path.join(repoRoot, "scripts", file)),
     );
-  });
-
-  it("carries no digest-era description", () => {
-    const pkg = readScriptsPackageJson();
-    assert.ok(
-      pkg.description !== undefined &&
-        !pkg.description.toLowerCase().includes("digest"),
-      `scripts package description should not mention digest, found: ${pkg.description ?? "none"}`,
-    );
-  });
-
-  it("carries no MCP SDK dependency", () => {
-    const pkg = readScriptsPackageJson();
-    const deps = Object.keys(pkg.dependencies ?? {});
-    const offenders = deps.filter((dep) => dep.includes("modelcontextprotocol"));
     assert.deepEqual(
       offenders,
       [],
-      `scripts dependencies should not include the MCP SDK, found: ${offenders.join(", ")}`,
+      `scripts/ should carry no npm workspace or build config after the CLI removal, still found: ${offenders.join(", ") || "none"}`,
+    );
+  });
+
+  it("has no scripts/src CLI source or test tree", () => {
+    const dir = path.join(repoRoot, "scripts", "src");
+    assert.equal(
+      fs.existsSync(dir),
+      false,
+      "scripts/src should be deleted with the bundled CLI (aura.ts, the rest-* command modules, gen-rest-*, their suites and the generated index)",
     );
   });
 
@@ -458,6 +449,87 @@ describe("no-remnants guard: root manifest and infra", () => {
       [],
       "Taskfile.yml should not carry the digest-era bundle note (targets unchanged)",
     );
+  });
+});
+
+// remove-cli-rest-surface: the agent-facing CLI and REST access surface is
+// removed unconditionally (the operator's settled retirement). The bundle,
+// its serving scripts, and the generated REST reference resource are gone;
+// the build surface carries no target that produces them; the root manifest
+// no longer lists the scripts workspace. The shared package's spec sync and
+// codegen targets stay (the internal REST library follows the consumer
+// rule in a later ticket).
+describe("no-remnants guard: CLI and REST reference removal", () => {
+  it("has no CLI bundle in the aura skill directory", () => {
+    const dir = path.join(repoRoot, "skills", "core", "aura", "dist");
+    assert.equal(
+      fs.existsSync(dir),
+      false,
+      "skills/core/aura/dist should be deleted (the bundled aura.mjs CLI)",
+    );
+  });
+
+  it("has no generated REST reference resource in the skill directory", () => {
+    const file = path.join(
+      repoRoot,
+      "skills",
+      "core",
+      "aura",
+      "resources",
+      "rest-api.md",
+    );
+    assert.equal(
+      fs.existsSync(file),
+      false,
+      "skills/core/aura/resources/rest-api.md should be deleted (the generated REST reference)",
+    );
+  });
+
+  it("lists no scripts workspace in the root manifest", () => {
+    const pkg = readRootPackageJson();
+    assert.deepEqual(
+      pkg.workspaces,
+      ["packages/shared"],
+      "package.json workspaces should list only packages/shared (the scripts workspace is deleted)",
+    );
+  });
+
+  it("carries no CLI-bundle or REST-reference target in the Taskfile", () => {
+    const taskfile = fs
+      .readFileSync(path.join(repoRoot, "Taskfile.yml"), "utf-8")
+      .split("\n");
+    const banned = [
+      "gen-rest-doc",
+      "gen-rest-index",
+      "esbuild",
+      "aura.mjs",
+      "AURA_DIST",
+      "ENTRY_OUTS",
+      "SCRIPTS_DIR",
+    ];
+    const offenders: string[] = [];
+    for (const [index, line] of taskfile.entries()) {
+      for (const needle of banned) {
+        if (line.includes(needle)) {
+          offenders.push(`Taskfile.yml:${index + 1}: ${line.trim()}`);
+        }
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "Taskfile.yml should carry no target that builds or regenerates the CLI bundle or the REST reference",
+    );
+  });
+
+  it("keeps the Taskfile targets the shared package still needs", () => {
+    const taskfile = fs.readFileSync(path.join(repoRoot, "Taskfile.yml"), "utf-8");
+    for (const needle of ["codegen", "openapi-sync", "typecheck"]) {
+      assert.ok(
+        taskfile.includes(needle),
+        `Taskfile.yml should keep the ${needle} target (guard against over-deletion; the consumer-rule ticket owns the REST library's targets)`,
+      );
+    }
   });
 });
 
@@ -687,6 +759,68 @@ describe("no-remnants guard: bug archive", () => {
       offenders,
       [],
       "no active bug report should mention the Atlassian provisioning flow (deleted with secrets-aura-pat-only)",
+    );
+  });
+});
+
+// remove-cli-rest-surface: no shipped file teaches reaching Aura through
+// the CLI or REST. The bundled CLI and the generated REST reference are
+// deleted, and the docs teach MCP-first access with UI pointers for the
+// REST-only capabilities, so the retired names, the removed command
+// surface, and the REST-teaching patterns fail the suite if they reappear.
+// Scanned: every file under skills/ (the shipped skill tree) and the five
+// root docs. Labels like "REST-only" and a non-teaching note that the REST
+// API exists stay legal; the patterns pin instructions that reach Aura
+// through REST or the removed CLI, and descriptive API-shape mentions that
+// name no access path (e.g. the feedback tool's wrapped POST /feedback
+// endpoint) are out of scope.
+const CLI_REST_TEACHING_PATTERNS: Array<[RegExp, string]> = [
+  [/aura\.mjs/, "the removed CLI bundle's name"],
+  [/rest-api\.md/, "a reference to the removed REST reference resource"],
+  [/openapi-new\.yaml/, "the stale REST-teaching spec pointer"],
+  [/\buse (the )?REST\b/i, "REST-access teaching (use REST)"],
+  [/\bvia (the |a )?REST\b/i, "REST-access teaching (via REST)"],
+  [/\bREST endpoint/, "REST-access teaching (REST endpoints)"],
+  [/\(REST\)/, "REST-access teaching (REST method tag)"],
+  [/UI \/ REST/, "REST-access teaching (UI / REST pointer)"],
+  [/REST \(?`(GET|POST|PATCH|PUT|DELETE)\b/, "REST-access teaching (REST plus HTTP verb)"],
+  [/review-(get|approvals|request|start|decide|reopen)/, "a removed artifact review subcommand"],
+  [/\brest (list|describe|call|search)\b/, "a removed rest CLI subcommand"],
+];
+
+function walkFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkFiles(entryPath));
+    else out.push(entryPath);
+  }
+  return out;
+}
+
+describe("no-remnants guard: no CLI or REST access teaching", () => {
+  it("carries no CLI or REST access teaching in the shipped skills and root docs", () => {
+    const offenders: string[] = [];
+    const scanned = [
+      ...walkFiles(path.join(repoRoot, "skills")),
+      ...ROOT_DOCS.map((doc) => path.join(repoRoot, doc)),
+    ];
+    for (const absPath of scanned) {
+      const lines = fs.readFileSync(absPath, "utf-8").split("\n");
+      for (const [index, line] of lines.entries()) {
+        for (const [pattern, reason] of CLI_REST_TEACHING_PATTERNS) {
+          if (pattern.test(line)) {
+            offenders.push(
+              `${path.relative(repoRoot, absPath)}:${index + 1} (${reason}): ${line.trim()}`,
+            );
+          }
+        }
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "no shipped file should teach reaching Aura through the CLI or REST (MCP-first access, UI pointers for REST-only capabilities)",
     );
   });
 });

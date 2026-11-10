@@ -32,19 +32,10 @@ have a higher structural reserve.
 > discouraged from an agent context — capacity is a personal commitment
 > between the contributor and the task owner.
 
-**Not available via MCP.** After the aura-mcp-dev overhaul (195 → 90 tools),
-all capacity tools are gone from the MCP surface. Each of the following is
-REST-ONLY — use the REST endpoints in `openapi-new.yaml` or the Aura UI:
-
-| Action (REST-ONLY) | REST endpoint |
-|---|---|
-| Get my capacity — `getMyCapacity` (REST-ONLY) | `GET /capacity/me` |
-| Get company base capacity — `getCapacitySettings` (REST-ONLY) | `GET /capacity/settings` |
-| Update company base capacity — `updateCapacitySettings` (REST-ONLY) | `PATCH /capacity/settings` |
-| Get member capacity (cross-task) — `getTaskMemberCapacity` (REST-ONLY) | `GET /tasks/{uuid}/members/{userIdOrUuid}/capacity` |
-| Set member capacity commitment — `updateTaskMemberCapacity` (REST-ONLY) | `PATCH /tasks/{uuid}/members/{userIdOrUuid}/capacity` |
-| Update participation status — `updateTaskMemberParticipation` (REST-ONLY) | `PATCH /tasks/{uuid}/members/{userIdOrUuid}/participation` |
-| Leadership overview — `listLeadershipCapacity` (REST-ONLY) | `GET /capacity/leadership` |
+The capacity capabilities are available on the aura-mcp-dev MCP server
+(`readCapacity`, `updateTaskMemberCapacity`, `updateTaskMemberParticipation`).
+Company capacity settings, the cross-member per-task view, and the
+leadership overview are not on MCP — use the Aura UI.
 
 For detailed usage examples and workflows, see
 [resources/usecases/capacity-planning.md](../usecases/capacity-planning.md).
