@@ -32,7 +32,8 @@
  * 5. Every reference query (`getSuggestions`) returns the cached view
  *    instantly, never awaiting an Aura fetch, and fires a background refresh
  *    (`refreshReferenceKind`) that runs the adapter's server-side search
- *    (`listTasks` with `search` for the typed partial) guarded by the
+ *    (the listTasks tool with the full-text `q` parameter for the typed
+ *    partial) guarded by the
  *    request's abort signal and writes the fresh results through to the
  *    cache, so they surface on the next keystroke (pi-tui re-queries per
  *    keystroke and drops late results itself). A task outside the local
@@ -132,17 +133,20 @@
  * and inserts it) or hand-typed as `#wiki:<uuid>` (programmatic or copied
  * references; the adapter discriminates the shapes with
  * `isWikiUuidForm`, and a uuid partial still finds its page by id prefix).
- * Wiki items carry the space, path, and version as metadata extras (the
- * artifact kind's pattern). Search hits carry no node path (their url is
+ * Wiki items carry the space and path as metadata extras (the artifact
+ * kind's pattern); the version does not ride the tree (the slim tree
+ * carries no latest_version) and loads lazily from the node read when a
+ * reference is resolved. Search hits carry no node path (their url is
  * `<base>/knowledge/<space_slug>/<uuid>`), so the hit-to-path derivation
  * walks the hit space's knowledge tree (`getKnowledgeTree`, the pure
  * `wikiItemsFromTree`), joined by node id and memoized per space for the
  * session, with one refetch when a memo misses a hit's id (a page created
- * after the memo); only DOCUMENT nodes are referenceable. The client has
- * no space-listing verb, so the warmup is search-seeded: one generic
- * `mcpWikiSearch` (bounded at the API max) surfaces the spaces worth
- * covering, then one memoized tree per distinct hit space writes complete
- * items, capped per space at 500 in tree order. Its slice 2 shipped
+ * after the memo). The slim tree says nothing about node kinds, so every
+ * node is a candidate (resolution discriminates: the by-path read
+ * resolves documents). The space listing exists on the interface
+ * (`listKnowledgeSpaces`), so the warmup enumerates the readable spaces
+ * directly and writes one memoized tree per space, capped per space at
+ * 500 in tree order. Its slice 2 shipped
  * expansion: on submit, both identity forms resolve to the same canonical
  * `<wiki-ref space path version>title</wiki-ref>` (cache-first through
  * complete cached metadata, then `getKnowledgeNodeByPath` for the path
@@ -152,11 +156,16 @@
  * instruction block grew the wiki-ref shape, completing the
  * one-block-documents-all-four end state.
  *
- * Credentials: the task adapter talks to Aura through the shared AuraClient
- * (`createDefaultAuraClient`, which reads `aura.baseUrl` from settings plus
- * the Aura PAT from the OS keyring). When credentials are missing, warmup
- * no-ops and the provider defers; nothing ever throws into the session.
- * Rule references never need credentials (local kind).
+ * Credentials: the server kinds talk to Aura through the typed aura-mcp
+ * interface. The factory loads the real credentials through the exported
+ * loader (`loadAuraMcpCredentials`, the package's dynamic-import seams over
+ * settings and keyring, the same read the registration extension does) and
+ * passes them into `createAuraMcpInterface` beside the notify hook; the
+ * construction then derives the endpoint from `aura.baseUrl`, authenticates
+ * with the keyring PAT, and runs the contract self-check. When credentials
+ * are missing the construction rejects, every lookup degrades to its
+ * cache-only answer, and nothing ever throws into the session. Rule
+ * references never need credentials (local kind).
  *
  * Tests: the pure seams are unit-tested in
  * `extensions/aura-references.test.ts`. Run with:
@@ -166,6 +175,13 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadRules, type Rule } from "./cursor-rules.ts";
+import {
+  auraMcpJson,
+  createAuraMcpInterface,
+  loadAuraMcpCredentials,
+  type AuraMcpCredentials,
+  type AuraMcpInterface,
+} from "./aura-mcp-client.ts";
 
 // ---------------------------------------------------------------------------
 // Autocomplete types (minimal structural shapes matching pi-tui's interface)
@@ -596,8 +612,8 @@ export function filterReferenceItems(
  * lands afterwards, so fresh results surface on the next keystroke.
  *
  * Pure in the arch-spec sense: the Aura access is the injected fetch (the
- * adapter's `searchServer`, whose `createClient` the caller controls) and the
- * cache is the injected cache; nothing else is touched. The refresh resolves
+ * adapter's `searchServer`, whose `createInterface` the caller controls) and
+ * the cache is the injected cache; nothing else is touched. The refresh resolves
  * rather than rejects: a failed or empty server search (and an aborted
  * request) leaves the cache, items and stamps, exactly as it was, and nothing
  * ever throws into the session.
@@ -810,7 +826,7 @@ Task references carry only the key, status, and title, never the task body. \`ke
 
 Rule references carry the rule's \`name\`, how it attaches (\`attach\`: \`manual\`, \`always\`, or \`glob\` with its patterns), and the rule's display title as the element text. The referenced rule's body is injected into the system prompt for this turn; honor it without further action.
 
-Artifact references carry the artifact's \`id\` (its uuid), its \`kind\` (\`PLAN\`, \`REVIEW\`, or \`GENERIC\`), the \`version\` the reference resolved to (the latest version at resolution time), and the artifact title as the element text; never the body. To read the full artifact, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further artifact details from the reference alone.
+Artifact references carry the artifact's \`id\` (its uuid), its \`kind\` (\`PLAN\`, \`OPINION\`, or \`GENERIC\`, plus the chat-only \`TEMPORARY\`), the \`version\` the reference resolved to (the latest version at resolution time), and the artifact title as the element text; never the body. To read the full artifact, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further artifact details from the reference alone.
 
 Wiki references carry the page's \`space\` (its knowledge-space slug), its \`path\` (the slug path within that space), the \`version\` the reference resolved to, and the page title as the element text; never the body. To read the page, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further wiki details from the reference alone.
 `;
@@ -830,45 +846,8 @@ export const TASK_KIND = "task";
  */
 export const MAX_TASKS = 500;
 
-/** Page size for `listTasks` (Aura's max is 100). */
+/** Page size for `searchTasks` (the live listTasks tool caps a page at 100). */
 export const PAGE_SIZE = 100;
-
-/** The subset of a task the engine reads (mirrors the shared client's Task
- *  without importing it). */
-export interface TaskSummary {
-  id: string;
-  human_key: string;
-  title: string;
-  status: string;
-}
-
-/** Query options for the structural listTasks (mirrors the shared client's
- *  ListTasksInput loosely; the real client satisfies this structurally). */
-export interface TaskListQuery {
-  status?: string;
-  /** The API takes "false"|"true"|"all"; the shared ListTasksInput still types
-   *  `archived` as boolean, so this structural copy types it unknown (the
-   *  same interface-widening the deleted `@AURA-` handling in aura-tasks.ts
-   *  made with an index-signature cast, without the cast). */
-  archived?: unknown;
-  limit?: number;
-  page?: number;
-  sort_by?: string;
-  sort_dir?: string;
-  search?: string;
-  [k: string]: unknown;
-}
-
-/**
- * The structural subset of the shared AuraClient the task adapter needs.
- * Deliberately structural (no import of `@pi-aura/shared/aura-client`): the
- * client is only imported live inside the extension factory via the
- * dynamic-import seam, which keeps `node --experimental-strip-types` runnable.
- */
-export interface TaskAuraClient {
-  listTasks(opts?: TaskListQuery): Promise<{ items: TaskSummary[]; pagination: unknown }>;
-  getTaskByHumanKey(key: string): Promise<TaskSummary>;
-}
 
 /** Escape a string for use as an XML attribute value: `"` -> `&quot;`,
  *  `&` -> `&amp;`, `<` -> `&lt;`. (The entities are spelled via
@@ -897,17 +876,31 @@ function taskKeyNumber(key: string): string {
   return dash === -1 ? key : key.slice(dash + 1);
 }
 
+/** The subset of a task the engine reads (mirrors the live listTasks /
+ *  getTaskByHumanKey payloads without importing them). */
+export interface TaskSummary {
+  id: string;
+  human_key: string;
+  title: string;
+  status: string;
+}
+
 /**
- * The task kind adapter: warmup (`listTasks` pagination into the cache) plus
- * local search (key prefix, key number prefix, and title substring,
- * case-insensitive). Aura access goes through the injectable `createClient`
- * factory: production wiring passes the dynamic-imported
- * `createDefaultAuraClient`, tests pass fakes.
+ * The task kind adapter: warmup (`searchTasks` pagination into the cache)
+ * plus local search (key prefix, key number prefix, and title substring,
+ * case-insensitive). Aura access goes through the typed aura-mcp interface
+ * via the injectable `createInterface` factory: production wiring passes the
+ * session's shared interface (constructed once per session_start with the
+ * notify hook), tests pass fakes. Every server path is silent on failure and
+ * maps `AuraMcpToolUnavailableError` (a core-drift unavailable tool path)
+ * onto its cache-only answer exactly like any other failure: a failed search
+ * returns nothing fresh, a failed targeted resolution leaves the mention as
+ * typed, and a failed warmup keeps whatever pages landed.
  */
 export function createTaskAdapter(options: {
-  createClient: () => Promise<TaskAuraClient>;
+  createInterface: () => Promise<AuraMcpInterface>;
 }): KindAdapter {
-  const { createClient } = options;
+  const { createInterface } = options;
 
   const toReferenceItem = (task: TaskSummary): ReferenceItem => ({
     kind: TASK_KIND,
@@ -916,6 +909,33 @@ export function createTaskAdapter(options: {
     title: task.title,
     status: task.status,
   });
+
+  /** The task list of a searchTasks payload (its JSON `items`, or nothing
+   *  when the payload carries no list). */
+  const taskItemsOf = (payload: unknown): TaskSummary[] => {
+    const items = (payload as { items?: unknown } | undefined)?.items;
+    return Array.isArray(items) ? (items as TaskSummary[]) : [];
+  };
+
+  /** The task object of a getTaskByHumanKey payload, validated lightly: a
+   *  payload without its identity fields is unresolvable, not a crash. */
+  const taskPayloadOf = (payload: unknown): TaskSummary | null => {
+    if (payload === null || typeof payload !== "object") return null;
+    const candidate = payload as Partial<TaskSummary>;
+    if (
+      typeof candidate.id !== "string" ||
+      typeof candidate.human_key !== "string" ||
+      typeof candidate.title !== "string"
+    ) {
+      return null;
+    }
+    return {
+      id: candidate.id,
+      human_key: candidate.human_key,
+      title: candidate.title,
+      status: typeof candidate.status === "string" ? candidate.status : "",
+    };
+  };
 
   const formatRow = (item: ReferenceItem): AutocompleteItem => ({
     // The value doubles as the inserted token: `#task:` plus the canonical
@@ -946,20 +966,26 @@ export function createTaskAdapter(options: {
 
     async searchServer(partial, searchOptions = {}) {
       try {
-        const client = await createClient();
-        const res = await client.listTasks({
-          search: partial,
-          status: "ALL",
-          archived: "all",
-          limit: searchOptions.limit ?? MAX_SUGGESTIONS,
-          sort_by: "updated_at",
-          sort_dir: "desc",
-        });
+        const ai = await createInterface();
+        // The live listTasks contract: full-text `q`, archived visibility
+        // ("all" spans open + archived), paging, sorting. The stale
+        // `search`/`status` keys the REST call once sent are gone: the live
+        // server does not accept them.
+        const payload = auraMcpJson(
+          await ai.searchTasks({
+            q: partial,
+            archived: "all",
+            limit: searchOptions.limit ?? MAX_SUGGESTIONS,
+            sort_by: "updated_at",
+            sort_dir: "desc",
+          }),
+        );
         if (searchOptions.signal?.aborted) return [];
-        return res.items.map(toReferenceItem);
+        return taskItemsOf(payload).map(toReferenceItem);
       } catch {
-        // Missing credentials or a failed search: the SWR merge gets nothing
-        // fresh and skips the write; the session is never disturbed.
+        // A failed call, an unavailable tool path (contract drift), or
+        // missing credentials: the SWR merge gets nothing fresh and skips
+        // the write; the session is never disturbed.
         return [];
       }
     },
@@ -977,46 +1003,52 @@ export function createTaskAdapter(options: {
       if (hit) return hit;
       // ...then via the targeted by-key lookup (matches case-insensitively).
       try {
-        const client = await createClient();
-        return toReferenceItem(await client.getTaskByHumanKey(token));
+        const ai = await createInterface();
+        const task = taskPayloadOf(auraMcpJson(await ai.getTaskByHumanKey(token)));
+        return task === null ? null : toReferenceItem(task);
       } catch {
-        // Missing credentials, 404/403, or network: leave the reference as
-        // typed so the agent can resolve it via the `aura` skill.
+        // Missing credentials, an unavailable tool path (contract drift),
+        // 404/403, or network: leave the reference as typed so the agent can
+        // resolve it via the `aura` skill.
         return null;
       }
     },
 
     async warmup(cache, warmupOptions = {}) {
       try {
-        const client = await createClient();
+        const ai = await createInterface();
         let page = 1;
         let collected = 0;
         while (collected < MAX_TASKS) {
           if (warmupOptions.signal?.aborted) return;
-          // `status: "ALL"` spans open + archived statuses; `archived: "all"`
-          // also surfaces archived tasks (see TaskListQuery on the typing).
-          const res = await client.listTasks({
-            status: "ALL",
-            archived: "all",
-            limit: PAGE_SIZE,
-            page,
-            sort_by: "updated_at",
-            sort_dir: "desc",
-          });
-          const mapped = res.items.map(toReferenceItem);
+          // The live wire contract: `archived: "all"` surfaces archived
+          // tasks (the archived-visibility parameter; the live tool has no
+          // status filter at all, and there is no full-text filter on a
+          // warmup page).
+          const payload = auraMcpJson(
+            await ai.searchTasks({
+              archived: "all",
+              limit: PAGE_SIZE,
+              page,
+              sort_by: "updated_at",
+              sort_dir: "desc",
+            }),
+          );
+          const mapped = taskItemsOf(payload).map(toReferenceItem);
           // Write page by page so partial progress (later page failure or an
           // abort mid-flight) still lands.
           cache.write(TASK_KIND, mapped);
           collected += mapped.length;
-          if (res.items.length < PAGE_SIZE) return;
+          if (mapped.length < PAGE_SIZE) return;
           page += 1;
         }
       } catch {
-        // Missing credentials (createDefaultAuraClient throws) or a failed
-        // page: warmup is best-effort. Whatever pages landed stay cached; the
-        // session is never disturbed and the provider keeps deferring until
-        // data exists. Credentials appearing later in the session do not
-        // retry: warmup is one-shot at session_start (this slice's contract).
+        // Missing credentials (the interface construction rejects), a failed
+        // page, or an unavailable tool path: warmup is best-effort. Whatever
+        // pages landed stay cached; the session is never disturbed and the
+        // provider keeps deferring until data exists. Credentials appearing
+        // later in the session do not retry: warmup is one-shot at
+        // session_start (this slice's contract).
       }
     },
   };
@@ -1141,11 +1173,12 @@ export const ARTIFACT_KIND = "artifact";
  */
 export const MAX_ARTIFACTS = 500;
 
-/** Page size for `listArtifacts` (Aura's max is 100, like tasks). */
+/** Page size for `searchArtifacts` (the live listArtifacts tool caps a page
+ *  at 100, like listTasks). */
 export const ARTIFACT_PAGE_SIZE = 100;
 
-/** The subset of an artifact the engine reads (mirrors the shared client's
- *  Artifact / ArtifactListItem without importing them). */
+/** The subset of an artifact the engine reads (mirrors the live listArtifacts
+ *  / getArtifact payloads without importing them). */
 export interface ArtifactSummary {
   id: string;
   title: string;
@@ -1154,24 +1187,13 @@ export interface ArtifactSummary {
 }
 
 /**
- * The structural subset of the shared AuraClient the artifact adapter needs
- * (same pattern as TaskAuraClient: structural, no import of the live client,
- * which only arrives through the dynamic-import seam; tests pass fakes).
- */
-export interface ArtifactAuraClient {
-  listArtifacts(
-    opts?: Record<string, unknown>,
-  ): Promise<{ items: ArtifactSummary[]; pagination: unknown }>;
-  getArtifact(id: string): Promise<ArtifactSummary>;
-}
-
-/**
  * An artifact reference item: a ReferenceItem whose extras carry the
  * metadata-driven expansion attributes. `artifactKind` is the Aura
- * artifact kind (PLAN, REVIEW, GENERIC; named so it never collides with
- * the engine's registry `kind`) and `version` is the latest version at
- * fetch time; both land in the sqlite cache's kind-agnostic metadata JSON
- * column and are read back from there on cache-first resolution. This is
+ * artifact kind (the live set: PLAN, OPINION, GENERIC, plus the chat-only
+ * TEMPORARY; named so it never collides with the engine's registry
+ * `kind`) and `version` is the latest version at fetch time; both land in
+ * the sqlite cache's kind-agnostic metadata JSON column and are read back
+ * from there on cache-first resolution. This is
  * the metadata-driven item pattern for the wiki kind (the wiki ticket's
  * interface contract: the same extras mechanism carries space, path, and
  * version there).
@@ -1212,19 +1234,50 @@ export function artifactItemMetadata(
 /**
  * The artifact kind adapter: the first metadata-driven kind (the expansion
  * attributes come from the item's metadata extras, not from the engine's
- * own item fields). Warmup pages `listArtifacts` into the cache at
+ * own item fields). Warmup pages `searchArtifacts` into the cache at
  * session_start; local search matches the uuid prefix OR the title
  * substring, case-insensitively; the server search passes the typed partial
- * as `q` through the SWR seam. Rows follow the prototype's artifact UX: the
+ * as `q` through the SWR seam (parameters already aligned with the live
+ * listArtifacts tool). Rows follow the prototype's artifact UX: the
  * title is the label (uuids are unreadable), the uuid rides the description,
  * and selection inserts the full uuid token, so the uuid appears in the
- * text box only after selection. Aura access goes through the injectable
- * `createClient` factory, exactly as the task adapter does.
+ * text box only after selection. Aura access goes through the typed
+ * aura-mcp interface via the injectable `createInterface` factory, exactly
+ * as the task adapter does (a `AuraMcpToolUnavailableError` degrades to the
+ * cache-only answers like any other failure).
  */
 export function createArtifactAdapter(options: {
-  createClient: () => Promise<ArtifactAuraClient>;
+  createInterface: () => Promise<AuraMcpInterface>;
 }): KindAdapter {
-  const { createClient } = options;
+  const { createInterface } = options;
+
+  /** The artifact list of a searchArtifacts payload (its JSON `items`, or
+   *  nothing when the payload carries no list). */
+  const artifactItemsOf = (payload: unknown): ArtifactSummary[] => {
+    const items = (payload as { items?: unknown } | undefined)?.items;
+    return Array.isArray(items) ? (items as ArtifactSummary[]) : [];
+  };
+
+  /** The artifact object of a getArtifact payload, validated lightly: a
+   *  payload without its identity fields is unresolvable, not a crash. */
+  const artifactPayloadOf = (payload: unknown): ArtifactSummary | null => {
+    if (payload === null || typeof payload !== "object") return null;
+    const candidate = payload as Partial<ArtifactSummary>;
+    if (
+      typeof candidate.id !== "string" ||
+      typeof candidate.title !== "string" ||
+      typeof candidate.latest_version !== "number" ||
+      typeof candidate.kind !== "string"
+    ) {
+      return null;
+    }
+    return {
+      id: candidate.id,
+      title: candidate.title,
+      latest_version: candidate.latest_version,
+      kind: candidate.kind,
+    };
+  };
 
   const formatRow = (item: ReferenceItem): AutocompleteItem => ({
     // The value doubles as the inserted token: `#artifact:` plus the full
@@ -1256,18 +1309,24 @@ export function createArtifactAdapter(options: {
 
     async searchServer(partial, searchOptions = {}) {
       try {
-        const client = await createClient();
-        const res = await client.listArtifacts({
-          q: partial,
-          limit: searchOptions.limit ?? MAX_SUGGESTIONS,
-          sort_by: "updated_at",
-          sort_dir: "desc",
-        });
+        const ai = await createInterface();
+        // The listArtifacts parameters are already aligned with the live
+        // tool: the typed partial is the title-search `q`, capped and
+        // sorted newest-updated first.
+        const payload = auraMcpJson(
+          await ai.searchArtifacts({
+            q: partial,
+            limit: searchOptions.limit ?? MAX_SUGGESTIONS,
+            sort_by: "updated_at",
+            sort_dir: "desc",
+          }),
+        );
         if (searchOptions.signal?.aborted) return [];
-        return res.items.map(artifactToReferenceItem);
+        return artifactItemsOf(payload).map(artifactToReferenceItem);
       } catch {
-        // Missing credentials or a failed search: the SWR merge gets nothing
-        // fresh and skips the write; the session is never disturbed.
+        // A failed call, an unavailable tool path (contract drift), or
+        // missing credentials: the SWR merge gets nothing fresh and skips
+        // the write; the session is never disturbed.
         return [];
       }
     },
@@ -1296,43 +1355,47 @@ export function createArtifactAdapter(options: {
       // ...then via the targeted by-id lookup (uuids match
       // case-insensitively; the server is the authority on casing).
       try {
-        const client = await createClient();
-        return artifactToReferenceItem(await client.getArtifact(token));
+        const ai = await createInterface();
+        const artifact = artifactPayloadOf(auraMcpJson(await ai.getArtifact(token)));
+        return artifact === null ? null : artifactToReferenceItem(artifact);
       } catch {
-        // Missing credentials, 404/403, or network: leave the reference as
-        // typed so the agent can resolve it via the `aura` skill.
+        // Missing credentials, an unavailable tool path (contract drift),
+        // 404/403, or network: leave the reference as typed so the agent can
+        // resolve it via the `aura` skill.
         return null;
       }
     },
 
     async warmup(cache, warmupOptions = {}) {
       try {
-        const client = await createClient();
+        const ai = await createInterface();
         let page = 1;
         let collected = 0;
         while (collected < MAX_ARTIFACTS) {
           if (warmupOptions.signal?.aborted) return;
           // The default (unfiltered) list is the broadest view; newest first
           // so the freshest artifacts land in the cache head.
-          const res = await client.listArtifacts({
-            limit: ARTIFACT_PAGE_SIZE,
-            page,
-            sort_by: "updated_at",
-            sort_dir: "desc",
-          });
-          const mapped = res.items.map(artifactToReferenceItem);
+          const payload = auraMcpJson(
+            await ai.searchArtifacts({
+              limit: ARTIFACT_PAGE_SIZE,
+              page,
+              sort_by: "updated_at",
+              sort_dir: "desc",
+            }),
+          );
+          const mapped = artifactItemsOf(payload).map(artifactToReferenceItem);
           // Write page by page so partial progress (later page failure or
           // an abort mid-flight) still lands.
           cache.write(ARTIFACT_KIND, mapped);
           collected += mapped.length;
-          if (res.items.length < ARTIFACT_PAGE_SIZE) return;
+          if (mapped.length < ARTIFACT_PAGE_SIZE) return;
           page += 1;
         }
       } catch {
-        // Missing credentials (createDefaultAuraClient throws) or a failed
-        // page: warmup is best-effort. Whatever pages landed stay cached; the
-        // session is never disturbed and the provider keeps deferring until
-        // data exists.
+        // Missing credentials (the interface construction rejects), a failed
+        // page, or an unavailable tool path: warmup is best-effort. Whatever
+        // pages landed stay cached; the session is never disturbed and the
+        // provider keeps deferring until data exists.
       }
     },
   };
@@ -1359,26 +1422,16 @@ export function isWikiUuidForm(value: string): boolean {
   return WIKI_UUID_PATTERN.test(value);
 }
 
-/** The warmup seed query (the recorded open-detail decision): a generic
- *  German term that real payloads show spanning the most-referenced
- *  spaces (engineering-foundation, skills, iso-27001-dokumente, legal-qa
- *  among ~11 distinct spaces in one 50-hit search). */
-export const WARMUP_WIKI_SEED_QUERY = "der";
-
-/** The warmup seed search's bound (the mcpWikiSearch API caps a query at
- *  50). */
-export const WARMUP_WIKI_SEARCH_LIMIT = 50;
-
 /** The warmup write bound per space (the same order of magnitude as the
  *  task and artifact kinds' 500): a space's tree can be large (legal-qa
  *  carries ~1000 nodes), so the warmup write keeps the head of each
- *  seeded space. Coverage, not a correctness limit: any page beyond the
+ *  listed space. Coverage, not a correctness limit: any page beyond the
  *  cap is still found by the per-query server search and its
  *  write-through. */
 export const MAX_WIKI_ITEMS_PER_SPACE = 500;
 
-/** The structural subset of a wiki search hit the adapter reads (mirrors
- *  the shared client's WikiSearchHit without importing it). Verified
+/** The structural subset of a knowledge-search hit the adapter reads
+ *  (mirrors the live searchKnowledge hit without importing it). Verified
  *  against live Aura: a hit carries `id`, `space_slug`, `title`, `url`,
  *  `heading_path`, `excerpt`, `match_source` and NO node path (the url is
  *  `<base>/knowledge/<space_slug>/<uuid>`, which adds nothing over the
@@ -1390,22 +1443,25 @@ export interface WikiSearchHit {
   title: string;
 }
 
-/** The structural subset of a knowledge tree node (mirrors the shared
- *  client's KnowledgeNode as getKnowledgeTree returns it: bodies are
- *  omitted, `children` carry the hierarchy). */
+/** The structural subset of a knowledge tree node: the SLIM live shape
+ *  (the live probe: nodes carry exactly `id`, `slug`, `title`,
+ *  `source_path`, `children`; no node kind and no latest_version, which is
+ *  why the derivation once never populated a row against the live
+ *  server). */
 export interface WikiTreeNode {
   id: string;
   slug: string;
   title: string;
-  kind: string;
-  latest_version: number;
+  source_path?: string;
   children?: WikiTreeNode[];
 }
 
 /** The structural subset of a knowledge node resolved by id or by path
- *  (mirrors the shared client's KnowledgeNode return of getKnowledgeNode /
- *  getKnowledgeNodeByPath; the by-path response carries no parent chain,
- *  which is why uuid-form resolution joins the tree for the path). */
+ *  (mirrors the live getKnowledgeNode / getKnowledgeNodeByPath payloads;
+ *  the by-path response carries no `space_slug`, which is why uuid-form
+ *  resolution joins the tree for the path). The node read is the lazy
+ *  version source: the slim tree carries no latest_version, so the
+ *  version on an expanded reference always comes from here. */
 export interface WikiNodeSummary {
   id: string;
   slug: string;
@@ -1414,56 +1470,44 @@ export interface WikiNodeSummary {
   space_slug?: string;
 }
 
-/** The structural subset of the shared AuraClient the wiki adapter needs
- *  (same pattern as TaskAuraClient / ArtifactAuraClient: structural, no
- *  import of the live client, which only arrives through the
- *  dynamic-import seam; tests pass fakes). */
-export interface WikiAuraClient {
-  mcpWikiSearch(input: { query: string; space_slug?: string; limit?: number }): Promise<{
-    items: WikiSearchHit[];
-  }>;
-  getKnowledgeTree(spaceSlug: string): Promise<{ nodes: WikiTreeNode[] }>;
-  getKnowledgeNode(uuid: string): Promise<WikiNodeSummary>;
-  getKnowledgeNodeByPath(spaceSlug: string, path: string): Promise<WikiNodeSummary>;
-}
-
 /** A wiki reference item: a ReferenceItem whose extras carry the
  *  metadata-driven expansion attributes (the artifact kind's pattern, the
- *  ticket-5 interface contract reused): `space` is the space slug, `path`
+ *  interface contract reused): `space` is the space slug, `path`
  *  the slug path within the space (the part after the first slash of the
- *  token), and `version` the page's latest version at fetch time. The item
+ *  token), and `version` the page's latest version. The item
  *  id is the node uuid (the hand-typed identity), the key the readable
- *  `space/path` form (the autocomplete insertion). All three extras land
- *  in the sqlite cache's kind-agnostic metadata JSON column and read back
- *  from there on cache-first resolution. */
+ *  `space/path` form (the autocomplete insertion). The extras land in the
+ *  sqlite cache's kind-agnostic metadata JSON column and read back from
+ *  there on cache-first resolution. `version` is optional: the slim tree
+ *  ride derives candidates WITHOUT one, and the version loads lazily from
+ *  the node read when a reference is resolved (the completeness gate in
+ *  `wikiItemMetadata` keeps a versionless row from expanding). */
 export interface WikiReferenceItem extends ReferenceItem {
   space: string;
   path: string;
-  version: number;
+  version?: number;
 }
 
 /** Map a space's knowledge tree to reference items: the hit-to-path
- *  derivation's pure payload function (the recorded open-detail decision).
- *  Only DOCUMENT nodes are referenceable (folders are containers, FILE
- *  nodes are assets; getKnowledgeNodeByPath resolves document nodes), the
- *  canonical path is the ancestor slug chain, the uuid is the item id, and
- *  `space/path` the token key. Items keep the tree's navigation order. */
+ *  derivation's pure payload function. Over the slim tree the candidates
+ *  derive from title and slug (every node; the tree no longer says which
+ *  are documents), the canonical path is the ancestor slug chain, the
+ *  uuid is the item id, and `space/path` the token key. No version rides
+ *  the item: versions load lazily from the node read when a reference is
+ *  resolved. Items keep the tree's navigation order. */
 export function wikiItemsFromTree(spaceSlug: string, nodes: WikiTreeNode[]): WikiReferenceItem[] {
   const items: WikiReferenceItem[] = [];
   const walk = (prefix: string, nodes: WikiTreeNode[]): void => {
     for (const node of nodes) {
       const path = prefix === "" ? node.slug : `${prefix}/${node.slug}`;
-      if (node.kind === "DOCUMENT") {
-        items.push({
-          kind: WIKI_KIND,
-          id: node.id,
-          key: `${spaceSlug}/${path}`,
-          title: node.title,
-          space: spaceSlug,
-          path,
-          version: node.latest_version,
-        });
-      }
+      items.push({
+        kind: WIKI_KIND,
+        id: node.id,
+        key: `${spaceSlug}/${path}`,
+        title: node.title,
+        space: spaceSlug,
+        path,
+      });
       if (node.children !== undefined && node.children.length > 0) {
         walk(path, node.children);
       }
@@ -1495,29 +1539,31 @@ export function wikiItemMetadata(
  * (programmatic or copied references; parsePartial passes both shapes
  * through, and the shape decides the downstream behavior).
  *
- * The hit-to-path derivation (the arch spec's settled open detail): search
- * hits carry no node path, so a hit's canonical `space/path` form comes
- * from its space's knowledge tree, `getKnowledgeTree(hit.space_slug)`,
- * walked by the pure `wikiItemsFromTree` and joined by node id. Trees are
- * memoized per space for the adapter's lifetime (one per session): the
- * per-keystroke SWR refresh then costs the search plus at most one tree
- * per not-yet-memoized space, and a hit whose id is missing from a
- * memoized tree (a page created after the fetch) refetches that space's
- * tree once. Hits whose space tree cannot be fetched are dropped, never a
- * crash. Only DOCUMENT nodes are referenceable.
+ * The hit-to-path derivation: search hits carry no node path, so a hit's
+ * canonical `space/path` form comes from its space's knowledge tree,
+ * `getKnowledgeTree(hit.space_slug)`, walked by the pure `wikiItemsFromTree`
+ * and joined by node id. Trees are memoized per space for the adapter's
+ * lifetime (one per session): the per-keystroke SWR refresh then costs the
+ * search plus at most one tree per not-yet-memoized space, and a hit whose
+ * id is missing from a memoized tree (a page created after the fetch)
+ * refetches that space's tree once. Hits whose space tree cannot be
+ * fetched are dropped, never a crash. The slim tree (id, slug, title,
+ * source_path, children) says nothing about node kinds, so every node is a
+ * candidate and the tree ride carries no version: versions load lazily
+ * from the node read when a reference is resolved.
  *
- * The warmup (the second settled open detail): the client has no
- * space-listing verb, so no cheap enumeration exists; the warmup is
- * search-seeded. One generic `mcpWikiSearch` (the seed query, bounded at
- * the API max) surfaces the spaces worth covering, then one memoized tree
- * per distinct hit space writes complete items to the cache, capped per
- * space. Aura access goes through the injectable `createClient` factory,
- * exactly as the task and artifact adapters do.
+ * The warmup: the space listing exists on the typed interface
+ * (listKnowledgeSpaces; the old "no space-listing verb" premise is gone),
+ * so the warmup enumerates the readable spaces directly and writes one
+ * tree per space, capped per space. Aura access goes through the typed
+ * aura-mcp interface via the injectable `createInterface` factory, exactly
+ * as the task and artifact adapters do (an `AuraMcpToolUnavailableError`
+ * degrades to the cache-only answers like any other failure).
  */
 export function createWikiAdapter(options: {
-  createClient: () => Promise<WikiAuraClient>;
+  createInterface: () => Promise<AuraMcpInterface>;
 }): KindAdapter {
-  const { createClient } = options;
+  const { createInterface } = options;
 
   // The per-session tree memo (space slug -> the space's items): the
   // canonical path of any hit in a memoized space costs no fetch.
@@ -1525,24 +1571,61 @@ export function createWikiAdapter(options: {
 
   const fetchTreeItems = async (
     spaceSlug: string,
-    client?: WikiAuraClient,
+    ai?: AuraMcpInterface,
   ): Promise<WikiReferenceItem[] | null> => {
     try {
-      // The caller's client is reused when it holds one (every public
-      // method builds exactly one client per call); standalone callers
+      // The caller's interface is reused when it holds one (every public
+      // method builds exactly one interface per call); standalone callers
       // (none today) would build their own here.
-      const active = client ?? (await createClient());
-      const tree = await active.getKnowledgeTree(spaceSlug);
-      const items = wikiItemsFromTree(spaceSlug, tree.nodes);
+      const active = ai ?? (await createInterface());
+      const tree = wikiTreeOf(auraMcpJson(await active.getKnowledgeTree(spaceSlug)));
+      const items = wikiItemsFromTree(spaceSlug, tree);
       treeMemo.set(spaceSlug, items);
       return items;
     } catch {
       // A space whose tree cannot be fetched (unknown slug, 404/403,
-      // network): the derivation is unavailable for its hits; they are
-      // dropped without disturbing the session. The failure is not
-      // memoized, so a later query can still complete the space.
+      // network, an unavailable tool path): the derivation is unavailable
+      // for its hits; they are dropped without disturbing the session. The
+      // failure is not memoized, so a later query can still complete the
+      // space.
       return null;
     }
+  };
+
+  /** The node list of a getKnowledgeTree payload (its JSON `nodes`, or
+   *  nothing when the payload carries none). */
+  const wikiTreeOf = (payload: unknown): WikiTreeNode[] => {
+    const nodes = (payload as { nodes?: unknown } | undefined)?.nodes;
+    return Array.isArray(nodes) ? (nodes as WikiTreeNode[]) : [];
+  };
+
+  /** The hit list of a searchKnowledge payload (its JSON `items`, or
+   *  nothing when the payload carries no list). */
+  const wikiHitsOf = (payload: unknown): WikiSearchHit[] => {
+    const items = (payload as { items?: unknown } | undefined)?.items;
+    return Array.isArray(items) ? (items as WikiSearchHit[]) : [];
+  };
+
+  /** The node object of a getKnowledgeNode / getKnowledgeNodeByPath
+   *  payload, validated lightly: a payload without its identity fields is
+   *  unresolvable, not a crash. */
+  const wikiNodeOf = (payload: unknown): WikiNodeSummary | null => {
+    if (payload === null || typeof payload !== "object") return null;
+    const candidate = payload as Partial<WikiNodeSummary>;
+    if (
+      typeof candidate.id !== "string" ||
+      typeof candidate.title !== "string" ||
+      typeof candidate.latest_version !== "number"
+    ) {
+      return null;
+    }
+    return {
+      id: candidate.id,
+      slug: typeof candidate.slug === "string" ? candidate.slug : "",
+      title: candidate.title,
+      latest_version: candidate.latest_version,
+      ...(typeof candidate.space_slug === "string" ? { space_slug: candidate.space_slug } : {}),
+    };
   };
 
   const formatRow = (item: ReferenceItem): AutocompleteItem => ({
@@ -1565,7 +1648,7 @@ export function createWikiAdapter(options: {
   const itemsForHits = async (
     hits: WikiSearchHit[],
     signal?: AbortSignal,
-    client?: WikiAuraClient,
+    ai?: AuraMcpInterface,
   ): Promise<WikiReferenceItem[]> => {
     const out: WikiReferenceItem[] = [];
     const spaces: string[] = [];
@@ -1579,7 +1662,7 @@ export function createWikiAdapter(options: {
       const staleMemo =
         items !== null && spaceHits.some((hit) => !items.some((item) => item.id === hit.id));
       if (items === null || staleMemo) {
-        items = await fetchTreeItems(space, client);
+        items = await fetchTreeItems(space, ai);
       }
       if (items === null) continue;
       for (const hit of spaceHits) {
@@ -1621,24 +1704,26 @@ export function createWikiAdapter(options: {
 
     async searchServer(partial, searchOptions = {}) {
       // The empty partial and the complete uuid form are not text queries:
-      // mcpWikiSearch matches titles and bodies, never ids, so firing it
-      // would be a doomed call (the API also requires a non-empty query).
+      // searchKnowledge matches titles and bodies, never ids, so firing it
+      // would be a doomed call (the tool also requires a non-empty query).
       // The SWR merge simply gets nothing fresh for those partials.
       if (partial === "" || isWikiUuidForm(partial)) return [];
       try {
-        const client = await createClient();
-        const res = await client.mcpWikiSearch({
-          query: partial,
-          limit: searchOptions.limit ?? MAX_SUGGESTIONS,
-        });
+        const ai = await createInterface();
+        const payload = auraMcpJson(
+          await ai.searchKnowledge({
+            query: partial,
+            limit: searchOptions.limit ?? MAX_SUGGESTIONS,
+          }),
+        );
         // The request was aborted while the fetch was in flight: the late
         // results are dropped, and no tree is fetched after the abort.
         if (searchOptions.signal?.aborted) return [];
-        return await itemsForHits(res.items, searchOptions.signal, client);
+        return await itemsForHits(wikiHitsOf(payload), searchOptions.signal, ai);
       } catch {
-        // Missing credentials or a failed search: the SWR merge gets
-        // nothing fresh and skips the write; the session is never
-        // disturbed.
+        // A failed call, an unavailable tool path (contract drift), or
+        // missing credentials: the SWR merge gets nothing fresh and skips
+        // the write; the session is never disturbed.
         return [];
       }
     },
@@ -1677,30 +1762,34 @@ export function createWikiAdapter(options: {
       const slash = token.indexOf("/");
       if (!uuidForm && slash <= 0) return null;
       try {
-        const client = await createClient();
+        const ai = await createInterface();
         if (uuidForm) {
-          // The uuid identity: the node carries its space, its fresh title,
-          // and its fresh version, but no ancestor chain (the node response
-          // has no path), so the canonical path comes from the space's tree
-          // (memoized, one refetch when the memo misses the id). The fresh
-          // node's title and version win over the tree's snapshot, so both
-          // identity forms resolve to the same current expansion.
-          const node = await client.getKnowledgeNode(token);
+          // The uuid identity: the node read carries its space, its fresh
+          // title, and the lazily loaded version, but no ancestor chain
+          // (the node response has no path), so the canonical path comes
+          // from the space's tree (memoized, one refetch when the memo
+          // misses the id). The fresh node's title and version win over
+          // the tree's snapshot, so both identity forms resolve to the
+          // same current expansion.
+          const node = wikiNodeOf(auraMcpJson(await ai.getKnowledgeNode(token)));
+          if (node === null) return null;
           const space = node.space_slug ?? "";
           if (space === "") return null;
           let items = treeMemo.get(space) ?? null;
           if (items === null || !items.some((item) => item.id === node.id)) {
-            items = await fetchTreeItems(space, client);
+            items = await fetchTreeItems(space, ai);
           }
           const item = items?.find((candidate) => candidate.id === node.id);
           if (item === undefined) return null;
           return { ...item, title: node.title, version: node.latest_version };
         }
         // The path identity: the space and path come from the token, the
-        // id, title, and version from the targeted by-path lookup.
+        // id, title, and the lazily loaded version from the targeted
+        // by-path node read.
         const space = token.slice(0, slash);
         const path = token.slice(slash + 1);
-        const node = await client.getKnowledgeNodeByPath(space, path);
+        const node = wikiNodeOf(auraMcpJson(await ai.getKnowledgeNodeByPath(space, path)));
+        if (node === null) return null;
         return {
           kind: WIKI_KIND,
           id: node.id,
@@ -1711,32 +1800,34 @@ export function createWikiAdapter(options: {
           version: node.latest_version,
         };
       } catch {
-        // Missing credentials, 404/403, or network: leave the reference as
-        // typed so the agent can resolve it via the `aura` skill.
+        // Missing credentials, an unavailable tool path (contract drift),
+        // 404/403, or network: leave the reference as typed so the agent
+        // can resolve it via the `aura` skill.
         return null;
       }
     },
 
     async warmup(cache, warmupOptions = {}) {
       try {
-        const client = await createClient();
-        // The seed search: one generic query bounded at the API max. Its
-        // hits decide which spaces are worth covering (the recorded
-        // open-detail decision: the client has no space-listing verb, so
-        // there is no cheap enumeration to walk instead).
-        const res = await client.mcpWikiSearch({
-          query: WARMUP_WIKI_SEED_QUERY,
-          limit: WARMUP_WIKI_SEARCH_LIMIT,
-        });
-        if (warmupOptions.signal?.aborted) return;
+        const ai = await createInterface();
+        // The space listing (the interface's listKnowledgeSpaces): the
+        // readable spaces enumerate directly; the old search-seeded probe
+        // (a generic query whose hits decided the spaces) is gone with the
+        // premise it encoded.
+        const listing = auraMcpJson(await ai.listKnowledgeSpaces());
+        const listed = (listing as { items?: unknown } | undefined)?.items;
         const spaces: string[] = [];
-        for (const hit of res.items) {
-          if (hit.space_slug !== "" && !spaces.includes(hit.space_slug)) spaces.push(hit.space_slug);
+        if (Array.isArray(listed)) {
+          for (const space of listed as Array<{ slug?: unknown }>) {
+            if (typeof space?.slug === "string" && space.slug !== "" && !spaces.includes(space.slug)) {
+              spaces.push(space.slug);
+            }
+          }
         }
         for (const space of spaces) {
           if (warmupOptions.signal?.aborted) return;
           let items = treeMemo.get(space) ?? null;
-          if (items === null) items = await fetchTreeItems(space, client);
+          if (items === null) items = await fetchTreeItems(space, ai);
           if (items === null) continue; // this space's tree failed; others still land
           // Write space by space so partial progress (a later tree failure
           // or an abort mid-flight) still lands; the cap keeps each space's
@@ -1744,11 +1835,12 @@ export function createWikiAdapter(options: {
           cache.write(WIKI_KIND, items.slice(0, MAX_WIKI_ITEMS_PER_SPACE));
         }
       } catch {
-        // Missing credentials (createDefaultAuraClient throws) or a
-        // failed seed search: warmup is best-effort. Nothing is written,
-        // the session is never disturbed, and the provider keeps deferring
-        // until data exists. Credentials appearing later in the session do
-        // not retry: warmup is one-shot at session_start.
+        // Missing credentials (the interface construction rejects), a
+        // failed listing, or an unavailable tool path: warmup is
+        // best-effort. Nothing is written, the session is never disturbed,
+        // and the provider keeps deferring until data exists. Credentials
+        // appearing later in the session do not retry: warmup is one-shot
+        // at session_start.
       }
     },
   };
@@ -1854,8 +1946,9 @@ export function createReferenceAutocompleteProvider(
   refreshOptions: { canRefresh?: () => boolean } = {},
 ): AutocompleteProvider {
   // The background-refresh gate. Production wiring latches the no-credentials
-  // state (createDefaultAuraClient() throws) and passes a gate that is off for
-  // the whole session, so a credential-less session fires no refresh at all.
+  // state (the interface construction rejects) and passes a gate that is off
+  // for the whole session, so a credential-less session fires no refresh at
+  // all.
   const canRefresh = refreshOptions.canRefresh ?? (() => true);
   return {
     // `#` for the engine's own `#kind:` tokens; `@` for the registered legacy
@@ -1938,21 +2031,8 @@ export function createReferenceAutocompleteProvider(
 }
 
 // ---------------------------------------------------------------------------
-// Dynamic-import seam (the package's standard seam for @pi-aura/shared:
-// Node's strip-types loader cannot resolve its .js extension specifiers)
+// Session cache (the sqlite store behind the ReferenceCache interface)
 // ---------------------------------------------------------------------------
-
-/**
- * Create the shared Aura client. Dynamic import: `@pi-aura/shared/aura-client`
- * uses .js extension specifiers internally, which Node's experimental
- * strip-types loader cannot resolve. Pi's extension runtime handles static
- * imports, so we dynamic-import the client factory here to keep the
- * unit-test entry point runnable with `node --experimental-strip-types`.
- */
-async function createDefaultClient(): Promise<TaskAuraClient & ArtifactAuraClient & WikiAuraClient> {
-  const { createDefaultAuraClient } = await import("@pi-aura/shared/aura-client");
-  return createDefaultAuraClient();
-}
 
 /**
  * Build the session's reference cache plus its warmup decision: the
@@ -2018,8 +2098,38 @@ async function createSessionCache(): Promise<{
 // Extension factory
 // ---------------------------------------------------------------------------
 
-export default function (pi: ExtensionAPI): void {
-  const taskAdapter = createTaskAdapter({ createClient: createDefaultClient });
+/** Injection points for the extension factory (the same hook pattern the
+ *  registration extension uses). Production wiring passes nothing: the
+ *  credentials load through the real loader over the package's
+ *  dynamic-import seams, and the session cache is the real sqlite-backed
+ *  builder. */
+export interface AuraReferencesExtensionOptions {
+  /** Inject the credential read (test hook; defaults to
+   *  {@link loadAuraMcpCredentials} over the package's dynamic-import
+   *  seams). */
+  loadCredentials?: () => Promise<AuraMcpCredentials>;
+  /** Inject the session cache builder (test hook; defaults to the real
+   *  sqlite-backed {@link createSessionCache}). */
+  createCache?: () => Promise<{ cache: ReferenceCache; shouldSkipWarmup: (kind: string) => boolean }>;
+}
+
+export default function (pi: ExtensionAPI, options: AuraReferencesExtensionOptions = {}): void {
+  // The session's typed aura-mcp interface: constructed once per session_start
+  // (its construction runs the contract self-check; the notify hook surfaces
+  // drift warnings through the UI). A failed construction (missing
+  // credentials, unreachable server) stays rejected for the whole session and
+  // every lookup degrades to cache-only, the established no-credentials
+  // behavior; a /reload re-emits session_start and re-arms everything. The
+  // adapters receive this accessor (not the promise) so a session swap is
+  // visible to every lookup; before the first session_start it rejects.
+  let sessionInterface: Promise<AuraMcpInterface> | null = null;
+  const createInterface = (): Promise<AuraMcpInterface> => {
+    if (sessionInterface === null) {
+      return Promise.reject(new Error("the aura-mcp interface is not built yet"));
+    }
+    return sessionInterface;
+  };
+  const taskAdapter = createTaskAdapter({ createInterface });
   // The rule kind (local-only): the rules ride engine memory, never the
   // reference cache (they are cwd-local; persisting rows would
   // cross-contaminate repos). The factory loads them per session and hands
@@ -2031,14 +2141,14 @@ export default function (pi: ExtensionAPI): void {
   // cache, the SWR refresh, and the TTL-gated warmup exactly as the task
   // kind does; its items carry the artifact kind + latest version as
   // metadata extras.
-  const artifactAdapter = createArtifactAdapter({ createClient: createDefaultClient });
+  const artifactAdapter = createArtifactAdapter({ createInterface });
   // The wiki kind (the dual-identity kind): same ride (persistent cache,
   // SWR refresh, TTL-gated warmup) with its own sources: the server search
-  // is mcpWikiSearch and the warmup is search-seeded (one generic seed
-  // search, then one tree per distinct hit space; the two open-detail
-  // decisions recorded in the ticket doc's implementation notes). Its
-  // items carry the space, path, and version as metadata extras.
-  const wikiAdapter = createWikiAdapter({ createClient: createDefaultClient });
+  // is searchKnowledge and the warmup enumerates the readable spaces via
+  // listKnowledgeSpaces, then fetches one tree per space. Its items carry
+  // the space and path as metadata extras; the version loads lazily from
+  // the node read when a reference is resolved.
+  const wikiAdapter = createWikiAdapter({ createInterface });
   const registry = createReferenceRegistry([taskAdapter, ruleAdapter, artifactAdapter, wikiAdapter]);
   // The first production alias: `@AURA-<digits>` keeps working through the
   // engine (legacy-token autocomplete insertion, expansion to the same
@@ -2073,22 +2183,55 @@ export default function (pi: ExtensionAPI): void {
     // credential-less state must not keep the previous session's latch, or
     // every mention would attempt a doomed (swallowed) targeted fetch.
     clientAvailable = false;
-    // The SWR refresh gate: off until one client build succeeds in this
-    // session. Detection is the same createDefaultAuraClient() throw the
-    // warmup relies on, probed once here: without credentials (no baseUrl or
-    // no PAT in the keyring) no refresh is fired at all. Like the warmup,
-    // this is one-shot: credentials appearing later in the session do not
-    // re-arm the gate until a /reload re-emits session_start. The same
-    // success latches `clientAvailable` for the expansion lookup.
+    // The SWR refresh gate: off until one interface construction succeeds in
+    // this session. The construction reads settings + keyring and runs the
+    // contract self-check; its notify hook surfaces drift warnings through the
+    // UI (cosmetic drift warns and keeps the path; core drift names what
+    // broke, and that tool's path fails fast: the adapters map the thrown
+    // `AuraMcpToolUnavailableError` onto their cache-only answers). Detection
+    // is the construction rejection itself, probed once here: without
+    // credentials (no baseUrl or no PAT in the keyring) no refresh is fired
+    // at all. Like the warmup, this is one-shot: a failed construction is
+    // not retried within the session until a /reload re-emits session_start.
+    // The same success latches `clientAvailable` for the expansion lookup.
     let refreshAllowed = false;
-    void createDefaultClient()
+    // A /reload re-emits session_start: release the previous session's held
+    // connection (the typed interface owns one, unlike the per-call REST
+    // client this engine replaced). Fire-and-forget; a failed close never
+    // disturbs the session, and an in-flight old-session lookup fails into
+    // its own catch and degrades to cache-only.
+    const previousInterface = sessionInterface;
+    if (previousInterface !== null) {
+      void previousInterface.then((ai) => ai.close()).catch(() => {});
+    }
+    // The previous session's interface was released above; now the session's
+    // credentials, loaded through the same exported loader the registration
+    // extension uses (settings plus keyring over the dynamic-import seams).
+    // The construction consumes them: without this read the default caller
+    // would resolve the connection from its (empty) arguments and throw on
+    // the missing PAT, latching every session cache-only. A broken loader
+    // read degrades to the empty set, so the construction below rejects into
+    // the existing catch and the gates stay off for the session.
+    let credentials: AuraMcpCredentials = { pat: null };
+    try {
+      credentials = options.loadCredentials ? await options.loadCredentials() : await loadAuraMcpCredentials();
+    } catch {
+      // Degrade to the no-credentials state; never throw into the session.
+    }
+    sessionInterface = createAuraMcpInterface({
+      ...(credentials.baseUrl !== undefined ? { baseUrl: credentials.baseUrl } : {}),
+      ...(credentials.pat !== null ? { pat: credentials.pat } : {}),
+      notify: (message, type) => ctx.ui.notify(message, type ?? "warning"),
+    });
+    void sessionInterface
       .then(() => {
         refreshAllowed = true;
         clientAvailable = true;
       })
       .catch(() => {
-        // No credentials: the gate stays off for the whole session; the
-        // provider defers on the empty cache exactly as in slice 1.
+        // No credentials (or no reachable server): the gates stay off for the
+        // whole session; the provider defers on the empty cache exactly as
+        // before, and every mention stays as typed.
       });
 
     ctx.ui.addAutocompleteProvider((current) =>
@@ -2113,7 +2256,7 @@ export default function (pi: ExtensionAPI): void {
     // unit-test fake and the silent fallback when the store cannot be
     // built. A /reload re-emits session_start and swaps in a fresh session
     // cache backed by the same file.
-    const { cache, shouldSkipWarmup } = await createSessionCache();
+    const { cache, shouldSkipWarmup } = options.createCache ? await options.createCache() : await createSessionCache();
     sessionCache = cache;
     warnLegacySyntax = createDeprecationWarningDecision();
 
