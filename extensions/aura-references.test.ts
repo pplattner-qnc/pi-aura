@@ -122,7 +122,7 @@ function stubAdapter(kind: string) {
 // ---------------------------------------------------------------------------
 
 /** Convert a shipped contract into the live-shaped tool the server would
- *  report for it (no drift) — the fake `listTools` baseline. */
+ *  report for it (no drift), the fake `listTools` baseline. */
 function toLiveTool(shipped: ShippedToolContract): AuraMcpLiveTool {
   const lines = shipped.description.split("\n");
   const hasTitleLine = lines.length > 1;
@@ -589,7 +589,7 @@ console.log("filterReferenceItems: ok");
 console.log("createTaskAdapter searchLocal + formatRow: ok");
 
 // ---------------------------------------------------------------------------
-// createTaskAdapter: warmup (searchTasks pagination into the cache) — over
+// createTaskAdapter: warmup (searchTasks pagination into the cache), over
 // the typed interface: the wire parameters are the live listTasks contract
 // (full-text `q` plus archived visibility), and the stale `search`/`status`
 // keys the old REST call sent are gone.
@@ -2973,7 +2973,7 @@ console.log("isWikiUuidForm: ok");
 {
   // wikiItemsFromTree: the hit-to-path derivation's payload source, pure
   // over the SLIM getKnowledgeTree response shape (the live probe: nodes
-  // carry exactly id, slug, title, source_path, children — no node kind and
+  // carry exactly id, slug, title, source_path, children: no node kind and
   // no latest_version; that is why the derivation never populated a row
   // against the live server). The candidates derive from title and slug
   // (every node; the slim tree no longer says which are documents), the
@@ -3255,7 +3255,7 @@ console.log("createWikiAdapter rows + local filtering: ok");
 // ---------------------------------------------------------------------------
 
 /** One knowledge tree node in the SLIM fake payload shape (the live probe:
- *  id, slug, title, source_path, children — no kind, no latest_version). */
+ *  id, slug, title, source_path, children: no kind, no latest_version). */
 function wikiNode(
   id: string,
   slug: string,
@@ -3984,7 +3984,7 @@ console.log("wiki expansion end-to-end: ok");
 
 // ---------------------------------------------------------------------------
 // Degraded tool paths (the interface self-check's unavailable set): the
-// affected mention kind degrades to its cache-only answers — searches fail
+// affected mention kind degrades to its cache-only answers: searches fail
 // fast and write nothing, resolutions stay cache-first, warmup no-ops, and
 // the pane never blocks (never a render lag, never a thrown pane).
 // ---------------------------------------------------------------------------
@@ -4052,7 +4052,7 @@ console.log("degraded task path renders from cache, never blocks: ok");
 {
   // The whole interface unavailable (missing credentials: the construction
   // rejects): every kind still renders the persisted cache instantly and
-  // never blocks on the doomed lookups — including the wiki kind's
+  // never blocks on the doomed lookups, including the wiki kind's
   // versionless tree rows (they render without any version).
   const cache = createInMemoryReferenceCache();
   cache.write("task", taskItems());

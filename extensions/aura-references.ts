@@ -1436,7 +1436,7 @@ export interface WikiSearchHit {
 
 /** The structural subset of a knowledge tree node: the SLIM live shape
  *  (the live probe: nodes carry exactly `id`, `slug`, `title`,
- *  `source_path`, `children`; no node kind and no latest_version — that is
+ *  `source_path`, `children`; no node kind and no latest_version, which is
  *  why the derivation once never populated a row against the live
  *  server). */
 export interface WikiTreeNode {
@@ -2092,8 +2092,8 @@ async function createSessionCache(): Promise<{
 export default function (pi: ExtensionAPI): void {
   // The session's typed aura-mcp interface: constructed once per session_start
   // (its construction runs the contract self-check; the notify hook surfaces
-  // drift warnings through the UI). A failed construction — missing
-  // credentials, unreachable server — stays rejected for the whole session and
+  // drift warnings through the UI). A failed construction (missing
+  // credentials, unreachable server) stays rejected for the whole session and
   // every lookup degrades to cache-only, the established no-credentials
   // behavior; a /reload re-emits session_start and re-arms everything. The
   // adapters receive this accessor (not the promise) so a session swap is
@@ -2163,7 +2163,7 @@ export default function (pi: ExtensionAPI): void {
     // this session. The construction reads settings + keyring and runs the
     // contract self-check; its notify hook surfaces drift warnings through the
     // UI (cosmetic drift warns and keeps the path; core drift names what
-    // broke, and that tool's path fails fast — the adapters map the thrown
+    // broke, and that tool's path fails fast: the adapters map the thrown
     // `AuraMcpToolUnavailableError` onto their cache-only answers). Detection
     // is the construction rejection itself, probed once here: without
     // credentials (no baseUrl or no PAT in the keyring) no refresh is fired
