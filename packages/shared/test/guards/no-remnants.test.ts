@@ -1012,6 +1012,19 @@ describe("no-remnants guard: aura skill rewrite", () => {
       "the MCP read half of the download pattern should name getArtifact",
     );
   });
+  it("mentions neither expected-dead tool", () => {
+    const skill = readSkillFile();
+    assert.doesNotMatch(
+      skill,
+      /\baiSetup\b/,
+      "aiSetup is expected to be dropped by Aura and must not be documented",
+    );
+    assert.doesNotMatch(
+      skill,
+      /\bgetBlueprintFiles\b/,
+      "getBlueprintFiles is expected to be dropped by Aura and must not be documented",
+    );
+  });
 });
 
 // root-docs-refresh: the README describes the package as it now is. The
