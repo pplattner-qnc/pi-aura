@@ -1,7 +1,7 @@
 # Questions Workflow
 
 Aura has a question queue where users post questions **directed at specific
-employees**. These are not AI chatbot questions — they are "ask a colleague"
+employees**. These are not AI chatbot questions; they are "ask a colleague"
 requests. For example: "Jane, how does the deployment rollback workflow
 work?" or "What's the process for requesting a new Bitbucket repo?"
 
@@ -36,9 +36,13 @@ unifiedSearch({ query: "...", source_types: ["QUESTION"] })
 ```
 
 Questions also appear in the memory graph as entity type `question` and can
-be explored via `listMemoryEntities`.
+be explored via `listMemoryEntities`. Conversely,
+`reportMemoryEntityQuestion` manufactures a question from the graph: flag
+a questionable knowledge entity with it and an open question lands in the
+very queue this file describes (see the
+[memory graph](memory-graph.md) use case).
 
-> **Note:** Graph expansion (`getMemoryGraph`) is not available via MCP —
+> **Note:** Graph expansion (`getMemoryGraph`) is not available via MCP;
 > use the Aura UI.
 
 ## Important considerations

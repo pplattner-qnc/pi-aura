@@ -1,13 +1,13 @@
 # Upload Documents
 
 Aura can ingest files as upload documents, which can then be linked to tasks
-and searched via unified search. Uploaded files are **parsed and indexed** —
+and searched via unified search. Uploaded files are **parsed and indexed**;
 the stored representation is extracted text organized into pages, not the
 original binary.
 
 Uploads run on MCP: `mcpCreateUploadDocument` takes the file content as a
 base64 tool argument, and `mcpGetUploadDocument` returns the parsed text as
-a tool result. Keep uploads modest — large files put their base64 payload
+a tool result. Keep uploads modest: large files put their base64 payload
 through the context twice (once on the call, once in results). Read the
 file from disk and encode it for the call; for large parsed results, write
 the content to a file with the `write` tool instead of keeping it in

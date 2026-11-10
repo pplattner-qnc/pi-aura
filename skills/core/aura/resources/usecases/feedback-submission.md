@@ -1,6 +1,6 @@
 # Submitting feedback about Aura
 
-When you hit a problem with **Aura itself** — a bug, a missing feature, or workflow friction caused by Aura (not by the way *we* use Aura) — propose it as feedback to the Aura maintainers. The agent never submits feedback directly; every proposal goes through an interactive user sign-off first.
+When you hit a problem with **Aura itself** (a bug, a missing feature, or workflow friction caused by Aura, not by the way *we* use Aura), propose it as feedback to the Aura maintainers. The agent never submits feedback directly; every proposal goes through an interactive user sign-off first.
 
 ## The sanctioned tool: `aura_feedback`
 
@@ -8,7 +8,7 @@ The `aura_feedback` tool is the only sanctioned way to submit this kind of feedb
 
 ### Parameters
 
-The tool takes the same fields as the feedback creation API call (`POST /feedback`), **except `source`** — the tool always sends `source: "MCP"` internally so the row records its true origin:
+The tool takes the same fields as the server's `createFeedback` tool (`title`, `body`, `is_anonymous`, `notify_author`, and the optional `source`, which the server accepts as `UI`, `AGENT` (chat card), or `MCP`); `aura_feedback` always sends `source: "MCP"` internally so the row records its true origin:
 
 | Parameter | Type | Required | Notes |
 |---|---|---|---|
@@ -19,18 +19,18 @@ The tool takes the same fields as the feedback creation API call (`POST /feedbac
 
 ### The interactive sign-off
 
-When you call `aura_feedback`, the user gets an interactive prompt — this is the whole reason the tool exists. The prompt shows the proposed **title** and **body** as text and two **checkboxes** (`is_anonymous`, `notify_author`) below. The user can answer with four actions:
+When you call `aura_feedback`, the user gets an interactive prompt (this is the whole reason the tool exists). The prompt shows the proposed **title** and **body** as text and two **checkboxes** (`is_anonymous`, `notify_author`) below. The user can answer with four actions:
 
-- **Yes** — send the feedback to Aura as-is. The row is created and the tool returns the created UUID.
-- **No** — do not send. The user may leave an optional comment; the tool returns a "rejected" result (with the comment if there was one).
-- **Refine** — do not send. A comment is **required**; the tool returns an explicit instruction for you to refine the proposal according to the user's feedback, which should lead to another `aura_feedback` call down the line.
-- **Edit** — open a second screen where the user can edit all four fields manually (title/body as text, the two flags as checkboxes), then choose **Submit** or **Cancel** at the bottom. **Submit** behaves like Yes but with the edited payload, and the result notes that the payload was edited. **Cancel** behaves like No without a comment.
+- **Yes**: send the feedback to Aura as-is. The row is created and the tool returns the created UUID.
+- **No**: do not send. The user may leave an optional comment; the tool returns a "rejected" result (with the comment if there was one).
+- **Refine**: do not send. A comment is **required**; the tool returns an explicit instruction for you to refine the proposal according to the user's feedback, which should lead to another `aura_feedback` call down the line.
+- **Edit**: open a second screen where the user can edit all four fields manually (title/body as text, the two flags as checkboxes), then choose **Submit** or **Cancel** at the bottom. **Submit** behaves like Yes but with the edited payload, and the result notes that the payload was edited. **Cancel** behaves like No without a comment.
 
 The tool validates the payload against the same hard limits the API enforces (`title` 1–120, `body` ≥ 50) **before** opening the prompt, so a too-short `body` fails fast with a clear message instead of wasting the user's time.
 
 ## Do not use the raw MCP tool
 
-The `aura-mcp-dev_createFeedback` MCP tool wraps the same `POST /feedback` endpoint, but it **submits directly with no interactive sign-off**. That is exactly the gap `aura_feedback` fills. Use `aura_feedback` for every maintainer-bound feedback proposal; leave `createFeedback` for cases where a human has already explicitly approved the exact payload out-of-band (rare).
+The `mcp__aura_mcp_dev__createFeedback` MCP tool submits directly with no interactive sign-off. That is exactly the gap `aura_feedback` fills. Use `aura_feedback` for every maintainer-bound feedback proposal; leave `createFeedback` for cases where a human has already explicitly approved the exact payload out-of-band (rare).
 
 ## The local log: `~/.pi/aura/feedback.jsonl`
 
@@ -53,9 +53,9 @@ On every successful submission, `aura_feedback` appends one JSON line to `~/.pi/
 ```
 
 - `timestamp` is an ISO string (UTC); `timestamp_local` is the same instant in the user's local time zone, for quick human reads.
-- `uuid` is the created feedback row's id — the same value the tool returns.
+- `uuid` is the created feedback row's id: the same value the tool returns.
 - `payload` is exactly what was sent to Aura (always with `source: "MCP"`).
-- `created` is the full created row the API returned (`FeedbackDetail`).
+- `created` is the created row as the tool returned it (its `id` and `status` are always present).
 
 ### Reading the log with `jq`
 
@@ -91,11 +91,25 @@ tail -n 1 ~/.pi/aura/feedback.jsonl | grep -oE '"uuid":"[^"]+"' | head -1
 
 ## What this tool is not for
 
-`aura_feedback` is for feedback **about Aura** — the product, its features, or its workflow friction. It is not a general-purpose channel for:
+`aura_feedback` is for feedback **about Aura**: the product, its features, or its workflow friction. It is not a general-purpose channel for:
 
 - Feedback about *this repo's* skills, rules, or setup (use those owners).
 - Questions directed at you (use `mcpAnswerQuestion` / the questions workflow).
 - Filing a task for work you want done (use the task management use case).
 - Triaging an inbound planning signal (use the signals use case).
 
-If you're unsure whether something is "Aura itself" vs. "how we use Aura", default to proposing it via `aura_feedback` and let the user decide with **No**/**Refine** — the sign-off is the safety net.
+If you're unsure whether something is "Aura itself" vs. "how we use Aura", default to proposing it via `aura_feedback` and let the user decide with **No**/**Refine**: the sign-off is the safety net.
+
+## Reading and triaging feedback (Leadership/Admin)
+
+The feedback read and triage family is live on MCP, gated behind the VIEW_FEEDBACK capability (Leadership/Admin):
+
+| Goal | Tool |
+|---|---|
+| Get one entry | `getFeedback` |
+| List entries (paginated) | `listFeedback` (filters `q`, `source` (`UI` \| `AGENT` \| `MCP`), `status`, `tags` with `tag_match`; discarded entries are hidden unless `status` selects them) |
+| Triage an entry | `changeFeedbackStatus` (`NEW` \| `ACCEPTED` \| `RESOLVED` \| `DISCARDED`; `DISCARDED` requires `discard_reason`) |
+| Attach the task that addresses it | `linkFeedbackTask` (linking an already-DONE task resolves the entry immediately) |
+| Link a related entry | `linkRelatedFeedback` (canonical undirected relation; self-links rejected) |
+
+Find feedback text across Aura with `unifiedSearch` and `source_types: ["FEEDBACK"]` (see the unified search use case). A caller without VIEW_FEEDBACK receives a 403 from the listing, not an empty list.
