@@ -145,6 +145,11 @@ Added a `rest` command group to the `aura` CLI that exposes every Aura REST oper
 
 
 
+
+## 2026-11-10, Rewrite the aura skill file (aura-skill-rewrite)
+
+The aura skill file teaches the live server again: the 120-tool count with the build identity cited once as the drift anchor, the corrected tool list (the opinion artifact kind, the base64 upload with its size limit, the whole mode with its character limits and the expected-version and full-replace gates), the leave-and-return scorecard replacing the false "left MCP entirely" paragraph, the response-format contract with the permission exclusion, and the new tool families at bullet level, with the two expected-dead tools absent and the codemode-plus-write pattern as the taught file workflow. Eight content guards in the remnants suite pin the rewrite's load-bearing facts so the next drift fails the suite instead of teaching agents stale facts. The development-process paragraph now defers the split status series to the process resource that ticket rewrites next, and the codemode walkthrough pointer waits on the usecase resource. Full suite green on the landed state (107 shared tests, ten extension suites, typecheck).
+
 ## 2026-11-10, Apply the consumer rule to the internal REST library (rest-library-consumer-rule)
 
 The internal REST library is retired whole, on counted evidence: the consumer enumeration found zero production consumers (the extensions migrated to the typed MCP interface, the CLI was already removed), so the generated client, its wrapper, the REST credential path, the spec source, the sync and codegen targets with their dev dependency, and the library's tests all left the tree, about 49,900 lines. The two type-only fixture imports in the feedback test were inlined as local fixture types rather than keeping the library alive; the guard flipped from keep-targets to removal pins, and the suite settled at 99 shared tests plus the ten extension suites, all green on the landed state. With this, the package's Aura access is the MCP interface alone: the registration, the mention machinery, and the feedback tool, with no REST code path left in production anywhere in the package.
