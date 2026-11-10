@@ -188,6 +188,24 @@ node --experimental-strip-types extensions/aura-references.test.ts
 node --experimental-strip-types extensions/aura-reference-cache.test.ts
 ```
 
+### Guard tests (`aura-mcp-contract`, `aura-mcp-server`)
+
+Two guard families landed with the MCP interface ticket:
+
+- **Provenance guards** (`extensions/aura-mcp-contract.test.ts`): the
+  shipped tool contracts (names, parameter names, types, requiredness, enum
+  values, descriptions) are cross-checked against the effort's verbatim
+  introspection dump, so a hand-edit to the contract data that drifts from
+  the recorded live server fails the suite.
+- **Installed-source guards** (`extensions/aura-mcp-server.test.ts`): pin
+  behavior this package depends on in pi itself, read from pi's installed
+  source in `node_modules`: the user's own `mcp.json` entry taking precedence
+  over an extension's registration, and the `session_start` flow that
+  connects extension-registered servers. A pi upgrade that changes either
+  fails the suite instead of breaking silently. Prefer asserting observable
+  behavior over pinning source text when the behavior is reachable; use
+  this source-pinning form only when it is not.
+
 `aura-reference-cache.test.ts` (the persistent sqlite store) exercises the
 real `node:sqlite` store against temp-file databases (WAL pragma, upserts,
 reopen persistence, base-URL keying, the silent in-memory fallback, the TTL
