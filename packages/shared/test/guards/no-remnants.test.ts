@@ -2861,3 +2861,69 @@ describe("no-remnants guard: root docs current (README)", () => {
     );
   });
 });
+
+describe("no-remnants guard: root docs current (glossary)", () => {
+  it("describes the PAT as keyring-stored with the mcp config file as the import source only", () => {
+    const context = readRootDoc("CONTEXT.md");
+    assert.match(
+      context,
+      /OS keyring/,
+      "the PAT entry should state the keyring as where the PAT lives",
+    );
+    assert.match(
+      context,
+      /import source/,
+      "the mcp.json file should be described as the import source only",
+    );
+    assert.doesNotMatch(
+      context,
+      /read from `~\/\.config\/mcp\/mcp\.json`/,
+      "the stale read-from-mcp.json PAT story should be gone",
+    );
+  });
+
+  it("carries the live tool count in the mcp* entry", () => {
+    const context = readRootDoc("CONTEXT.md");
+    assert.doesNotMatch(context, /\b90\b/, "the stale 90-tool count should be gone");
+    assert.match(context, /\b120\b/, "the live 120-tool count should be stated");
+  });
+
+  it("replaces the removed REST access-client entries with the shipped typed interface", () => {
+    const context = readRootDoc("CONTEXT.md");
+    assert.doesNotMatch(
+      context,
+      /AuraClient|HeyApiAuraClient|@pi-aura\/shared\/aura-client|@hey-api|openapi-ts/i,
+      "the removed REST library entries should be gone (taught by absence, not negation)",
+    );
+    assert.match(
+      context,
+      /aura-mcp-client\.ts/,
+      "the shipped typed interface module should be named",
+    );
+    assert.match(
+      context,
+      /createAuraMcpInterface/,
+      "the typed interface's constructor should be named",
+    );
+  });
+
+  it("describes the keyring as it ships", () => {
+    const context = readRootDoc("CONTEXT.md");
+    assert.doesNotMatch(
+      context,
+      /@napi-rs\/keyring/,
+      "the dead @napi-rs/keyring attribution should be gone",
+    );
+    assert.match(
+      context,
+      /Secret Service/,
+      "the Linux D-Bus Secret Service backend should be named",
+    );
+    assert.match(context, /FakeKeyring/, "the FakeKeyring test seam should be named");
+    assert.match(
+      context,
+      /FileKeyring/,
+      "the file backend backing the automated keyring suite should be named",
+    );
+  });
+});
