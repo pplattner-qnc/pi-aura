@@ -141,9 +141,9 @@ Walk **one status at a time** anyway: that is the calling discipline in
 `engineering-foundation/guides/tracker-aura`, because a skipped status is a
 one-way door and a gate only settles through its own sign-off.
 
-`status_change_reason` is not needed when moving forward along the intended
-path (e.g. `IN_DEVELOPMENT` → `IN_REVIEW`). It is **required to override a
-disallowed status jump, or to leave a rejected quality gate**; the reason is
+`status_change_reason` is **required to override a disallowed status jump,
+or to leave a rejected quality gate**. Moving forward along the intended
+path (e.g. `IN_DEVELOPMENT` → `IN_REVIEW`) needs no reason; the reason is
 recorded for transparency. A refused status change saves nothing.
 
 Agents never move a task past a gate on their own: present the gate state to
