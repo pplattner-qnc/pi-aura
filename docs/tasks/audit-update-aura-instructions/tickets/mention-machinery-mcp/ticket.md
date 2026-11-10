@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Mention machinery on MCP
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by:
 - aura-mcp-interface
 size: l
@@ -31,3 +31,11 @@ The reference instruction's artifact kind list becomes the live set (PLAN, OPINI
 ## Blocked by
 
 - aura-mcp-interface
+
+## Implementation notes
+
+Landed as merge 3176edb on task/mention-machinery-mcp (eleven commits: the original nine plus the route-back fix pair; the merged tree is bit-identical to the verified tip). The mention machinery runs every server lookup through the typed interface; the whole change lives in the reference engine and its test (the three interface modules, the manifest, and the cache module are untouched).
+
+Durable facts for dependents: the adapters' seam is renamed createClient to createInterface, and the removed exports (the four structural client types, the two warmup seed constants, the private default-client import) were package-internal with no remaining consumers (verified by grep). Wiki versions load lazily at resolution only (no insert-time fetch, no cache write-back; one node read per expansion, so a repeated mention refetches). Every tree node is an autocomplete candidate, folders included; the by-path read is assumed to resolve documents only, and a folder-exclusion discriminator would need a live probe (recorded as the one unverified-live assumption). The wiki warmup is space-listed: one tree per listed space, capped at 500 nodes per space. The factory holds a persistent connection released on /reload (untested; pi-runtime verified only). Two factory hooks exist for tests: loadCredentials and createCache (the registration extension's hook pattern mirrored); production wiring passes nothing.
+
+The route-back addendum (second chain run): the first verification found the production blocker, the construction of the interface without credentials latching cache-only for every user; the fix loads real credentials through the exported loader at session_start and passes baseUrl and pat beside notify. The construction-path regression test runs with no injected caller anywhere: the real loader over fixture seams, the real MCP client and streamable transport over loopback HTTP to a local fake aura-mcp-dev serving the shipped contracts; it re-runs acceptance criteria 1 and 2 at the production path and pins the corrected warmup wire parameters there. The verify pass additionally probed the production instance read-only through the shipped construction path using the config-file PAT; the keyring-PAT live check stays on the operator's list.

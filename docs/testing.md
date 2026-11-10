@@ -147,6 +147,20 @@ Two guard families landed with the MCP interface ticket:
   behavior over pinning source text when the behavior is reachable; use
   this source-pinning form only when it is not.
 
+### Construction-path tests (the loopback fake instance)
+
+When a suite must exercise a path that injected fakes would replace
+(the production construction of the typed interface, for instance), the
+pattern landed with the mention-machinery migration: a local fake
+streamable-HTTP aura-mcp-dev server over loopback, reached by the real
+pi-mcp client and transport, with the real credential loader running over
+fixture seams (a tmp settings file plus a recording fake keyring). The
+fake serves the shipped tool contracts so the self-check stays drift-free,
+and the assertions cover what only the production path can show: the loader
+was consulted, the loaded PAT rode the Authorization header, the endpoint
+came from the loaded settings, and the acceptance criteria hold with no
+injected caller anywhere.
+
 `aura-reference-cache.test.ts` (the persistent sqlite store) exercises the
 real `node:sqlite` store against temp-file databases (WAL pragma, upserts,
 reopen persistence, base-URL keying, the silent in-memory fallback, the TTL

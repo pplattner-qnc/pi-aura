@@ -21,17 +21,27 @@
  * kind end-to-end (the first metadata-driven kind: item mapping whose
  * extras carry the artifact kind and latest version, title-labeled rows
  * with the uuid in the description and the full uuid token as the value,
- * uuid-prefix + title-substring local filtering, the listArtifacts warmup
- * pagination with its q-based server search, and the SWR write-through
- * for server-only matches and renames), the artifact-ref expansion (the
- * metadata-driven id/kind/version attributes, cache-first resolution gated
- * on complete cached metadata with the targeted getArtifact fallback,
- * unknown mentions left as typed, and the escaping), and the instruction
- * block's artifact-ref shape. The provider wiring
+ * uuid-prefix + title-substring local filtering, the searchArtifacts
+ * warmup pagination with its q-based server search, and the SWR
+ * write-through for server-only matches and renames), the artifact-ref
+ * expansion (the metadata-driven id/kind/version attributes, cache-first
+ * resolution gated on complete cached metadata with the targeted
+ * getArtifact fallback, unknown mentions left as typed, and the
+ * escaping), the instruction block's artifact-ref shape (the live kind
+ * set), and the wiki kind end-to-end (slim-tree candidates derived from
+ * title and slug, searchKnowledge with the tree join, the space-listed
+ * warmup, and resolutions whose version loads lazily from the node
+ * read). Every server-facing suite runs over the typed aura-mcp
+ * interface built on a fake caller (the arch spec's caller seam): the
+ * tool envelopes, the payload extraction, and the self-check verdicts
+ * are exercised exactly as the live server feeds them, and a degraded
+ * tool path (the self-check's unavailable set) pins the cache-only
+ * degradation. The provider wiring
  * that defers to the built-in
  * provider for non-reference tokens is tested at its
- * pure wrapper seam. The extension factory (which reaches Aura through the
- * dynamic-import seam and surfaces the deprecation warning via `ctx.ui.notify`)
+ * pure wrapper seam. The extension factory (which constructs the typed
+ * interface once per session with the notify hook and surfaces the
+ * deprecation warning via `ctx.ui.notify`)
  * is exercised by the pi runtime once credentials are configured, mirroring
  * the `aura-tasks` test file.
  */
@@ -66,14 +76,18 @@ import auraReferences, {
   wikiItemsFromTree,
   wikiItemMetadata,
   WIKI_KIND,
-  WARMUP_WIKI_SEED_QUERY,
-  WARMUP_WIKI_SEARCH_LIMIT,
   MAX_WIKI_ITEMS_PER_SPACE,
   type ReferenceItem,
   type WikiSearchHit,
   type WikiTreeNode,
 } from "./aura-references.ts";
 import type { Rule } from "./cursor-rules.ts";
+import { createAuraMcpInterface, loadAuraMcpCredentials, type AuraMcpCaller } from "./aura-mcp-client.ts";
+import {
+  SHIPPED_AURA_MCP_TOOLS,
+  type AuraMcpLiveTool,
+  type ShippedToolContract,
+} from "./aura-mcp-contract.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,6 +110,119 @@ function stubAdapter(kind: string) {
     formatExpansion: (item: { key: string }) => `<${kind}-ref key="${item.key}"></${kind}-ref>`,
     resolveFullToken: async () => null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// The aura-mcp-dev fake caller (the typed interface's caller seam): the
+// adapters under test are fed through a real createAuraMcpInterface built
+// over this fake, so every server-facing test exercises the tool envelope,
+// the payload extraction, and the self-check exactly as the live server
+// feeds them (the arch spec's caller seam, the mention ticket's "fake
+// caller" requirement).
+// ---------------------------------------------------------------------------
+
+/** Convert a shipped contract into the live-shaped tool the server would
+ *  report for it (no drift), the fake `listTools` baseline. */
+function toLiveTool(shipped: ShippedToolContract): AuraMcpLiveTool {
+  const lines = shipped.description.split("\n");
+  const hasTitleLine = lines.length > 1;
+  const properties: Record<string, unknown> = {};
+  const required: string[] = [];
+  for (const [name, param] of Object.entries(shipped.params)) {
+    properties[name] = {
+      type: param.type === "number" ? "integer" : param.type,
+      description: param.description,
+      ...(param.enum !== undefined ? { enum: [...param.enum] } : {}),
+      ...(param.default !== undefined ? { default: param.default } : {}),
+    };
+    if (param.required) required.push(name);
+  }
+  return {
+    name: shipped.name,
+    ...(hasTitleLine ? { title: lines[0] } : {}),
+    description: hasTitleLine ? lines.slice(1).join("\n").replace(/^\n+/, "") : lines[0],
+    inputSchema: { type: "object", properties, ...(required.length > 0 ? { required } : {}) },
+  };
+}
+
+/** Wrap a tool's JSON payload in the MCP result envelope. */
+function okResult(payload: unknown) {
+  return { content: [{ type: "text", text: JSON.stringify(payload) }] };
+}
+
+/** A fake aura-mcp-dev caller: per-tool payload handlers, each handed the
+ *  call's args and returning the tool's JSON payload (the envelope is
+ *  wrapped here). A tool without a handler rejects (the natural error
+ *  shape). `calls` records only callTool invocations (never listTools, so
+ *  the construction-time self-check stays invisible to the assertions). */
+function fakeAuraCaller(handlers: Record<string, (args: Record<string, unknown>) => unknown> = {}) {
+  const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+  const caller: AuraMcpCaller = {
+    async callTool(tool, args) {
+      calls.push({ tool, args });
+      const handler = handlers[tool];
+      if (handler === undefined) throw new Error(`no fake handler for ${tool}`);
+      return okResult(await handler(args));
+    },
+    async listTools() {
+      return SHIPPED_AURA_MCP_TOOLS.map(toLiveTool);
+    },
+  };
+  return { caller, calls };
+}
+
+/** The typed interface over a fake caller: what every adapter under test
+ *  consumes through its `createInterface` seam. */
+async function interfaceOverCaller(caller: AuraMcpCaller) {
+  return createAuraMcpInterface({ caller });
+}
+
+/** A never-available interface factory (the no-credentials/degraded seam):
+ *  construction rejects, so every server lookup fails and the adapter
+ *  degrades to its cache-only answers. */
+async function noopInterface(): Promise<never> {
+  throw new Error("no credentials");
+}
+
+/** A promise with its resolve/reject exposed, so tests decide when (and how)
+ *  the server answers. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** A controllable aura-mcp-dev caller for the SWR seam: every callTool is a
+ *  deferred promise the test resolves (with the tool's JSON payload) or
+ *  rejects, never answering on its own. Calls are recorded with their tool
+ *  and args; the deferred handles are handed back in call order. */
+function controllableCaller() {
+  const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+  const pending: Array<ReturnType<typeof deferred<unknown>>> = [];
+  const caller: AuraMcpCaller = {
+    async callTool(tool, args) {
+      calls.push({ tool, args });
+      const d = deferred<unknown>();
+      pending.push(d);
+      return okResult(await d.promise);
+    },
+    async listTools() {
+      return SHIPPED_AURA_MCP_TOOLS.map(toLiveTool);
+    },
+  };
+  return { caller, calls, pending };
+}
+
+/** Let every pending microtask drain before asserting on a started call: the
+ *  typed interface adds awaits (the construction's self-check, the tool
+ *  envelope) between the refresh start and the fake caller's record. A
+ *  macrotask boundary guarantees the whole pending microtask chain ran. */
+async function settle(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 // ---------------------------------------------------------------------------
@@ -392,11 +519,7 @@ console.log("filterReferenceItems: ok");
 // ---------------------------------------------------------------------------
 
 {
-  const adapter = createTaskAdapter({
-    createClient: async () => {
-      throw new Error("no credentials in this test");
-    },
-  });
+  const adapter = createTaskAdapter({ createInterface: noopInterface });
 
   assert.equal(adapter.kind, "task");
 
@@ -466,7 +589,10 @@ console.log("filterReferenceItems: ok");
 console.log("createTaskAdapter searchLocal + formatRow: ok");
 
 // ---------------------------------------------------------------------------
-// createTaskAdapter: warmup (listTasks pagination into the cache)
+// createTaskAdapter: warmup (searchTasks pagination into the cache), over
+// the typed interface: the wire parameters are the live listTasks contract
+// (full-text `q` plus archived visibility), and the stale `search`/`status`
+// keys the old REST call sent are gone.
 // ---------------------------------------------------------------------------
 
 interface FakeTask {
@@ -485,59 +611,53 @@ function fakeTasks(count: number, offset = 0): FakeTask[] {
   }));
 }
 
-/** Fake AuraClient: one array of pages; options to fail or abort on a page. */
-function fakeClient(pages: FakeTask[][], behavior?: {
-  failOnPage?: number;
-  abortOnPage?: (signal: AbortSignal) => void;
-}) {
+/** Fake aura-mcp-dev task surface: one array of pages served by the listTasks
+ *  handler (paged by the `page` arg), with call recording (the full args of
+ *  every call) and a failure switch. */
+function fakeTaskCaller(pages: FakeTask[][], behavior?: { failOnPage?: number }) {
   const pageCalls: number[] = [];
-  const searches: string[] = [];
-  return {
-    client: {
-      listTasks: async (query?: { page?: number; search?: string }) => {
-        const page = query?.page ?? 1;
-        pageCalls.push(page);
-        if (query?.search !== undefined) searches.push(query.search);
-        if (behavior?.failOnPage === page) throw new Error("network down");
-        behavior?.abortOnPage?.(new AbortController().signal);
-        return { items: pages[page - 1] ?? [], pagination: {} };
-      },
-      getTaskByHumanKey: async () => {
-        throw new Error("not used here");
-      },
+  const argLog: Array<Record<string, unknown>> = [];
+  const { caller } = fakeAuraCaller({
+    listTasks: (args) => {
+      const page = typeof args.page === "number" ? args.page : 1;
+      pageCalls.push(page);
+      argLog.push(args);
+      if (behavior?.failOnPage === page) throw new Error("network down");
+      return { items: pages[page - 1] ?? [], pagination: {} };
     },
-    pageCalls,
-    searches,
-  };
+  });
+  return { caller, pageCalls, argLog };
+}
+
+/** The exact wire parameters the adapter must send for a warmup page. */
+function warmupPageArgs(page: number): Record<string, unknown> {
+  return { archived: "all", limit: 100, page, sort_by: "updated_at", sort_dir: "desc" };
 }
 
 {
   // Multi-page pagination: page 1 full (100 items), page 2 partial. Writes
   // land page by page so partial progress stays cached.
-  const { client, pageCalls } = fakeClient([fakeTasks(100), fakeTasks(3, 100)]);
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, pageCalls, argLog } = fakeTaskCaller([fakeTasks(100), fakeTasks(3, 100)]);
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   await adapter.warmup(cache);
   assert.equal(cache.read("task").length, 103);
   assert.deepEqual(pageCalls, [1, 2], "stops after a partial page");
+  assert.deepEqual(argLog, [warmupPageArgs(1), warmupPageArgs(2)], "the live wire contract: full-text-free paging with archived visibility; no stale `search`/`status` keys");
   assert.equal(cache.fetchedAt("task") !== null, true);
 
   // Cap: at most MAX_TASKS tasks are pulled (5 full pages of 100 reach the
   // 500 cap, so a 6th page is never requested). The cache keeps the head.
-  const big = fakeClient([fakeTasks(100, 0), fakeTasks(100, 100), fakeTasks(100, 200), fakeTasks(100, 300), fakeTasks(100, 400), fakeTasks(100, 500), fakeTasks(100, 600)]);
-  const capped = createTaskAdapter({ createClient: async () => big.client });
+  const big = fakeTaskCaller([fakeTasks(100, 0), fakeTasks(100, 100), fakeTasks(100, 200), fakeTasks(100, 300), fakeTasks(100, 400), fakeTasks(100, 500), fakeTasks(100, 600)]);
+  const capped = createTaskAdapter({ createInterface: async () => interfaceOverCaller(big.caller) });
   const cappedCache = createInMemoryReferenceCache();
   await capped.warmup(cappedCache);
   assert.equal(cappedCache.read("task").length, 500);
   assert.deepEqual(big.pageCalls, [1, 2, 3, 4, 5], "stops at the cap without a surplus page");
 
-  // Missing credentials: createDefaultAuraClient throws. Warmup no-ops
+  // Missing credentials: the interface construction rejects. Warmup no-ops
   // (resolves, empty cache, nothing thrown into the session).
-  const noCreds = createTaskAdapter({
-    createClient: async () => {
-      throw new Error("missing PAT");
-    },
-  });
+  const noCreds = createTaskAdapter({ createInterface: noopInterface });
   const emptyCache = createInMemoryReferenceCache();
   await noCreds.warmup(emptyCache);
   assert.deepEqual(emptyCache.read("task"), []);
@@ -547,34 +667,31 @@ function fakeClient(pages: FakeTask[][], behavior?: {
   // and nothing throws into the session.
   const controller = new AbortController();
   const abortPageCalls: number[] = [];
-  const aborting = {
-    listTasks: async (query?: { page?: number }) => {
-      const page = query?.page ?? 1;
+  const { caller: abortCaller } = fakeAuraCaller({
+    listTasks: (args) => {
+      const page = typeof args.page === "number" ? args.page : 1;
       abortPageCalls.push(page);
       if (page >= 2) controller.abort();
       return { items: fakeTasks(100, (page - 1) * 100), pagination: {} };
     },
-    getTaskByHumanKey: async () => {
-      throw new Error("not used here");
-    },
-  };
-  const abortAdapter = createTaskAdapter({ createClient: async () => aborting });
+  });
+  const abortAdapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(abortCaller) });
   const abortCache = createInMemoryReferenceCache();
   await abortAdapter.warmup(abortCache, { signal: controller.signal });
   assert.deepEqual(abortPageCalls, [1, 2], "pagination stops after the abort");
   assert.equal(abortCache.read("task").length, 200, "landed pages stay cached");
 
   // A page fetch that rejects: warmup resolves (no throw), earlier pages stay.
-  const failing = fakeClient([fakeTasks(100), fakeTasks(100, 100)], { failOnPage: 2 });
-  const failAdapter = createTaskAdapter({ createClient: async () => failing.client });
+  const failing = fakeTaskCaller([fakeTasks(100), fakeTasks(100, 100)], { failOnPage: 2 });
+  const failAdapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(failing.caller) });
   const failCache = createInMemoryReferenceCache();
   await failAdapter.warmup(failCache);
   assert.equal(failCache.read("task").length, 100, "page 1 survived the page 2 failure");
 
   // A warmup into an already-populated cache merges (upsert) rather than
   // replacing: a re-warmup keeps ids stable.
-  const { client: single } = fakeClient([fakeTasks(2)]);
-  const mergeAdapter = createTaskAdapter({ createClient: async () => single });
+  const single = fakeTaskCaller([fakeTasks(2)]);
+  const mergeAdapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(single.caller) });
   const mergeCache = createInMemoryReferenceCache();
   await mergeAdapter.warmup(mergeCache);
   await mergeAdapter.warmup(mergeCache);
@@ -584,53 +701,23 @@ function fakeClient(pages: FakeTask[][], behavior?: {
 console.log("createTaskAdapter warmup: ok");
 
 // ---------------------------------------------------------------------------
-// refreshReferenceKind (SWR orchestration: injected fetch + cache)
+// refreshReferenceKind (SWR orchestration: injected fetch + cache). The
+// adapter's server search runs over the typed interface (built once over the
+// controllable fake caller), so the deferred answers and the wire args the
+// tests observe are the live tool call's.
 // ---------------------------------------------------------------------------
-
-/** A promise with its resolve/reject exposed, so tests decide when (and how)
- *  the server answers. */
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
-/** What one `listTasks` search eventually answers with. */
-type SearchReply = { items: FakeTask[]; pagination: unknown };
-type SearchCall = ReturnType<typeof deferred<SearchReply>> & { search: string | undefined };
-
-/** A controllable AuraClient for the SWR seam: every `listTasks` search is a
- *  deferred promise the test resolves, rejects, or leaves hanging. Each call
- *  is recorded with its query (the typed partial lands in `search`). */
-function controllableSearchClient() {
-  const calls: SearchCall[] = [];
-  return {
-    client: {
-      listTasks: (query?: { search?: string }) => {
-        const d = deferred<SearchReply>();
-        calls.push({ ...d, search: query?.search });
-        return d.promise;
-      },
-      getTaskByHumanKey: async () => {
-        throw new Error("not used here");
-      },
-    },
-    calls,
-  };
-}
 
 {
   // A completed refresh writes through to the cache (the next query sees fresh
   // data): a cached item with a stale title plus a server result carrying the
   // corrected title. The server result replaces its cached twin in place
-  // (dedupe by id) and stamps a fresh fetchedAt.
+  // (dedupe by id) and stamps a fresh fetchedAt. The wire parameters are the
+  // live listTasks contract: full-text `q` plus archived visibility, capped
+  // and sorted; the stale `search` and `status` keys the old REST call sent
+  // are gone.
   let ts = 0;
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache(() => {
     ts += 1000;
     return ts;
@@ -638,13 +725,19 @@ function controllableSearchClient() {
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
 
   const refresh = refreshReferenceKind(cache, adapter, "42");
-  // One microtask hop: the refresh starts its search asynchronously (the
-  // adapter awaits its client factory), so the call record exists only after
-  // the hop. Deterministic: the search start was queued before this await.
-  await Promise.resolve();
+  // Let the refresh start settle: the adapter awaits its interface factory
+  // (whose construction runs the self-check) before the tool call, so the
+  // call record exists only after those awaits drain. Deterministic: the
+  // search start was queued before this await.
+  await settle();
   assert.equal(calls.length, 1, "the refresh fired exactly one server search");
-  assert.equal(calls[0]?.search, "42", "the typed partial is the listTasks search");
-  calls[0]!.resolve({
+  assert.equal(calls[0]?.tool, "listTasks", "the search runs over the typed interface's listTasks tool");
+  assert.deepEqual(
+    calls[0]?.args,
+    { q: "42", archived: "all", limit: MAX_SUGGESTIONS, sort_by: "updated_at", sort_dir: "desc" },
+    "the live wire contract: full-text `q` plus archived visibility, capped and sorted; no stale `search`/`status` keys",
+  );
+  pending[0]!.resolve({
     items: [{ id: "u1", human_key: "AURA-42", title: "Fix the renamed login bug", status: "OPEN" }],
     pagination: {},
   });
@@ -665,14 +758,14 @@ console.log("refreshReferenceKind write-through: ok");
 {
   // A server-only match (a task outside the local cache window) is added to
   // the cache, so the next query can find it by title substring.
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
 
   const refresh = refreshReferenceKind(cache, adapter, "obscure");
-  await Promise.resolve(); // let the async search start reach listTasks
-  calls[0]!.resolve({
+  await settle(); // let the interface construction and the tool call reach the fake
+  pending[0]!.resolve({
     items: [{ id: "u2", human_key: "AURA-999", title: "The obscure story point spike", status: "OPEN" }],
     pagination: {},
   });
@@ -691,8 +784,8 @@ console.log("refreshReferenceKind server-only match: ok");
   // Merge semantics: a server page carrying one corrected twin and one new
   // task merges over the cache (upsert by id; cached order preserved for the
   // kept entries).
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   cache.write("task", [
     { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" },
@@ -700,8 +793,8 @@ console.log("refreshReferenceKind server-only match: ok");
   ]);
 
   const refresh = refreshReferenceKind(cache, adapter, "42");
-  await Promise.resolve(); // let the async search start reach listTasks
-  calls[0]!.resolve({
+  await settle(); // let the interface construction and the tool call reach the fake
+  pending[0]!.resolve({
     items: [
       { id: "u1", human_key: "AURA-42", title: "Fix the renamed login bug", status: "DONE" },
       { id: "u3", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" },
@@ -726,8 +819,8 @@ console.log("refreshReferenceKind merge over local: ok");
   // Abort guards. A hung fetch that resolves after the request was aborted
   // must not write (no write after abort), and an already-aborted request
   // fires no fetch at all: aborted queries stop their work.
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
   const stampBefore = cache.fetchedAt("task");
@@ -742,10 +835,10 @@ console.log("refreshReferenceKind merge over local: ok");
   // dropped, the cache stays exactly as it was.
   const controller = new AbortController();
   const hung = refreshReferenceKind(cache, adapter, "42", { signal: controller.signal });
-  await Promise.resolve(); // let the async search start reach listTasks
+  await settle(); // let the interface construction and the tool call reach the fake
   assert.equal(calls.length, 1);
   controller.abort(); // pi-tui superseded this request mid-flight
-  calls[0]!.resolve({
+  pending[0]!.resolve({
     items: [{ id: "u1", human_key: "AURA-42", title: "Fix the late renamed title", status: "OPEN" }],
     pagination: {},
   });
@@ -761,20 +854,20 @@ console.log("refreshReferenceKind abort guards: ok");
 {
   // Rapid successive queries: pi-tui aborts the earlier request when the
   // later starts, so only the later query's results may land.
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
 
   const earlier = new AbortController();
   const later = new AbortController();
   const first = refreshReferenceKind(cache, adapter, "42", { signal: earlier.signal });
   const second = refreshReferenceKind(cache, adapter, "42", { signal: later.signal });
-  await Promise.resolve(); // let both async searches reach listTasks
+  await settle(); // let both interface constructions and tool calls reach the fake
   assert.equal(calls.length, 2, "each query fired its own search");
 
   earlier.abort(); // the later request superseded the earlier one
-  calls[0]!.resolve({ items: [{ id: "ua", human_key: "AURA-11", title: "Earlier query result", status: "OPEN" }], pagination: {} });
-  calls[1]!.resolve({ items: [{ id: "ub", human_key: "AURA-22", title: "Later query result", status: "OPEN" }], pagination: {} });
+  pending[0]!.resolve({ items: [{ id: "ua", human_key: "AURA-11", title: "Earlier query result", status: "OPEN" }], pagination: {} });
+  pending[1]!.resolve({ items: [{ id: "ub", human_key: "AURA-22", title: "Later query result", status: "OPEN" }], pagination: {} });
   await Promise.all([first, second]);
 
   assert.deepEqual(
@@ -791,8 +884,8 @@ console.log("refreshReferenceKind rapid queries (later aborts earlier): ok");
   // mid-search) and the refresh resolves without throwing, leaving the cache
   // exactly as it was (items and stamp). Cached suggestions still return.
   let ts = 0;
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache(() => {
     ts += 1000;
     return ts;
@@ -800,8 +893,8 @@ console.log("refreshReferenceKind rapid queries (later aborts earlier): ok");
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
 
   const refresh = refreshReferenceKind(cache, adapter, "42");
-  await Promise.resolve(); // let the async search start reach listTasks
-  calls[0]!.reject(new Error("connection reset mid-search"));
+  await settle(); // let the interface construction and the tool call reach the fake
+  pending[0]!.reject(new Error("connection reset mid-search"));
   await refresh; // resolves, never throws into the session
   const after = cache.read("task");
   assert.equal(after.length, 1);
@@ -833,14 +926,14 @@ console.log("refreshReferenceKind never rejects: ok");
 {
   // The server answers with an empty result: local items are kept (and the
   // cache keeps its stamp, since nothing new was fetched to write).
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache(() => 7000);
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
 
   const refresh = refreshReferenceKind(cache, adapter, "zzz-nothing-matches");
-  await Promise.resolve(); // let the async search start reach listTasks
-  calls[0]!.resolve({ items: [], pagination: {} });
+  await settle(); // let the interface construction and the tool call reach the fake
+  pending[0]!.resolve({ items: [], pagination: {} });
   await refresh;
   const after = cache.read("task");
   assert.deepEqual(after.map((e) => e.key), ["AURA-42"], "local items kept on an empty server result");
@@ -852,13 +945,13 @@ console.log("refreshReferenceKind empty server result: ok");
 {
   // Edge: server results with unknown extra fields. The adapter maps a task
   // to its reference fields; extra fields never reach the cache entries.
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache(() => 9000);
 
   const refresh = refreshReferenceKind(cache, adapter, "42");
-  await Promise.resolve(); // let the async search start reach listTasks
-  calls[0]!.resolve({
+  await settle(); // let the interface construction and the tool call reach the fake
+  pending[0]!.resolve({
     items: [
       {
         id: "u1",
@@ -888,12 +981,12 @@ console.log("refreshReferenceKind unknown extra fields: ok");
 /** A provider wired over a controllable-search task adapter: exposes the
  *  search-call recorder so tests observe the background refreshes. */
 function swrProvider(cache: ReturnType<typeof createInMemoryReferenceCache>) {
-  const { client, calls } = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => client });
+  const { caller, calls, pending } = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const registry = createReferenceRegistry([adapter]);
   const current = fakeCurrent();
   const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache);
-  return { provider, calls, current };
+  return { provider, calls, pending, current };
 }
 
 {
@@ -903,12 +996,12 @@ function swrProvider(cache: ReturnType<typeof createInMemoryReferenceCache>) {
   // background.
   const cache = createInMemoryReferenceCache();
   cache.write("task", taskItems());
-  const { provider, calls } = swrProvider(cache);
+  const { provider, calls, pending } = swrProvider(cache);
 
   const suggestions = await suggestAt(provider, "#task:42", 8);
   assert.deepEqual(suggestions?.items.map((i) => i.value), ["#task:AURA-42", "#task:AURA-424"]);
   assert.equal(suggestions?.prefix, "#task:42");
-  await Promise.resolve(); // one hop: the background refresh reaches listTasks
+  await settle(); // the background refresh reaches the fake caller
   assert.equal(calls.length, 1, "the same query fired the background refresh");
   // The fetch is left hanging forever: the provider never awaited it.
 }
@@ -921,15 +1014,15 @@ console.log("provider SWR: instant cache answer, background refresh fired: ok");
   // provider (that is how a task outside the cache window becomes findable).
   const cache = createInMemoryReferenceCache();
   cache.write("task", taskItems());
-  const { provider, calls, current } = swrProvider(cache);
+  const { provider, calls, pending, current } = swrProvider(cache);
 
   await suggestAt(provider, "#task:", 6); // empty partial: the cache head
   await suggestAt(provider, "#task:42", 8); // key partial
   await suggestAt(provider, "#task:login", 11); // title partial
   const deferBase = current.calls.suggestions;
   await suggestAt(provider, "#task:zzz", 9); // zero-match: defers, still refreshes
-  await Promise.resolve(); // let the last refresh reach listTasks
-  assert.deepEqual(calls.map((c) => c.search), ["", "42", "login", "zzz"]);
+  await settle(); // let the last refresh reach the fake caller
+  assert.deepEqual(calls.map((c) => c.args.q), ["", "42", "login", "zzz"]);
   assert.equal(current.calls.suggestions, deferBase + 1, "zero-match still defers to the built-in provider");
 
   // A non-reference token (deferred from the start) fires no refresh.
@@ -945,15 +1038,15 @@ console.log("provider SWR: every reference query refreshes with its partial: ok"
   // aborts superseded requests, and a late server answer must never land.
   const cache = createInMemoryReferenceCache();
   cache.write("task", taskItems());
-  const { provider, calls } = swrProvider(cache);
+  const { provider, calls, pending } = swrProvider(cache);
   const controller = new AbortController();
 
   const suggestions = await provider.getSuggestions(["#task:login"], 0, 11, { signal: controller.signal });
   assert.equal(suggestions?.items[0]?.value, "#task:AURA-42", "the cache answered instantly");
-  await Promise.resolve(); // the refresh is now in flight
+  await settle(); // the refresh is now in flight
   assert.equal(calls.length, 1);
   controller.abort(); // pi-tui superseded this request
-  calls[0]!.resolve({
+  pending[0]!.resolve({
     items: [{ id: "late", human_key: "AURA-555", title: "Late server answer", status: "OPEN" }],
     pagination: {},
   });
@@ -974,8 +1067,8 @@ console.log("provider SWR: the request abort signal guards the write: ok");
   // still answer from the cache but fire no server search.
   const cache = createInMemoryReferenceCache();
   cache.write("task", taskItems());
-  const gated = controllableSearchClient();
-  const adapter = createTaskAdapter({ createClient: async () => gated.client });
+  const gated = controllableCaller();
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(gated.caller) });
   const registry = createReferenceRegistry([adapter]);
   const current = fakeCurrent();
   const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache, {
@@ -985,7 +1078,7 @@ console.log("provider SWR: the request abort signal guards the write: ok");
   await suggestAt(provider, "#task:42", 8);
   await suggestAt(provider, "#task:", 6);
   await suggestAt(provider, "#task:zzz", 9); // zero-match: defers, and no refresh either
-  await Promise.resolve(); // a fired refresh would have reached listTasks by now
+  await settle(); // a fired refresh would have reached the fake caller by now
   assert.equal(gated.calls.length, 0, "no refresh fired without credentials");
   // The cached answers still come out.
   const suggestions = await suggestAt(provider, "#task:42", 8);
@@ -1001,12 +1094,12 @@ console.log("provider SWR: no refresh without credentials (canRefresh gate): ok"
   // keystroke) sees the fresh title.
   const cache = createInMemoryReferenceCache();
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
-  const { provider, calls } = swrProvider(cache);
+  const { provider, calls, pending } = swrProvider(cache);
 
   const stale = await suggestAt(provider, "#task:login", 11);
   assert.equal(stale?.items[0]?.description, "[OPEN] Fix the login bug", "query 1: the stale cached row");
-  await Promise.resolve(); // the refresh is in flight
-  calls[0]!.resolve({
+  await settle(); // the refresh is in flight
+  pending[0]!.resolve({
     items: [{ id: "u1", human_key: "AURA-42", title: "Fix the renamed login bug", status: "OPEN" }],
     pagination: {},
   });
@@ -1025,13 +1118,13 @@ console.log("provider SWR end-to-end: renamed title visible one keystroke later:
   // query 2 offers it as a reference row.
   const cache = createInMemoryReferenceCache();
   cache.write("task", [{ kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" }]);
-  const { provider, calls, current } = swrProvider(cache);
+  const { provider, calls, pending, current } = swrProvider(cache);
 
   const deferredFirst = await suggestAt(provider, "#task:unpronounceable", 21);
   assert.equal(deferredFirst?.items[0]?.value, "file.txt", "query 1: no local match, deferred");
-  await Promise.resolve(); // the refresh is in flight
-  assert.equal(calls[0]?.search, "unpronounceable");
-  calls[0]!.resolve({
+  await settle(); // the refresh is in flight
+  assert.equal(calls[0]?.args.q, "unpronounceable");
+  pending[0]!.resolve({
     items: [{ id: "u2", human_key: "AURA-888", title: "The unpronounceable wiki slug", status: "OPEN" }],
     pagination: {},
   });
@@ -1069,15 +1162,11 @@ function lookupOver(items: ReferenceItem[]): {
   };
 }
 
-/** The production-shaped registry (task kind only); the injected client
- *  factory throws so a test can never reach Aura through it. */
+/** The production-shaped registry (task kind only); the injected interface
+ *  factory rejects so a test can never reach Aura through it. */
 function expansionRegistry() {
   return createReferenceRegistry([
-    createTaskAdapter({
-      createClient: async () => {
-        throw new Error("no credentials in this test");
-      },
-    }),
+    createTaskAdapter({ createInterface: noopInterface }),
   ]);
 }
 
@@ -1211,11 +1300,7 @@ console.log("expandReferenceMentions: multiple + duplicate + case-insensitive: o
 // ---------------------------------------------------------------------------
 
 {
-  const adapter = createTaskAdapter({
-    createClient: async () => {
-      throw new Error("no credentials in this test");
-    },
-  });
+  const adapter = createTaskAdapter({ createInterface: noopInterface });
 
   // The format: key and status as attributes, title as element text.
   assert.equal(
@@ -1306,10 +1391,6 @@ function fakeCurrent(suggestions = { items: [{ value: "file.txt", label: "file.t
   };
 }
 
-const noopClient = async () => {
-  throw new Error("no credentials");
-};
-
 function taskItems(): ReferenceItem[] {
   return [
     { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN" },
@@ -1320,7 +1401,7 @@ function taskItems(): ReferenceItem[] {
 
 function wiredProvider(cache: ReturnType<typeof createInMemoryReferenceCache> | null) {
   const current = fakeCurrent();
-  const adapter = createTaskAdapter({ createClient: noopClient });
+  const adapter = createTaskAdapter({ createInterface: noopInterface });
   const registry = createReferenceRegistry([adapter]);
   const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache);
   return { current, provider, registry };
@@ -1411,7 +1492,7 @@ console.log("provider suggestions + deferral: ok");
   const bare = fakeCurrent();
   const bareProvider = { ...bare.provider } as Record<string, unknown>;
   delete bareProvider.shouldTriggerFileCompletion;
-  const adapter = createTaskAdapter({ createClient: noopClient });
+  const adapter = createTaskAdapter({ createInterface: noopInterface });
   const registry = createReferenceRegistry([adapter]);
   const overlay = createReferenceAutocompleteProvider(
     bareProvider as unknown as Parameters<typeof createReferenceAutocompleteProvider>[0],
@@ -1441,7 +1522,7 @@ console.log("provider failure modes (defer, no throw): ok");
     searchLocal: () => [{ value: "#wiki:row", label: "#wiki:row" }],
   };
   const registry = createReferenceRegistry([
-    createTaskAdapter({ createClient: noopClient }),
+    createTaskAdapter({ createInterface: noopInterface }),
     declining,
   ]);
   const provider = createReferenceAutocompleteProvider(current.provider, registry, () =>
@@ -1535,7 +1616,7 @@ console.log("alias registry registration + expansion routing: ok");
  *  adapter's client factory always throws, so a test can never reach Aura
  *  through it. */
 function auraAliasRegistry() {
-  const adapter = createTaskAdapter({ createClient: noopClient });
+  const adapter = createTaskAdapter({ createInterface: noopInterface });
   const registry = createReferenceRegistry([adapter]);
   registry.registerAlias(createAuraTaskAlias(adapter));
   return registry;
@@ -1631,18 +1712,18 @@ console.log("production @AURA- alias autocomplete: ok");
   // cached; AURA-1337 must come from the targeted fallback; AURA-999 is
   // unknown everywhere.
   const keyLookups: string[] = [];
-  const adapter = createTaskAdapter({
-    createClient: async () => ({
-      listTasks: async () => ({ items: [], pagination: {} }),
-      getTaskByHumanKey: async (key: string) => {
-        keyLookups.push(key);
-        if (key.toLowerCase() === "aura-1337") {
-          return { id: "u2", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" };
-        }
-        throw new Error("404 not found");
-      },
-    }),
+  const { caller } = fakeAuraCaller({
+    listTasks: () => ({ items: [], pagination: {} }),
+    getTaskByHumanKey: (args) => {
+      const key = String(args.human_key);
+      keyLookups.push(key);
+      if (key.toLowerCase() === "aura-1337") {
+        return { id: "u2", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" };
+      }
+      throw new Error("404 not found");
+    },
   });
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const registry = createReferenceRegistry([adapter]);
   registry.registerAlias(createAuraTaskAlias(adapter));
   const cache = createInMemoryReferenceCache();
@@ -1772,21 +1853,23 @@ console.log("once-per-session deprecation-warning decision: ok");
 // ---------------------------------------------------------------------------
 
 {
-  // A counting client factory: a cache hit must build no client at all (no
-  // targeted fetch); only the fallback reaches Aura.
-  let clientBuilds = 0;
+  // A counting interface factory: a cache hit must build no interface at all
+  // (no targeted fetch); only the fallback reaches Aura.
+  let interfaceBuilds = 0;
+  const { caller } = fakeAuraCaller({
+    listTasks: () => ({ items: [], pagination: {} }),
+    getTaskByHumanKey: (args) => {
+      const key = String(args.human_key);
+      if (key.toUpperCase() === "AURA-1337") {
+        return { id: "u2", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" };
+      }
+      throw new Error("404 not found");
+    },
+  });
   const adapter = createTaskAdapter({
-    createClient: async () => {
-      clientBuilds += 1;
-      return {
-        listTasks: async () => ({ items: [], pagination: {} }),
-        getTaskByHumanKey: async (key: string) => {
-          if (key.toUpperCase() === "AURA-1337") {
-            return { id: "u2", human_key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" };
-          }
-          throw new Error("404 not found");
-        },
-      };
+    createInterface: async () => {
+      interfaceBuilds += 1;
+      return interfaceOverCaller(caller);
     },
   });
   const cache = createInMemoryReferenceCache(() => 5000);
@@ -1798,7 +1881,7 @@ console.log("once-per-session deprecation-warning decision: ok");
     await adapter.resolveFullToken("aura-42", cache),
     { kind: "task", id: "u1", key: "AURA-42", title: "Fix the login bug", status: "OPEN", fetchedAt: 5000 },
   );
-  assert.equal(clientBuilds, 0, "a cache hit builds no client");
+  assert.equal(interfaceBuilds, 0, "a cache hit builds no interface");
 
   // Cache miss: the targeted getTaskByHumanKey fallback resolves (typed
   // casing differs; the expansion carries the canonical server key).
@@ -1806,7 +1889,7 @@ console.log("once-per-session deprecation-warning decision: ok");
     await adapter.resolveFullToken("aura-1337", cache),
     { kind: "task", id: "u2", key: "AURA-1337", title: "Ship the dashboard", status: "IN_REVIEW" },
   );
-  assert.equal(clientBuilds, 1, "the fallback built exactly one client");
+  assert.equal(interfaceBuilds, 1, "the fallback built exactly one interface");
 
   // Targeted fetch miss (unknown key): null, so the mention stays as typed.
   assert.equal(await adapter.resolveFullToken("AURA-999", cache), null);
@@ -1814,7 +1897,7 @@ console.log("once-per-session deprecation-warning decision: ok");
   // Targeted fetch throws (network failure, missing credentials): null, and
   // nothing throws into the session.
   assert.equal(await adapter.resolveFullToken("AURA-404", cache), null);
-  assert.equal(clientBuilds, 3, "each fallback attempt built one client");
+  assert.equal(interfaceBuilds, 3, "each fallback attempt built one interface");
 }
 
 console.log("resolveFullToken cache-first + targeted fallback: ok");
@@ -1838,7 +1921,9 @@ console.log("resolveFullToken cache-first + targeted fallback: ok");
   assert.ok(/element text is the task title/.test(REFERENCE_INSTRUCTION), "names the task title part");
   assert.ok(/display title as the element text/.test(REFERENCE_INSTRUCTION), "names the rule display title part");
   assert.ok(/artifact title as the element text/.test(REFERENCE_INSTRUCTION), "names the artifact title part");
-  assert.ok(/`PLAN`/.test(REFERENCE_INSTRUCTION), "names the artifact kind values");
+  assert.ok(/`PLAN`, `OPINION`, or `GENERIC`/.test(REFERENCE_INSTRUCTION), "names the live artifact kind set");
+  assert.ok(/chat-only `TEMPORARY`/.test(REFERENCE_INSTRUCTION), "names the chat-only kind");
+  assert.ok(!/`PLAN`, `REVIEW`/.test(REFERENCE_INSTRUCTION), "the retired REVIEW kind is gone from the live set");
   assert.ok(/`version` the reference resolved to/.test(REFERENCE_INSTRUCTION), "names the artifact version semantics");
   assert.ok(REFERENCE_INSTRUCTION.includes("aura"), "points at the aura skill for task references");
   assert.ok(
@@ -2057,7 +2142,7 @@ console.log("createRuleAdapter resolveFullToken: ok");
 {
   const current = fakeCurrent();
   const registry = createReferenceRegistry([
-    createTaskAdapter({ createClient: noopClient }),
+    createTaskAdapter({ createInterface: noopInterface }),
     createRuleAdapter({ getRules: () => testRules() }),
   ]);
   const provider = createReferenceAutocompleteProvider(current.provider, registry, () => createInMemoryReferenceCache());
@@ -2105,7 +2190,7 @@ console.log("provider rule suggestions + deferral: ok");
 {
   const ruleAdapter = createRuleAdapter({ getRules: () => testRules() });
   const registry = createReferenceRegistry([
-    createTaskAdapter({ createClient: noopClient }),
+    createTaskAdapter({ createInterface: noopInterface }),
     ruleAdapter,
   ]);
   // The factory's per-kind lookup wiring, verbatim: local kinds resolve
@@ -2155,7 +2240,7 @@ console.log("rule expansion end-to-end: ok");
  *  adapters and both production aliases (`@AURA-`, `@rule:`), exactly as the
  *  extension factory registers them. */
 function ruleAliasRegistry(rules: Rule[] = testRules()) {
-  const taskAdapter = createTaskAdapter({ createClient: noopClient });
+  const taskAdapter = createTaskAdapter({ createInterface: noopInterface });
   const ruleAdapter = createRuleAdapter({ getRules: () => rules });
   const registry = createReferenceRegistry([taskAdapter, ruleAdapter]);
   registry.registerAlias(createAuraTaskAlias(taskAdapter));
@@ -2337,35 +2422,27 @@ function fakeArtifacts(count: number, offset = 0): FakeArtifact[] {
   }));
 }
 
-/** Fake artifact client: one array of pages (page 1 by default, so search
- *  queries resolve against pages[0]); option to fail on a page. */
-function fakeArtifactClient(pages: FakeArtifact[][], behavior?: { failOnPage?: number }) {
+/** Fake aura-mcp-dev artifact surface: one array of pages served by the
+ *  listArtifacts handler (paged by the `page` arg, so search queries resolve
+ *  against pages[0]), with call recording (the full args of every call) and
+ *  a failure switch. */
+function fakeArtifactCaller(pages: FakeArtifact[][], behavior?: { failOnPage?: number }) {
   const pageCalls: number[] = [];
   const queries: Array<Record<string, unknown>> = [];
-  return {
-    client: {
-      listArtifacts: async (query?: Record<string, unknown>) => {
-        const page = (query?.page as number | undefined) ?? 1;
-        pageCalls.push(page);
-        queries.push({ ...query });
-        if (behavior?.failOnPage === page) throw new Error("network down");
-        return { items: pages[page - 1] ?? [], pagination: {} };
-      },
-      getArtifact: async () => {
-        throw new Error("not used here");
-      },
+  const { caller } = fakeAuraCaller({
+    listArtifacts: (args) => {
+      const page = typeof args.page === "number" ? args.page : 1;
+      pageCalls.push(page);
+      queries.push({ ...args });
+      if (behavior?.failOnPage === page) throw new Error("network down");
+      return { items: pages[page - 1] ?? [], pagination: {} };
     },
-    pageCalls,
-    queries,
-  };
+  });
+  return { caller, pageCalls, queries };
 }
 
 {
-  const adapter = createArtifactAdapter({
-    createClient: async () => {
-      throw new Error("no credentials in this test");
-    },
-  });
+  const adapter = createArtifactAdapter({ createInterface: noopInterface });
 
   assert.equal(ARTIFACT_KIND, "artifact");
   assert.equal(adapter.kind, ARTIFACT_KIND);
@@ -2504,11 +2581,11 @@ console.log("createArtifactAdapter rows + local filtering: ok");
   // Multi-page pagination: page 1 full (100 items), page 2 partial. Writes
   // land page by page so partial progress survives, and the cached items
   // carry the artifact kind and latest version (the metadata extras).
-  const { client, pageCalls, queries } = fakeArtifactClient([
+  const { caller, pageCalls, queries } = fakeArtifactCaller([
     fakeArtifacts(100),
     fakeArtifacts(3, 100),
   ]);
-  const adapter = createArtifactAdapter({ createClient: async () => client });
+  const adapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   await adapter.warmup(cache);
   assert.equal(cache.read("artifact").length, 103);
@@ -2526,7 +2603,7 @@ console.log("createArtifactAdapter rows + local filtering: ok");
 
   // Cap: at most MAX_ARTIFACTS artifacts are pulled (5 full pages of 100
   // reach the 500 cap, so a 6th page is never requested).
-  const big = fakeArtifactClient([
+  const big = fakeArtifactCaller([
     fakeArtifacts(100, 0),
     fakeArtifacts(100, 100),
     fakeArtifacts(100, 200),
@@ -2534,7 +2611,7 @@ console.log("createArtifactAdapter rows + local filtering: ok");
     fakeArtifacts(100, 400),
     fakeArtifacts(100, 500),
   ]);
-  const capped = createArtifactAdapter({ createClient: async () => big.client });
+  const capped = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(big.caller) });
   const cappedCache = createInMemoryReferenceCache();
   await capped.warmup(cappedCache);
   assert.equal(cappedCache.read("artifact").length, MAX_ARTIFACTS);
@@ -2542,11 +2619,7 @@ console.log("createArtifactAdapter rows + local filtering: ok");
 
   // Missing credentials: createDefaultAuraClient throws. Warmup no-ops
   // (resolves, empty cache, nothing thrown into the session).
-  const noCreds = createArtifactAdapter({
-    createClient: async () => {
-      throw new Error("missing PAT");
-    },
-  });
+  const noCreds = createArtifactAdapter({ createInterface: noopInterface });
   const emptyCache = createInMemoryReferenceCache();
   await noCreds.warmup(emptyCache);
   assert.deepEqual(emptyCache.read("artifact"), []);
@@ -2556,26 +2629,23 @@ console.log("createArtifactAdapter rows + local filtering: ok");
   // and nothing throws into the session.
   const controller = new AbortController();
   const abortPageCalls: number[] = [];
-  const aborting = {
-    listArtifacts: async (query?: { page?: number }) => {
-      const page = query?.page ?? 1;
+  const { caller: abortCaller } = fakeAuraCaller({
+    listArtifacts: (args) => {
+      const page = typeof args.page === "number" ? args.page : 1;
       abortPageCalls.push(page);
       if (page >= 2) controller.abort();
       return { items: fakeArtifacts(100, (page - 1) * 100), pagination: {} };
     },
-    getArtifact: async () => {
-      throw new Error("not used here");
-    },
-  };
-  const abortAdapter = createArtifactAdapter({ createClient: async () => aborting });
+  });
+  const abortAdapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(abortCaller) });
   const abortCache = createInMemoryReferenceCache();
   await abortAdapter.warmup(abortCache, { signal: controller.signal });
   assert.deepEqual(abortPageCalls, [1, 2], "pagination stops after the abort");
   assert.equal(abortCache.read("artifact").length, 200, "landed pages stay cached");
 
   // A page fetch that rejects: warmup resolves (no throw), earlier pages stay.
-  const failing = fakeArtifactClient([fakeArtifacts(100), fakeArtifacts(100, 100)], { failOnPage: 2 });
-  const failAdapter = createArtifactAdapter({ createClient: async () => failing.client });
+  const failing = fakeArtifactCaller([fakeArtifacts(100), fakeArtifacts(100, 100)], { failOnPage: 2 });
+  const failAdapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(failing.caller) });
   const failCache = createInMemoryReferenceCache();
   await failAdapter.warmup(failCache);
   assert.equal(failCache.read("artifact").length, 100, "page 1 survived the page 2 failure");
@@ -2591,8 +2661,8 @@ console.log("createArtifactAdapter warmup: ok");
   // The typed partial lands in `q`; the query is capped and sorted
   // newest-updated first; the result items map to reference items carrying
   // the metadata extras.
-  const { client, queries } = fakeArtifactClient([fakeArtifacts(2)]);
-  const adapter = createArtifactAdapter({ createClient: async () => client });
+  const { caller, queries } = fakeArtifactCaller([fakeArtifacts(2)]);
+  const adapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const results = await adapter.searchServer("onboard");
   assert.deepEqual(queries, [
     { q: "onboard", limit: MAX_SUGGESTIONS, sort_by: "updated_at", sort_dir: "desc" },
@@ -2600,15 +2670,15 @@ console.log("createArtifactAdapter warmup: ok");
   assert.deepEqual(results, fakeArtifacts(2).map(artifactToReferenceItem));
 
   // A custom limit is honored (the SWR seam passes one).
-  const { client: limited, queries: limitedQueries } = fakeArtifactClient([fakeArtifacts(2)]);
-  const limitedAdapter = createArtifactAdapter({ createClient: async () => limited });
+  const { caller: limited, queries: limitedQueries } = fakeArtifactCaller([fakeArtifacts(2)]);
+  const limitedAdapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(limited) });
   await limitedAdapter.searchServer("x", { limit: 1 });
   assert.equal(limitedQueries[0]?.limit, 1);
 
   // An aborted request: the late in-flight results are dropped ([]).
   const controller = new AbortController();
-  const { client: late } = fakeArtifactClient([fakeArtifacts(1)]);
-  const lateAdapter = createArtifactAdapter({ createClient: async () => late });
+  const { caller: late } = fakeArtifactCaller([fakeArtifacts(1)]);
+  const lateAdapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(late) });
   const pending = lateAdapter.searchServer("x", { signal: controller.signal });
   controller.abort(); // abort while the fetch is in flight
   assert.deepEqual(await pending, [], "late results after an abort are dropped");
@@ -2616,14 +2686,9 @@ console.log("createArtifactAdapter warmup: ok");
   // A failed search (missing credentials, network): [] (nothing fresh for
   // the SWR merge, nothing thrown into the session).
   const failingSearch = createArtifactAdapter({
-    createClient: async () => ({
-      listArtifacts: async () => {
-        throw new Error("network down");
-      },
-      getArtifact: async () => {
-        throw new Error("not used here");
-      },
-    }),
+    createInterface: async () => {
+      throw new Error("network down");
+    },
   });
   assert.deepEqual(await failingSearch.searchServer("x"), []);
 }
@@ -2638,8 +2703,8 @@ console.log("createArtifactAdapter searchServer: ok");
   // A server-only match (an artifact outside the local cache window) is
   // added by the write-through, so the next query finds it by title
   // substring one keystroke after the refresh lands.
-  const { client } = fakeArtifactClient([fakeArtifacts(1, 500)]);
-  const adapter = createArtifactAdapter({ createClient: async () => client });
+  const { caller } = fakeArtifactCaller([fakeArtifacts(1, 500)]);
+  const adapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   cache.write("artifact", [
     artifactToReferenceItem({ id: "9f3c0001-1111-4222-8333-444444444444", title: "Onboarding flow review", latest_version: 2, kind: "REVIEW" }),
@@ -2668,8 +2733,8 @@ console.log("refreshReferenceKind server-only artifact match: ok");
     latest_version: 4,
     kind: "PLAN",
   };
-  const { client } = fakeArtifactClient([[renamed]]);
-  const adapter = createArtifactAdapter({ createClient: async () => client });
+  const { caller } = fakeArtifactCaller([[renamed]]);
+  const adapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   cache.write("artifact", [
     artifactToReferenceItem({ id: renamed.id, title: "Old planning doc", latest_version: 3, kind: "PLAN" }),
@@ -2688,11 +2753,7 @@ console.log("refreshReferenceKind artifact rename correction: ok");
 // ---------------------------------------------------------------------------
 
 {
-  const adapter = createArtifactAdapter({
-    createClient: async () => {
-      throw new Error("no credentials in this test");
-    },
-  });
+  const adapter = createArtifactAdapter({ createInterface: noopInterface });
 
   // The expansion shape: <artifact-ref id kind version>title</artifact-ref>,
   // with the kind and version read from the item's metadata extras.
@@ -2724,22 +2785,24 @@ console.log("createArtifactAdapter formatExpansion: ok");
   // A counting client factory: a cache hit with complete metadata must
   // build no client at all (no targeted fetch); only the fallbacks reach
   // Aura.
-  let clientBuilds = 0;
+  let interfaceBuilds = 0;
+  const { caller } = fakeAuraCaller({
+    listArtifacts: () => ({ items: [], pagination: {} }),
+    getArtifact: (args) => {
+      const id = String(args.id);
+      if (id === "77e00001-1111-4222-8333-444444444444") {
+        return { id, title: "Server-known artifact", latest_version: 9, kind: "REVIEW" };
+      }
+      if (id === "0a1b0001-1111-4222-8333-444444444444") {
+        return { id, title: "Refreshed metadata row", latest_version: 5, kind: "PLAN" };
+      }
+      throw new Error("404 not found");
+    },
+  });
   const adapter = createArtifactAdapter({
-    createClient: async () => {
-      clientBuilds += 1;
-      return {
-        listArtifacts: async () => ({ items: [], pagination: {} }),
-        getArtifact: async (id: string) => {
-          if (id === "77e00001-1111-4222-8333-444444444444") {
-            return { id, title: "Server-known artifact", latest_version: 9, kind: "REVIEW" };
-          }
-          if (id === "0a1b0001-1111-4222-8333-444444444444") {
-            return { id, title: "Refreshed metadata row", latest_version: 5, kind: "PLAN" };
-          }
-          throw new Error("404 not found");
-        },
-      };
+    createInterface: async () => {
+      interfaceBuilds += 1;
+      return interfaceOverCaller(caller);
     },
   });
   const cache = createInMemoryReferenceCache(() => 5000);
@@ -2760,7 +2823,7 @@ console.log("createArtifactAdapter formatExpansion: ok");
       fetchedAt: 5000,
     },
   );
-  assert.equal(clientBuilds, 0, "a cache hit builds no client");
+  assert.equal(interfaceBuilds, 0, "a cache hit builds no interface");
 
   // A cached row lacking the version metadata falls back to the targeted
   // fetch (a half-metadata row must not expand with missing attributes);
@@ -2769,7 +2832,7 @@ console.log("createArtifactAdapter formatExpansion: ok");
     await adapter.resolveFullToken("0a1b0001-1111-4222-8333-444444444444", cache),
     artifactToReferenceItem({ id: "0a1b0001-1111-4222-8333-444444444444", title: "Refreshed metadata row", latest_version: 5, kind: "PLAN" }),
   );
-  assert.equal(clientBuilds, 1, "the metadata-less row fell back to one fetch");
+  assert.equal(interfaceBuilds, 1, "the metadata-less row fell back to one fetch");
 
   // Cache miss: the targeted getArtifact fallback resolves, with the kind
   // and version taken from the targeted fetch.
@@ -2777,18 +2840,14 @@ console.log("createArtifactAdapter formatExpansion: ok");
     await adapter.resolveFullToken("77e00001-1111-4222-8333-444444444444", cache),
     artifactToReferenceItem({ id: "77e00001-1111-4222-8333-444444444444", title: "Server-known artifact", latest_version: 9, kind: "REVIEW" }),
   );
-  assert.equal(clientBuilds, 2, "the cache-miss fallback built exactly one client");
+  assert.equal(interfaceBuilds, 2, "the cache-miss fallback built exactly one interface");
 
   // Targeted fetch miss (unknown uuid): null, so the mention stays as typed.
   assert.equal(await adapter.resolveFullToken("00000000-0000-0000-0000-000000000000", cache), null);
 
   // Targeted fetch throws (network failure, missing credentials): null,
   // and nothing throws into the session.
-  const noCreds = createArtifactAdapter({
-    createClient: async () => {
-      throw new Error("missing PAT");
-    },
-  });
+  const noCreds = createArtifactAdapter({ createInterface: noopInterface });
   const emptyCache = createInMemoryReferenceCache();
   assert.equal(await noCreds.resolveFullToken("9f3c0001-1111-4222-8333-444444444444", emptyCache), null);
 }
@@ -2801,19 +2860,21 @@ console.log("createArtifactAdapter resolveFullToken: ok");
 // ---------------------------------------------------------------------------
 
 {
-  let clientBuilds = 0;
+  let interfaceBuilds = 0;
+  const { caller } = fakeAuraCaller({
+    listArtifacts: () => ({ items: [], pagination: {} }),
+    getArtifact: (args) => {
+      const id = String(args.id);
+      if (id === "77e00001-1111-4222-8333-444444444444") {
+        return { id, title: "Server-known artifact", latest_version: 9, kind: "REVIEW" };
+      }
+      throw new Error("404 not found");
+    },
+  });
   const adapter = createArtifactAdapter({
-    createClient: async () => {
-      clientBuilds += 1;
-      return {
-        listArtifacts: async () => ({ items: [], pagination: {} }),
-        getArtifact: async (id: string) => {
-          if (id === "77e00001-1111-4222-8333-444444444444") {
-            return { id, title: "Server-known artifact", latest_version: 9, kind: "REVIEW" };
-          }
-          throw new Error("404 not found");
-        },
-      };
+    createInterface: async () => {
+      interfaceBuilds += 1;
+      return interfaceOverCaller(caller);
     },
   });
   const registry = createReferenceRegistry([adapter]);
@@ -2836,7 +2897,7 @@ console.log("createArtifactAdapter resolveFullToken: ok");
     await expandReferenceMentions("see #artifact:9f3c0001-1111-4222-8333-444444444444 today", registry, lookup),
     `see ${cachedTag} today`,
   );
-  assert.equal(clientBuilds, 0, "cached metadata resolved without a fetch");
+  assert.equal(interfaceBuilds, 0, "cached metadata resolved without a fetch");
 
   // Mentions at the start and the end of the prompt.
   assert.equal(
@@ -2859,7 +2920,7 @@ console.log("createArtifactAdapter resolveFullToken: ok");
     ),
     `compare ${cachedTag} with ${fetchedTag} and #artifact:00000000-0000-0000-0000-000000000000`,
   );
-  assert.equal(clientBuilds, 2, "the miss and the unknown each built one client");
+  assert.equal(interfaceBuilds, 2, "the miss and the unknown each built one interface");
 
   // Duplicate mentions of the same artifact: one resolution, every
   // occurrence expands.
@@ -2871,7 +2932,7 @@ console.log("createArtifactAdapter resolveFullToken: ok");
     ),
     `${fetchedTag} and ${fetchedTag} again`,
   );
-  assert.equal(clientBuilds, 3, "duplicates shared one resolution");
+  assert.equal(interfaceBuilds, 3, "duplicates shared one resolution");
 
   // A prompt without references passes through unchanged.
   const plain = "a prompt with no references at all";
@@ -2911,51 +2972,38 @@ console.log("isWikiUuidForm: ok");
 
 {
   // wikiItemsFromTree: the hit-to-path derivation's payload source, pure
-  // over the real getKnowledgeTree response shape (verified against live
-  // Aura: nodes carry id, kind, slug, title, latest_version, children).
-  // Only DOCUMENT nodes are referenceable (folders are containers, FILE
-  // nodes are assets); the canonical path is the ancestor slug chain; the
-  // uuid is the item id and `space/path` the token key.
+  // over the SLIM getKnowledgeTree response shape (the live probe: nodes
+  // carry exactly id, slug, title, source_path, children: no node kind and
+  // no latest_version; that is why the derivation never populated a row
+  // against the live server). The candidates derive from title and slug
+  // (every node; the slim tree no longer says which are documents), the
+  // canonical path is the ancestor slug chain, the uuid is the item id and
+  // `space/path` the token key, and NO version rides the item: versions
+  // load lazily from the node read when a reference is resolved.
   const tree: WikiTreeNode[] = [
     {
       id: "2f6b7f30-5cb1-42f7-9545-e22409284253",
-      kind: "FOLDER",
       slug: "nis-2",
       title: "NIS-2",
-      latest_version: 0,
       children: [
         {
           id: "19116556-6e3b-451a-9866-2d61c0736a78",
-          kind: "DOCUMENT",
           slug: "it-sicherheitskonzept",
           title: "IT-Sicherheitskonzept",
-          latest_version: 2,
           children: [],
         },
         {
           id: "9d152742-2ea6-4b64-9958-dbc032f3ff19",
-          kind: "DOCUMENT",
           slug: "isms-basiskonzept",
           title: "ISMS-Basiskonzept",
-          latest_version: 1,
           children: [],
         },
       ],
     },
     {
       id: "00000000-0000-0000-0000-000000000001",
-      kind: "DOCUMENT",
       slug: "overview",
       title: "Space overview",
-      latest_version: 7,
-      children: [],
-    },
-    {
-      id: "00000000-0000-0000-0000-000000000002",
-      kind: "FILE",
-      slug: "policy-pdf",
-      title: "Policy PDF",
-      latest_version: 3,
       children: [],
     },
   ];
@@ -2963,12 +3011,19 @@ console.log("isWikiUuidForm: ok");
   assert.deepEqual(items, [
     {
       kind: "wiki",
+      id: "2f6b7f30-5cb1-42f7-9545-e22409284253",
+      key: "iso-27001-dokumente/nis-2",
+      title: "NIS-2",
+      space: "iso-27001-dokumente",
+      path: "nis-2",
+    },
+    {
+      kind: "wiki",
       id: "19116556-6e3b-451a-9866-2d61c0736a78",
       key: "iso-27001-dokumente/nis-2/it-sicherheitskonzept",
       title: "IT-Sicherheitskonzept",
       space: "iso-27001-dokumente",
       path: "nis-2/it-sicherheitskonzept",
-      version: 2,
     },
     {
       kind: "wiki",
@@ -2977,7 +3032,6 @@ console.log("isWikiUuidForm: ok");
       title: "ISMS-Basiskonzept",
       space: "iso-27001-dokumente",
       path: "nis-2/isms-basiskonzept",
-      version: 1,
     },
     {
       kind: "wiki",
@@ -2986,32 +3040,26 @@ console.log("isWikiUuidForm: ok");
       title: "Space overview",
       space: "iso-27001-dokumente",
       path: "overview",
-      version: 7,
     },
-  ], "folders and files are skipped, nested paths carry the ancestor slugs");
+  ], "every slim-tree node is a candidate derived from title and slug (parents before children); nested paths carry the ancestor slugs; no version (lazy from the node read)");
 
-  // Deep nesting: the slug chain accumulates across levels.
+  // Deep nesting: the slug chain accumulates across levels (folders and
+  // documents alike are candidates now; only resolution discriminates).
   const deep = wikiItemsFromTree("eng", [
     {
       id: "00000000-0000-0000-0000-00000000000a",
-      kind: "FOLDER",
       slug: "process",
       title: "Process",
-      latest_version: 0,
       children: [
         {
           id: "00000000-0000-0000-0000-00000000000b",
-          kind: "FOLDER",
           slug: "reviews",
           title: "Reviews",
-          latest_version: 0,
           children: [
             {
               id: "00000000-0000-0000-0000-00000000000c",
-              kind: "DOCUMENT",
               slug: "pr-conventions",
               title: "PR conventions",
-              latest_version: 12,
               children: [],
             },
           ],
@@ -3022,23 +3070,40 @@ console.log("isWikiUuidForm: ok");
   assert.deepEqual(deep, [
     {
       kind: "wiki",
+      id: "00000000-0000-0000-0000-00000000000a",
+      key: "eng/process",
+      title: "Process",
+      space: "eng",
+      path: "process",
+    },
+    {
+      kind: "wiki",
+      id: "00000000-0000-0000-0000-00000000000b",
+      key: "eng/process/reviews",
+      title: "Reviews",
+      space: "eng",
+      path: "process/reviews",
+    },
+    {
+      kind: "wiki",
       id: "00000000-0000-0000-0000-00000000000c",
       key: "eng/process/reviews/pr-conventions",
       title: "PR conventions",
       space: "eng",
       path: "process/reviews/pr-conventions",
-      version: 12,
     },
   ]);
 
   // The metadata accessor (the artifact pattern): a complete space/path/
   // version triple reads off any item; an incomplete row reports null so
-  // resolution can distinguish a metadata-less cached row.
-  assert.deepEqual(wikiItemMetadata(items[0]), {
+  // resolution can distinguish a versionless tree row (the lazy-version
+  // contract) or a metadata-less cached row.
+  assert.deepEqual(wikiItemMetadata({ ...items[1], version: 2 }), {
     space: "iso-27001-dokumente",
     path: "nis-2/it-sicherheitskonzept",
     version: 2,
   });
+  assert.equal(wikiItemMetadata(items[1]), null, "a versionless tree row is incomplete");
   assert.equal(wikiItemMetadata({ kind: "wiki", id: "x", key: "eng/x", title: "T" }), null);
   assert.equal(
     wikiItemMetadata({ kind: "wiki", id: "x", key: "eng/x", title: "T", space: "eng", path: "x" }),
@@ -3060,11 +3125,7 @@ console.log("wikiItemsFromTree + wikiItemMetadata: ok");
 // ---------------------------------------------------------------------------
 
 {
-  const adapter = createWikiAdapter({
-    createClient: async () => {
-      throw new Error("no credentials in this test");
-    },
-  });
+  const adapter = createWikiAdapter({ createInterface: noopInterface });
 
   assert.equal(WIKI_KIND, "wiki");
   assert.equal(adapter.kind, WIKI_KIND);
@@ -3084,7 +3145,6 @@ console.log("wikiItemsFromTree + wikiItemMetadata: ok");
     title: "PR conventions",
     space: "eng",
     path: "process/pr-conventions",
-    version: 12,
   };
   const qaChecklist: ReferenceItem = {
     kind: "wiki",
@@ -3093,7 +3153,6 @@ console.log("wikiItemsFromTree + wikiItemMetadata: ok");
     title: "QA checklist",
     space: "eng",
     path: "process/qa-checklist",
-    version: 3,
   };
   const itSicherheitskonzept: ReferenceItem = {
     kind: "wiki",
@@ -3102,7 +3161,6 @@ console.log("wikiItemsFromTree + wikiItemMetadata: ok");
     title: "IT-Sicherheitskonzept",
     space: "iso-27001-dokumente",
     path: "nis-2/it-sicherheitskonzept",
-    version: 2,
   };
   const sameTitleElsewhere: ReferenceItem = {
     kind: "wiki",
@@ -3111,7 +3169,6 @@ console.log("wikiItemsFromTree + wikiItemMetadata: ok");
     title: "PR conventions",
     space: "legal-qa",
     path: "case-notes",
-    version: 1,
   };
   const items = [prConventions, qaChecklist, itSicherheitskonzept, sameTitleElsewhere];
 
@@ -3178,7 +3235,6 @@ console.log("wikiItemsFromTree + wikiItemMetadata: ok");
     title: `Page ${i}`,
     space: "space",
     path: `page-${i}`,
-    version: 1,
   }));
   assert.equal(adapter.searchLocal(many, "").length, MAX_SUGGESTIONS);
 
@@ -3195,55 +3251,89 @@ console.log("wikiItemsFromTree + wikiItemMetadata: ok");
 console.log("createWikiAdapter rows + local filtering: ok");
 
 // ---------------------------------------------------------------------------
-// Fake wiki client (the structural WikiAuraClient seam)
+// Fake aura-mcp-dev wiki surface (the typed interface's caller seam)
 // ---------------------------------------------------------------------------
 
-/** One knowledge tree node in the fake payload shape. */
+/** One knowledge tree node in the SLIM fake payload shape (the live probe:
+ *  id, slug, title, source_path, children: no kind, no latest_version). */
 function wikiNode(
   id: string,
   slug: string,
   title: string,
   extra: Partial<WikiTreeNode> = {},
 ): WikiTreeNode {
-  return { id, slug, title, kind: "DOCUMENT", latest_version: 1, children: [], ...extra };
+  return { id, slug, title, children: [], ...extra };
 }
 
-/** Fake wiki client: search hits plus per-space trees (both live records so
- * a test can mutate them between calls, simulating pages created after a
- * memoized tree), with call recording and failure switches. An unknown
- * space slug models the real 404 (a throw), not an empty tree. */
-function fakeWikiClient(options: {
-  hits: WikiSearchHit[];
-  trees: Record<string, WikiTreeNode[]>;
+/** A by-id node-read payload (the live probe: `space_slug` only on this
+ *  read; kind and latest_version present). */
+function slimNodeRead(id: string, slug: string, title: string, latest_version: number, space_slug: string) {
+  return { id, slug, title, latest_version, space_slug, kind: "DOCUMENT" };
+}
+
+/** A by-path node-read payload (the live probe: no `space_slug` on this
+ *  read; kind and latest_version present). */
+function slimPathRead(id: string, slug: string, title: string, latest_version: number) {
+  return { id, slug, title, latest_version, kind: "DOCUMENT" };
+}
+
+/** Fake aura-mcp-dev wiki surface: knowledge-search hits, the readable
+ *  space list, per-space slim trees (live records so a test can mutate them
+ *  between calls, simulating pages created after a memoized tree), and node
+ *  reads by identifier and by slug path, with call recording and failure
+ *  switches. An unknown space slug or node id models the real 404 (a
+ *  throw), not an empty tree. */
+function fakeWikiCaller(options: {
+  hits?: WikiSearchHit[];
+  spaces?: string[];
+  trees?: Record<string, WikiTreeNode[]>;
+  nodes?: Record<string, Record<string, unknown>>;
+  paths?: Record<string, Record<string, unknown>>;
   failSearch?: boolean;
+  failSpaces?: boolean;
   failTrees?: string[];
 }) {
-  const searchCalls: Array<{ query: string; limit?: number }> = [];
+  const searchCalls: Array<{ query: unknown; limit?: number }> = [];
+  const spaceCalls: number[] = [];
   const treeCalls: string[] = [];
-  return {
-    client: {
-      mcpWikiSearch: async (input: { query: string; limit?: number }) => {
-        searchCalls.push({ query: input.query, limit: input.limit });
-        if (options.failSearch) throw new Error("search down");
-        return { items: options.hits };
-      },
-      getKnowledgeTree: async (slug: string) => {
-        treeCalls.push(slug);
-        if (options.failTrees?.includes(slug)) throw new Error("tree down");
-        const nodes = options.trees[slug];
-        if (nodes === undefined) throw new Error(`404 no space ${slug}`);
-        return { nodes };
-      },
-      getKnowledgeNode: async () => {
-        throw new Error("not used in this slice");
-      },
-      getKnowledgeNodeByPath: async () => {
-        throw new Error("not used in this slice");
-      },
+  const nodeCalls: string[] = [];
+  const byPathCalls: Array<[string, string]> = [];
+  const { caller } = fakeAuraCaller({
+    searchKnowledge: (args) => {
+      searchCalls.push({ query: args.query, limit: args.limit as number | undefined });
+      if (options.failSearch) throw new Error("search down");
+      return { items: options.hits ?? [], pagination: {} };
     },
-    searchCalls,
-    treeCalls,
-  };
+    listKnowledgeSpaces: () => {
+      spaceCalls.push(1);
+      if (options.failSpaces) throw new Error("spaces down");
+      return { items: (options.spaces ?? []).map((slug) => ({ id: `space-${slug}`, slug, title: slug })) };
+    },
+    getKnowledgeTree: (args) => {
+      const slug = String(args.slug);
+      treeCalls.push(slug);
+      if (options.failTrees?.includes(slug)) throw new Error("tree down");
+      const nodes = options.trees?.[slug];
+      if (nodes === undefined) throw new Error(`404 no space ${slug}`);
+      return { space_id: `space-${slug}`, nodes, total: nodes.length, limit: 200, truncated: false };
+    },
+    getKnowledgeNode: (args) => {
+      const id = String(args.id);
+      nodeCalls.push(id);
+      const node = options.nodes?.[id];
+      if (node === undefined) throw new Error("404 not found");
+      return node;
+    },
+    getKnowledgeNodeByPath: (args) => {
+      const slug = String(args.slug);
+      const path = String(args.path);
+      byPathCalls.push([slug, path]);
+      const node = options.paths?.[`${slug}/${path}`];
+      if (node === undefined) throw new Error("404 not found");
+      return node;
+    },
+  });
+  return { caller, searchCalls, spaceCalls, treeCalls, nodeCalls, byPathCalls };
 }
 
 const ENG_PR_ID = "a36cd327-2e9b-47cd-9f4c-17bea059546a";
@@ -3252,37 +3342,36 @@ const ISO_IT_ID = "19116556-6e3b-451a-9866-2d61c0736a78";
 function engTree(): WikiTreeNode[] {
   return [
     wikiNode("00000000-0000-4000-8000-00000000000f", "process", "Process", {
-      kind: "FOLDER",
-      latest_version: 0,
-      children: [wikiNode(ENG_PR_ID, "pr-conventions", "PR conventions", { latest_version: 12 })],
+      children: [wikiNode(ENG_PR_ID, "pr-conventions", "PR conventions")],
     }),
   ];
 }
 
 // ---------------------------------------------------------------------------
-// createWikiAdapter: searchServer (mcpWikiSearch + the tree join)
+// createWikiAdapter: searchServer (searchKnowledge + the tree join)
 // ---------------------------------------------------------------------------
 
 {
-  // The typed partial lands in the search query (capped); the hit-to-path
-  // derivation fetches ONE tree per distinct hit space; the returned items
-  // carry the complete dual identity (uuid id + space/path key + version).
+  // The typed partial lands in the knowledge-search query (capped); the
+  // hit-to-path derivation fetches ONE tree per distinct hit space; the
+  // returned items carry the dual identity (uuid id + space/path key) and
+  // NO version: versions load lazily from the node read on resolution.
   const trees: Record<string, WikiTreeNode[]> = {
     eng: [
-      wikiNode("00000000-0000-4000-8000-00000000000f", "process", "Process", { kind: "FOLDER", latest_version: 0 }),
-      wikiNode(ENG_PR_ID, "pr-conventions", "PR conventions", { latest_version: 12 }),
+      wikiNode("00000000-0000-4000-8000-00000000000f", "process", "Process"),
+      wikiNode(ENG_PR_ID, "pr-conventions", "PR conventions"),
     ],
     "iso-27001-dokumente": [
-      wikiNode("2f6b7f30-5cb1-42f7-9545-e22409284253", "nis-2", "NIS-2", { kind: "FOLDER", latest_version: 0 }),
-      wikiNode(ISO_IT_ID, "it-sicherheitskonzept", "IT-Sicherheitskonzept", { latest_version: 2 }),
+      wikiNode("2f6b7f30-5cb1-42f7-9545-e22409284253", "nis-2", "NIS-2"),
+      wikiNode(ISO_IT_ID, "it-sicherheitskonzept", "IT-Sicherheitskonzept"),
     ],
   };
   const hits: WikiSearchHit[] = [
     { id: ISO_IT_ID, space_slug: "iso-27001-dokumente", title: "IT-Sicherheitskonzept" },
     { id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" },
   ];
-  const { client, searchCalls, treeCalls } = fakeWikiClient({ hits, trees });
-  const adapter = createWikiAdapter({ createClient: async () => client });
+  const { caller, searchCalls, treeCalls } = fakeWikiCaller({ hits, trees });
+  const adapter = createWikiAdapter({ createInterface: async () => interfaceOverCaller(caller) });
 
   const results = await adapter.searchServer("konvention");
   assert.deepEqual(searchCalls, [{ query: "konvention", limit: MAX_SUGGESTIONS }]);
@@ -3295,7 +3384,6 @@ function engTree(): WikiTreeNode[] {
       title: "IT-Sicherheitskonzept",
       space: "iso-27001-dokumente",
       path: "it-sicherheitskonzept",
-      version: 2,
     },
     {
       kind: "wiki",
@@ -3304,13 +3392,12 @@ function engTree(): WikiTreeNode[] {
       title: "PR conventions",
       space: "eng",
       path: "pr-conventions",
-      version: 12,
     },
   ]);
 
   // A custom limit is honored (the SWR seam passes one).
-  const { client: limited, searchCalls: limitedCalls } = fakeWikiClient({ hits: [], trees: {} });
-  const limitedAdapter = createWikiAdapter({ createClient: async () => limited });
+  const { caller: limited, searchCalls: limitedCalls } = fakeWikiCaller({ hits: [], trees: {} });
+  const limitedAdapter = createWikiAdapter({ createInterface: async () => interfaceOverCaller(limited) });
   await limitedAdapter.searchServer("x", { limit: 5 });
   assert.equal(limitedCalls[0]?.limit, 5);
 
@@ -3324,7 +3411,7 @@ function engTree(): WikiTreeNode[] {
   // refetched tree completes the item (self-healing).
   const newHit: WikiSearchHit = { id: "33333333-3333-4333-8333-333333333333", space_slug: "eng", title: "New page" };
   hits.push(newHit);
-  trees.eng.push(wikiNode(newHit.id, "new-page", "New page", { latest_version: 1 }));
+  trees.eng.push(wikiNode(newHit.id, "new-page", "New page"));
   const healed = await adapter.searchServer("new page");
   assert.deepEqual(treeCalls, ["iso-27001-dokumente", "eng", "eng"], "one refetch for the stale memo");
   assert.deepEqual(
@@ -3336,17 +3423,17 @@ function engTree(): WikiTreeNode[] {
   // A hit with a missing space_slug (the slice's edge case): no derivation
   // is possible, the hit is dropped, nothing crashes, and no tree call for
   // the empty slug is fired (the space guard skips the doomed fetch).
-  const { client: noSpace, treeCalls: noSpaceTrees } = fakeWikiClient({
+  const { caller: noSpace, treeCalls: noSpaceTrees } = fakeWikiCaller({
     hits: [{ id: ENG_PR_ID, space_slug: "", title: "Ghost hit" }],
     trees,
   });
-  const noSpaceAdapter = createWikiAdapter({ createClient: async () => noSpace });
+  const noSpaceAdapter = createWikiAdapter({ createInterface: async () => interfaceOverCaller(noSpace) });
   assert.deepEqual(await noSpaceAdapter.searchServer("ghost"), []);
   assert.deepEqual(noSpaceTrees, []);
 
   // A space whose tree fetch fails: that space's hits are dropped, no
   // crash; other spaces still complete.
-  const { client: partialFail } = fakeWikiClient({
+  const { caller: partialFail } = fakeWikiCaller({
     hits: [
       { id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" },
       { id: ISO_IT_ID, space_slug: "iso-27001-dokumente", title: "IT-Sicherheitskonzept" },
@@ -3354,28 +3441,28 @@ function engTree(): WikiTreeNode[] {
     trees,
     failTrees: ["eng"],
   });
-  const partialFailAdapter = createWikiAdapter({ createClient: async () => partialFail });
+  const partialFailAdapter = createWikiAdapter({ createInterface: async () => interfaceOverCaller(partialFail) });
   assert.deepEqual(
     (await partialFailAdapter.searchServer("x")).map((i) => i.key),
     ["iso-27001-dokumente/it-sicherheitskonzept"],
   );
 
   // The empty partial and the complete uuid form are not text queries:
-  // mcpWikiSearch matches titles and bodies, never ids, so no search is
+  // searchKnowledge matches titles and bodies, never ids, so no search is
   // fired at all (a doomed call skipped).
-  const { client: skip, searchCalls: skipCalls } = fakeWikiClient({ hits: [], trees: {} });
-  const skipAdapter = createWikiAdapter({ createClient: async () => skip });
+  const { caller: skip, searchCalls: skipCalls } = fakeWikiCaller({ hits: [], trees: {} });
+  const skipAdapter = createWikiAdapter({ createInterface: async () => interfaceOverCaller(skip) });
   assert.deepEqual(await skipAdapter.searchServer(""), []);
   assert.deepEqual(await skipAdapter.searchServer(ENG_PR_ID), []);
   assert.deepEqual(skipCalls, [], "neither the empty partial nor the uuid form searches");
 
   // An aborted request: the late in-flight results are dropped ([]).
   const controller = new AbortController();
-  const { client: late } = fakeWikiClient({
+  const { caller: late } = fakeWikiCaller({
     hits: [{ id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" }],
     trees,
   });
-  const lateAdapter = createWikiAdapter({ createClient: async () => late });
+  const lateAdapter = createWikiAdapter({ createInterface: async () => interfaceOverCaller(late) });
   const pending = lateAdapter.searchServer("x", { signal: controller.signal });
   controller.abort(); // abort while the fetch is in flight
   assert.deepEqual(await pending, [], "late results after an abort are dropped");
@@ -3383,30 +3470,15 @@ function engTree(): WikiTreeNode[] {
   // A failed search (missing credentials, network): [] (nothing fresh for
   // the SWR merge, nothing thrown into the session).
   const failingSearch = createWikiAdapter({
-    createClient: async () => ({
-      mcpWikiSearch: async () => {
-        throw new Error("network down");
-      },
-      getKnowledgeTree: async () => {
-        throw new Error("not used here");
-      },
-      getKnowledgeNode: async () => {
-        throw new Error("not used here");
-      },
-      getKnowledgeNodeByPath: async () => {
-        throw new Error("not used here");
-      },
-    }),
+    createInterface: async () => {
+      throw new Error("network down");
+    },
   });
   assert.deepEqual(await failingSearch.searchServer("x"), []);
 
   // Missing credentials: searchServer returns [] and never builds past the
-  // client factory.
-  const noCreds = createWikiAdapter({
-    createClient: async () => {
-      throw new Error("missing PAT");
-    },
-  });
+  // interface factory.
+  const noCreds = createWikiAdapter({ createInterface: noopInterface });
   assert.deepEqual(await noCreds.searchServer("x"), []);
 }
 
@@ -3420,13 +3492,13 @@ console.log("createWikiAdapter searchServer: ok");
   // A server-only match (a page outside the local cache window) is added by
   // the write-through, so the next query finds it by title substring one
   // keystroke after the refresh lands.
-  const { client } = fakeWikiClient({
+  const { caller } = fakeWikiCaller({
     hits: [{ id: "44444444-4444-4444-8444-444444444444", space_slug: "eng", title: "Release conventions" }],
     trees: {
-      eng: [wikiNode("44444444-4444-4444-8444-444444444444", "release-conventions", "Release conventions", { latest_version: 5 })],
+      eng: [wikiNode("44444444-4444-4444-8444-444444444444", "release-conventions", "Release conventions")],
     },
   });
-  const adapter = createWikiAdapter({ createClient: async () => client });
+  const adapter = createWikiAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   cache.write("wiki", [
     {
@@ -3436,7 +3508,6 @@ console.log("createWikiAdapter searchServer: ok");
       title: "PR conventions",
       space: "eng",
       path: "pr-conventions",
-      version: 12,
     },
   ]);
   await refreshReferenceKind(cache, adapter, "release");
@@ -3445,11 +3516,13 @@ console.log("createWikiAdapter searchServer: ok");
     ["eng/pr-conventions", "eng/release-conventions"],
     "server-only match added after the cached item",
   );
-  // The added row carries the metadata extras.
+  // The added row carries the identity extras; the version is NOT among
+  // them (the slim tree ride carries no version; it loads lazily from the
+  // node read when a reference is resolved).
   const added = cache.read("wiki")[1];
   assert.equal(added?.space, "eng");
   assert.equal(added?.path, "release-conventions");
-  assert.equal(added?.version, 5);
+  assert.equal(added?.version, undefined, "no version on a tree-derived row");
   // The merged cache finds the fresh page by title on the next keystroke.
   assert.equal(adapter.searchLocal(cache.read("wiki"), "release conven").length, 1);
 }
@@ -3457,38 +3530,36 @@ console.log("createWikiAdapter searchServer: ok");
 console.log("refreshReferenceKind server-only wiki match: ok");
 
 // ---------------------------------------------------------------------------
-// createWikiAdapter: warmup (search-seeded, tree-completed)
+// createWikiAdapter: warmup (space-listed, tree-completed)
 // ---------------------------------------------------------------------------
 
 {
-  // The recorded warmup decision: one generic seed search (bounded at the
-  // API max), then one tree per distinct hit space, whose items write to
-  // the cache per space with complete metadata.
-  const { client, searchCalls, treeCalls } = fakeWikiClient({
-    hits: [
-      { id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" },
-      { id: ISO_IT_ID, space_slug: "iso-27001-dokumente", title: "IT-Sicherheitskonzept" },
-    ],
+  // The recorded warmup decision, updated: the space listing exists on the
+  // typed interface (listKnowledgeSpaces), so the "no space-listing verb"
+  // premise drops and the warmup enumerates the readable spaces directly
+  // instead of the old search-seeded probe, then writes one tree per space
+  // (versionless rows; the cap keeps each space's write bounded).
+  const { caller, spaceCalls, treeCalls } = fakeWikiCaller({
+    spaces: ["eng", "iso-27001-dokumente"],
     trees: {
       eng: engTree(),
-      "iso-27001-dokumente": [wikiNode(ISO_IT_ID, "it-sicherheitskonzept", "IT-Sicherheitskonzept", { latest_version: 2 })],
+      "iso-27001-dokumente": [wikiNode(ISO_IT_ID, "it-sicherheitskonzept", "IT-Sicherheitskonzept")],
     },
   });
-  const adapter = createWikiAdapter({ createClient: async () => client });
+  const adapter = createWikiAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   await adapter.warmup(cache);
-  assert.deepEqual(searchCalls, [
-    { query: WARMUP_WIKI_SEED_QUERY, limit: WARMUP_WIKI_SEARCH_LIMIT },
-  ]);
-  assert.deepEqual(treeCalls, ["eng", "iso-27001-dokumente"], "one tree per distinct seed-hit space");
+  assert.deepEqual(spaceCalls, [1], "one space listing");
+  assert.deepEqual(treeCalls, ["eng", "iso-27001-dokumente"], "one tree per listed space");
   assert.deepEqual(
     cache.read("wiki").map((e) => e.key),
-    ["eng/process/pr-conventions", "iso-27001-dokumente/it-sicherheitskonzept"],
+    ["eng/process", "eng/process/pr-conventions", "iso-27001-dokumente/it-sicherheitskonzept"],
+    "every slim-tree node lands (folders included; resolution discriminates)",
   );
   const first = cache.read("wiki")[0];
   assert.equal(first?.space, "eng");
-  assert.equal(first?.path, "process/pr-conventions");
-  assert.equal(first?.version, 12);
+  assert.equal(first?.path, "process");
+  assert.equal(first?.version, undefined, "no version: it loads lazily from the node read");
   assert.equal(cache.fetchedAt("wiki") !== null, true);
 
   // The warmup write is capped per space (MAX_WIKI_ITEMS_PER_SPACE), in
@@ -3496,11 +3567,11 @@ console.log("refreshReferenceKind server-only wiki match: ok");
   const many: WikiTreeNode[] = Array.from({ length: 600 }, (_, i) =>
     wikiNode(`00000000-0000-4000-8000-${String(i).padStart(12, "0")}`, `page-${i}`, `Page ${i}`),
   );
-  const { client: big } = fakeWikiClient({
-    hits: [{ id: "00000000-0000-4000-8000-000000000000", space_slug: "big", title: "Page 0" }],
+  const big = fakeWikiCaller({
+    spaces: ["big"],
     trees: { big: many },
   });
-  const bigAdapter = createWikiAdapter({ createClient: async () => big });
+  const bigAdapter = createWikiAdapter({ createInterface: async () => interfaceOverCaller(big.caller) });
   const bigCache = createInMemoryReferenceCache();
   await bigAdapter.warmup(bigCache);
   assert.equal(bigCache.read("wiki").length, MAX_WIKI_ITEMS_PER_SPACE);
@@ -3510,88 +3581,68 @@ console.log("refreshReferenceKind server-only wiki match: ok");
     "tree order is kept within the cap",
   );
 
-  // Abort after the seed search: no tree fetches, no writes.
+  // Abort right after the space listing: no tree fetches, no writes.
   const controller = new AbortController();
-  const abortSearches: Array<{ query: string; limit?: number }> = [];
-  const aborting = {
-    mcpWikiSearch: async (input: { query: string; limit?: number }) => {
-      abortSearches.push({ query: input.query, limit: input.limit });
-      controller.abort(); // abort while the seed search resolves
-      return { items: [{ id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" }] };
+  const abortListings: number[] = [];
+  const { caller: abortCaller } = fakeAuraCaller({
+    listKnowledgeSpaces: () => {
+      abortListings.push(1);
+      controller.abort(); // abort while the listing resolves
+      return { items: [{ id: "space-eng", slug: "eng", title: "eng" }] };
     },
-    getKnowledgeTree: async () => {
-      throw new Error("no tree should be fetched");
-    },
-    getKnowledgeNode: async () => {
-      throw new Error("not used here");
-    },
-    getKnowledgeNodeByPath: async () => {
-      throw new Error("not used here");
-    },
-  };
-  const abortAdapter = createWikiAdapter({ createClient: async () => aborting });
+  });
+  const abortAdapter = createWikiAdapter({ createInterface: async () => interfaceOverCaller(abortCaller) });
   const abortCache = createInMemoryReferenceCache();
   await abortAdapter.warmup(abortCache, { signal: controller.signal });
   assert.deepEqual(abortCache.read("wiki"), []);
-  assert.equal(abortSearches.length, 1);
+  assert.equal(abortListings.length, 1);
 
   // Abort between spaces: the in-flight space's already-received tree
   // still lands (the artifact warmup's between-pages precedent), and the
   // NEXT space is never fetched.
   const controller2 = new AbortController();
-  const treeSlugs: string[] = [];
-  const staggered = {
-    mcpWikiSearch: async () => ({
-      items: [
-        { id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" },
-        { id: ISO_IT_ID, space_slug: "iso-27001-dokumente", title: "IT-Sicherheitskonzept" },
-        { id: "55555555-5555-4555-8555-555555555555", space_slug: "third", title: "Third space page" },
-      ],
-    }),
-    getKnowledgeTree: async (slug: string) => {
-      treeSlugs.push(slug);
-      if (slug === "iso-27001-dokumente") controller2.abort(); // abort during the second tree
-      const id = slug === "eng" ? ENG_PR_ID : slug === "iso-27001-dokumente" ? ISO_IT_ID : "55555555-5555-4555-8555-555555555555";
-      return { nodes: [wikiNode(id, "doc", "Doc")] };
+  const staggered = fakeWikiCaller({
+    spaces: ["eng", "iso-27001-dokumente", "third"],
+    trees: {
+      eng: [wikiNode(ENG_PR_ID, "doc", "Doc")],
+      "iso-27001-dokumente": [wikiNode(ISO_IT_ID, "doc", "Doc")],
+      third: [wikiNode("55555555-5555-4555-8555-555555555555", "doc", "Doc")],
     },
-    getKnowledgeNode: async () => {
-      throw new Error("not used here");
-    },
-    getKnowledgeNodeByPath: async () => {
-      throw new Error("not used here");
-    },
+  });
+  // Wrap the tree handler to abort during the second space's tree.
+  const staggeredTree = staggered.caller.callTool;
+  staggered.caller.callTool = async (tool, args) => {
+    if (tool === "getKnowledgeTree" && args.slug === "iso-27001-dokumente") controller2.abort();
+    return staggeredTree(tool, args);
   };
-  const staggeredAdapter = createWikiAdapter({ createClient: async () => staggered });
+  const staggeredAdapter = createWikiAdapter({ createInterface: async () => interfaceOverCaller(staggered.caller) });
   const staggeredCache = createInMemoryReferenceCache();
   await staggeredAdapter.warmup(staggeredCache, { signal: controller2.signal });
-  assert.deepEqual(treeSlugs, ["eng", "iso-27001-dokumente"], "the third space is never fetched");
+  assert.deepEqual(staggered.treeCalls, ["eng", "iso-27001-dokumente"], "the third space is never fetched");
   assert.deepEqual(
     staggeredCache.read("wiki").map((e) => e.key),
     ["eng/doc", "iso-27001-dokumente/doc"],
     "both in-flight trees landed their writes",
   );
 
-  // A failed seed search: no tree calls, no write, warmup resolves.
-  const { client: searchFail, treeCalls: searchFailTrees } = fakeWikiClient({ hits: [], trees: {}, failSearch: true });
-  const searchFailAdapter = createWikiAdapter({ createClient: async () => searchFail });
-  const searchFailCache = createInMemoryReferenceCache();
-  await searchFailAdapter.warmup(searchFailCache);
-  assert.deepEqual(searchFailTrees, []);
-  assert.deepEqual(searchFailCache.read("wiki"), []);
+  // A failed space listing: no tree calls, no write, warmup resolves.
+  const { caller: listingFail, treeCalls: listingFailTrees } = fakeWikiCaller({ spaces: [], trees: {}, failSpaces: true });
+  const listingFailAdapter = createWikiAdapter({ createInterface: async () => interfaceOverCaller(listingFail) });
+  const listingFailCache = createInMemoryReferenceCache();
+  await listingFailAdapter.warmup(listingFailCache);
+  assert.deepEqual(listingFailTrees, []);
+  assert.deepEqual(listingFailCache.read("wiki"), []);
 
   // A space whose tree fails mid-warmup: the other spaces still land.
-  const { client: treeFail } = fakeWikiClient({
-    hits: [
-      { id: ENG_PR_ID, space_slug: "eng", title: "PR conventions" },
-      { id: ISO_IT_ID, space_slug: "iso-27001-dokumente", title: "IT-Sicherheitskonzept" },
-    ],
+  const { caller: treeFail } = fakeWikiCaller({
+    spaces: ["eng", "iso-27001-dokumente"],
     trees: {
       eng: engTree(),
       "iso-27001-dokumente": [wikiNode(ISO_IT_ID, "it-sicherheitskonzept", "IT-Sicherheitskonzept")],
     },
     failTrees: ["eng"],
   });
-  const treeFailAdapter = createWikiAdapter({ createClient: async () => treeFail });
+  const treeFailAdapter = createWikiAdapter({ createInterface: async () => interfaceOverCaller(treeFail) });
   const treeFailCache = createInMemoryReferenceCache();
   await treeFailAdapter.warmup(treeFailCache);
   assert.deepEqual(
@@ -3600,13 +3651,9 @@ console.log("refreshReferenceKind server-only wiki match: ok");
     "the failing space is skipped, the healthy one lands",
   );
 
-  // Missing credentials: createDefaultAuraClient throws. Warmup no-ops
+  // Missing credentials: the interface construction rejects. Warmup no-ops
   // (resolves, empty cache, nothing thrown into the session).
-  const noCreds = createWikiAdapter({
-    createClient: async () => {
-      throw new Error("missing PAT");
-    },
-  });
+  const noCreds = createWikiAdapter({ createInterface: noopInterface });
   const emptyCache = createInMemoryReferenceCache();
   await noCreds.warmup(emptyCache);
   assert.deepEqual(emptyCache.read("wiki"), []);
@@ -3619,11 +3666,7 @@ console.log("createWikiAdapter warmup: ok");
 // ---------------------------------------------------------------------------
 
 {
-  const adapter = createWikiAdapter({
-    createClient: async () => {
-      throw new Error("no credentials in this test");
-    },
-  });
+  const adapter = createWikiAdapter({ createInterface: noopInterface });
 
   // The expansion shape: <wiki-ref space path version>title</wiki-ref>,
   // with the space, path, and version read from the item's metadata
@@ -3670,60 +3713,42 @@ console.log("createWikiAdapter formatExpansion: ok");
 
 // ---------------------------------------------------------------------------
 // createWikiAdapter: resolveFullToken (cache-first with the metadata gate,
-// then the shape-appropriate endpoint; unresolvable is null)
+// then the shape-appropriate node read whose lazily fetched version
+// completes the item; unresolvable is null)
 // ---------------------------------------------------------------------------
 
 {
-  // A counting client factory: a cache hit with complete metadata must
-  // build no client at all (no targeted fetch); only the fallbacks reach
+  // A counting interface factory: a cache hit with complete metadata must
+  // build no interface at all (no targeted fetch); only the fallbacks reach
   // Aura.
-  let clientBuilds = 0;
-  const byPathCalls: Array<[string, string]> = [];
-  const nodeCalls: string[] = [];
-  const treeCalls: string[] = [];
+  let interfaceBuilds = 0;
+  const { caller, byPathCalls, nodeCalls, treeCalls } = fakeWikiCaller({
+    trees: {
+      eng: [
+        wikiNode("00000000-0000-4000-8000-00000000000f", "process", "Process", {
+          children: [wikiNode(ENG_PR_ID, "pr-conventions", "PR conventions")],
+        }),
+      ],
+    },
+    nodes: {
+      // Fresh node data: the version is NEWER than the tree's snapshot (the
+      // targeted fetch is the fresh authority; the tree supplies the path).
+      [ENG_PR_ID]: slimNodeRead(ENG_PR_ID, "pr-conventions", "PR conventions", 15, "eng"),
+      // A ghost node: resolvable by id, but absent from its space's tree
+      // (no derivable path).
+      "99999999-9999-4999-8999-999999999999": slimNodeRead("99999999-9999-4999-8999-999999999999", "ghost", "Ghost", 1, "eng"),
+    },
+    paths: {
+      "eng/process/pr-conventions": slimPathRead(ENG_PR_ID, "pr-conventions", "PR conventions", 12),
+      // The versionless tree row's page: the node read supplies the lazily
+      // loaded version.
+      "eng/process/qa-checklist": slimPathRead("0a1b0001-1111-4111-8111-111111111111", "qa-checklist", "QA checklist", 4),
+    },
+  });
   const adapter = createWikiAdapter({
-    createClient: async () => {
-      clientBuilds += 1;
-      return {
-        mcpWikiSearch: async () => ({ items: [] }),
-        getKnowledgeTree: async (slug: string) => {
-          treeCalls.push(slug);
-          if (slug === "eng") {
-            return {
-              nodes: [
-                wikiNode("00000000-0000-4000-8000-00000000000f", "process", "Process", {
-                  kind: "FOLDER",
-                  latest_version: 0,
-                  children: [wikiNode(ENG_PR_ID, "pr-conventions", "PR conventions", { latest_version: 12 })],
-                }),
-              ],
-            };
-          }
-          throw new Error("404 no space");
-        },
-        getKnowledgeNode: async (uuid: string) => {
-          nodeCalls.push(uuid);
-          if (uuid === ENG_PR_ID) {
-            // Fresh node data: the version is NEWER than the memoized
- // tree's (the targeted fetch is the fresh authority; the tree supplies
-            // the path).
-            return { id: uuid, slug: "pr-conventions", title: "PR conventions", latest_version: 15, space_slug: "eng" };
-          }
-          if (uuid === "99999999-9999-4999-8999-999999999999") {
-            // A ghost node: resolvable by id, but absent from its space's
-            // tree (no derivable path).
-            return { id: uuid, slug: "ghost", title: "Ghost", latest_version: 1, space_slug: "eng" };
-          }
-          throw new Error("404 not found");
-        },
-        getKnowledgeNodeByPath: async (slug: string, path: string) => {
-          byPathCalls.push([slug, path]);
-          if (slug === "eng" && path === "process/pr-conventions") {
-            return { id: ENG_PR_ID, slug: "pr-conventions", title: "PR conventions", latest_version: 12 };
-          }
-          throw new Error("404 not found");
-        },
-      };
+    createInterface: async () => {
+      interfaceBuilds += 1;
+      return interfaceOverCaller(caller);
     },
   });
   const cache = createInMemoryReferenceCache(() => 5000);
@@ -3738,26 +3763,34 @@ console.log("createWikiAdapter formatExpansion: ok");
   };
   cache.write("wiki", [
     cachedOverview,
-    // A metadata-less cached row (an older or corrupted entry): present in
-    // the cache but incomplete, so resolution must not stop at it.
-    { kind: "wiki", id: "0a1b0001-1111-4111-8111-111111111111", key: "eng/process/qa-checklist", title: "QA checklist" },
+    // A versionless tree row (the slim shape: identity known, version
+    // lazy): incomplete metadata, so resolution falls through to the node
+    // read whose version the expansion needs.
+    {
+      kind: "wiki",
+      id: "0a1b0001-1111-4111-8111-111111111111",
+      key: "eng/process/qa-checklist",
+      title: "QA checklist",
+      space: "eng",
+      path: "process/qa-checklist",
+    },
   ]);
 
   // Path-form cache hit (case-insensitive key): resolved from the cached
-  // metadata, no client built, no targeted fetch; the entry comes back as
-  // the cache row it is (fetchedAt stamp included).
+  // metadata, no interface built, no targeted fetch; the entry comes back
+  // as the cache row it is (fetchedAt stamp included).
   assert.deepEqual(
     await adapter.resolveFullToken("ISO-27001-DOKUMENTE/OVERVIEW", cache),
     { ...cachedOverview, fetchedAt: 5000 },
   );
-  assert.equal(clientBuilds, 0, "a cache hit builds no client");
+  assert.equal(interfaceBuilds, 0, "a cache hit builds no interface");
 
   // Uuid-form cache hit (by id, case-insensitive): same, no fetch.
   assert.deepEqual(
     await adapter.resolveFullToken("77E00001-1111-4111-8111-111111111111", cache),
     { ...cachedOverview, fetchedAt: 5000 },
   );
-  assert.equal(clientBuilds, 0);
+  assert.equal(interfaceBuilds, 0);
 
   // Path-form cache miss: the targeted getKnowledgeNodeByPath(space, path)
   // resolves, the item built from the response (id, title, version) plus
@@ -3775,7 +3808,25 @@ console.log("createWikiAdapter formatExpansion: ok");
     },
   );
   assert.deepEqual(byPathCalls, [["eng", "process/pr-conventions"]]);
-  assert.equal(clientBuilds, 1, "the cache-miss fallback built exactly one client");
+  assert.equal(interfaceBuilds, 1, "the cache-miss fallback built exactly one interface");
+
+  // The versionless tree row falls through to the node read, whose lazily
+  // fetched version completes the item: the wiki mention's version comes
+  // from the node read, never from the versionless cache row.
+  assert.deepEqual(
+    await adapter.resolveFullToken("eng/process/qa-checklist", cache),
+    {
+      kind: "wiki",
+      id: "0a1b0001-1111-4111-8111-111111111111",
+      key: "eng/process/qa-checklist",
+      title: "QA checklist",
+      space: "eng",
+      path: "process/qa-checklist",
+      version: 4,
+    },
+    "the lazy version: the node read supplies what the slim tree does not",
+  );
+  assert.deepEqual(byPathCalls[byPathCalls.length - 1], ["eng", "process/qa-checklist"]);
 
   // Uuid-form cache miss: getKnowledgeNode(uuid) supplies the space, the
   // fresh title, and the fresh version; the space's tree (memoized or
@@ -3795,13 +3846,7 @@ console.log("createWikiAdapter formatExpansion: ok");
   );
   assert.deepEqual(nodeCalls, [ENG_PR_ID]);
   assert.deepEqual(treeCalls, ["eng"], "the space's tree fetched on first touch");
-  assert.equal(clientBuilds, 2);
-
-  // A cached row lacking the metadata falls back to the targeted fetch (a
-  // half-metadata row must not expand with missing attributes); the
-  // endpoint 404s, so the mention stays as typed.
-  assert.equal(await adapter.resolveFullToken("eng/process/qa-checklist", cache), null);
-  assert.deepEqual(byPathCalls[byPathCalls.length - 1], ["eng", "process/qa-checklist"]);
+  assert.equal(interfaceBuilds, 3, "one build per fallback (miss, versionless row, uuid miss)");
 
   // A uuid whose node is absent from its space's tree: no derivable path,
   // null (a wrong path would be worse than no expansion).
@@ -3812,18 +3857,14 @@ console.log("createWikiAdapter formatExpansion: ok");
   assert.equal(await adapter.resolveFullToken("00000000-0000-4000-8000-000000000000", cache), null);
 
   // A bare space slug is neither the path form (no slash) nor the uuid
-  // form: null, with no client built for it.
-  const buildsBefore = clientBuilds;
+  // form: null, with no interface built for it.
+  const buildsBefore = interfaceBuilds;
   assert.equal(await adapter.resolveFullToken("eng", cache), null);
-  assert.equal(clientBuilds, buildsBefore, "the invalid form builds no client");
+  assert.equal(interfaceBuilds, buildsBefore, "the invalid form builds no interface");
 
   // Targeted fetch throws (network failure, missing credentials): null,
   // and nothing throws into the session.
-  const noCreds = createWikiAdapter({
-    createClient: async () => {
-      throw new Error("missing PAT");
-    },
-  });
+  const noCreds = createWikiAdapter({ createInterface: noopInterface });
   const emptyCache = createInMemoryReferenceCache();
   assert.equal(await noCreds.resolveFullToken("eng/process/pr-conventions", emptyCache), null);
   assert.equal(await noCreds.resolveFullToken(ENG_PR_ID, emptyCache), null);
@@ -3837,34 +3878,26 @@ console.log("createWikiAdapter resolveFullToken: ok");
 // ---------------------------------------------------------------------------
 
 {
-  let clientBuilds = 0;
-  const adapter = createWikiAdapter({
-    createClient: async () => {
-      clientBuilds += 1;
-      return {
-        mcpWikiSearch: async () => ({ items: [] }),
-        getKnowledgeTree: async () => ({
-          nodes: [
-            wikiNode("00000000-0000-4000-8000-00000000000f", "process", "Process", {
-              kind: "FOLDER",
-              latest_version: 0,
-              children: [wikiNode(ENG_PR_ID, "pr-conventions", "PR conventions", { latest_version: 12 })],
-            }),
-          ],
+  let interfaceBuilds = 0;
+  const { caller } = fakeWikiCaller({
+    trees: {
+      eng: [
+        wikiNode("00000000-0000-4000-8000-00000000000f", "process", "Process", {
+          children: [wikiNode(ENG_PR_ID, "pr-conventions", "PR conventions")],
         }),
-        getKnowledgeNode: async (uuid: string) => {
-          if (uuid === ENG_PR_ID) {
-            return { id: uuid, slug: "pr-conventions", title: "PR conventions", latest_version: 12, space_slug: "eng" };
-          }
-          throw new Error("404 not found");
-        },
-        getKnowledgeNodeByPath: async (slug: string, path: string) => {
-          if (slug === "eng" && path === "process/qa-checklist") {
-            return { id: "11111111-1111-4111-8111-111111111111", slug: "qa-checklist", title: "QA & `<review>` checklist", latest_version: 4 };
-          }
-          throw new Error("404 not found");
-        },
-      };
+      ],
+    },
+    nodes: {
+      [ENG_PR_ID]: slimNodeRead(ENG_PR_ID, "pr-conventions", "PR conventions", 12, "eng"),
+    },
+    paths: {
+      "eng/process/qa-checklist": slimPathRead("11111111-1111-4111-8111-111111111111", "qa-checklist", "QA & `<review>` checklist", 4),
+    },
+  });
+  const adapter = createWikiAdapter({
+    createInterface: async () => {
+      interfaceBuilds += 1;
+      return interfaceOverCaller(caller);
     },
   });
   const registry = createReferenceRegistry([adapter]);
@@ -3889,28 +3922,28 @@ console.log("createWikiAdapter resolveFullToken: ok");
   const cachedTag = '<wiki-ref space="eng" path="process/pr-conventions" version="12">PR conventions</wiki-ref>';
 
   // Both identity forms of the SAME page expand to the identical canonical
-  // tag: the path form from the cached metadata (no client built), the
+  // tag: the path form from the cached metadata (no interface built), the
   // uuid form from the node + tree join.
   assert.equal(
     await expandReferenceMentions("see #wiki:eng/process/pr-conventions today", registry, lookup),
     `see ${cachedTag} today`,
   );
-  assert.equal(clientBuilds, 0, "the cached path form resolved without a fetch");
+  assert.equal(interfaceBuilds, 0, "the cached path form resolved without a fetch");
   assert.equal(
     await expandReferenceMentions("see #wiki:a36cd327-2e9b-47cd-9f4c-17bea059546a today", registry, lookup),
     `see ${cachedTag} today`,
     "the uuid form of the same page produces the identical expansion",
   );
-  assert.equal(clientBuilds, 0, "the cached uuid form resolved without a fetch");
+  assert.equal(interfaceBuilds, 0, "the cached uuid form resolved without a fetch");
 
-  // A cache miss through the path form: the by-path fetch resolves, with
-  // the version and title from the fetch and the XML-special title
-  // escaped as element text.
+  // A cache miss through the path form: the by-path node read resolves, with
+  // the lazily fetched version and title from the read and the XML-special
+  // title escaped as element text.
   assert.equal(
     await expandReferenceMentions("also #wiki:eng/process/qa-checklist please", registry, lookup),
     'also <wiki-ref space="eng" path="process/qa-checklist" version="4">QA &amp; `&lt;review>` checklist</wiki-ref> please',
   );
-  assert.equal(clientBuilds, 1);
+  assert.equal(interfaceBuilds, 1);
 
   // Mixed known and unknown mentions: each known one expands, the unknown
   // stays as typed.
@@ -3922,7 +3955,7 @@ console.log("createWikiAdapter resolveFullToken: ok");
     ),
     `compare ${cachedTag} with #wiki:legal-qa/missing and ${cachedTag} again`,
   );
-  assert.equal(clientBuilds, 2, "the unknown mention resolved once (a miss) and duplicates shared it");
+  assert.equal(interfaceBuilds, 2, "the unknown mention resolved once (a miss) and duplicates shared it");
 
   // Mentions at the start and the end of the prompt.
   assert.equal(
@@ -3944,10 +3977,109 @@ console.log("createWikiAdapter resolveFullToken: ok");
     await expandReferenceMentions("fix #wiki:eng/process/pr-conventions", registry, null),
     "fix #wiki:eng/process/pr-conventions",
   );
-  assert.equal(clientBuilds, 2, "no further client was built under the null lookup");
+  assert.equal(interfaceBuilds, 2, "no further interface was built under the null lookup");
 }
 
 console.log("wiki expansion end-to-end: ok");
+
+// ---------------------------------------------------------------------------
+// Degraded tool paths (the interface self-check's unavailable set): the
+// affected mention kind degrades to its cache-only answers: searches fail
+// fast and write nothing, resolutions stay cache-first, warmup no-ops, and
+// the pane never blocks (never a render lag, never a thrown pane).
+// ---------------------------------------------------------------------------
+
+{
+  // Core drift: the live server no longer carries the `q` parameter the
+  // wrapper sends, so the interface's self-check marks the listTasks path
+  // unavailable and its calls fail fast. The task adapter maps that onto
+  // its cache-only answers.
+  const drifted = SHIPPED_AURA_MCP_TOOLS.map(toLiveTool).map((tool) => {
+    if (tool.name !== "listTasks") return tool;
+    const schema = tool.inputSchema as { properties: Record<string, unknown> };
+    const properties = Object.fromEntries(
+      Object.entries(schema.properties).filter(([name]) => name !== "q"),
+    );
+    return { ...tool, inputSchema: { type: "object", properties } };
+  });
+  let callToolHits = 0;
+  const { caller } = fakeAuraCaller({
+    listTasks: () => {
+      callToolHits += 1;
+      return { items: [], pagination: {} };
+    },
+  });
+  caller.listTools = async () => drifted;
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
+
+  // The search fails fast: no call reaches the server, so the SWR merge
+  // gets nothing fresh.
+  assert.deepEqual(await adapter.searchServer("x"), []);
+  assert.equal(callToolHits, 0, "an unavailable path calls nothing");
+
+  // The write-through writes nothing: the cache (items and stamp) stays.
+  const cache = createInMemoryReferenceCache(() => 4242);
+  cache.write("task", taskItems());
+  const stamp = cache.fetchedAt("task");
+  await refreshReferenceKind(cache, adapter, "42");
+  assert.equal(cache.fetchedAt("task"), stamp, "no write, no stamp on an unavailable path");
+
+  // Resolution stays cache-first: the cached row resolves without a
+  // fetch; an uncached key fails fast to null (the mention stays as
+  // typed).
+  assert.equal((await adapter.resolveFullToken("AURA-42", cache))?.key, "AURA-42");
+  assert.equal(callToolHits, 0, "the cached resolution never reached the server");
+  assert.equal(await adapter.resolveFullToken("AURA-999", cache), null, "the uncached key fails fast");
+
+  // Warmup no-ops without throwing, leaving the cache alone.
+  await adapter.warmup(cache);
+  assert.equal(cache.read("task").length, taskItems().length, "warmup left the cache alone");
+
+  // The pane never blocks: with the degraded kind wired, a typed token
+  // renders the cached rows instantly (and fires a background refresh
+  // that harmlessly writes nothing).
+  const registry = createReferenceRegistry([adapter]);
+  const current = fakeCurrent();
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache);
+  const suggestions = await suggestAt(provider, "#task:42", 8);
+  assert.deepEqual(suggestions?.items.map((i) => i.value), ["#task:AURA-42", "#task:AURA-424"]);
+  await settle();
+  assert.equal(callToolHits, 0, "the degraded background refresh also calls nothing");
+}
+
+console.log("degraded task path renders from cache, never blocks: ok");
+
+{
+  // The whole interface unavailable (missing credentials: the construction
+  // rejects): every kind still renders the persisted cache instantly and
+  // never blocks on the doomed lookups, including the wiki kind's
+  // versionless tree rows (they render without any version).
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", taskItems());
+  cache.write("wiki", [
+    {
+      kind: "wiki",
+      id: ENG_PR_ID,
+      key: "eng/process/pr-conventions",
+      title: "PR conventions",
+      space: "eng",
+      path: "process/pr-conventions",
+    },
+  ]);
+  const registry = createReferenceRegistry([
+    createTaskAdapter({ createInterface: noopInterface }),
+    createWikiAdapter({ createInterface: noopInterface }),
+  ]);
+  const current = fakeCurrent();
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache);
+  const tasks = await suggestAt(provider, "#task:42", 8);
+  assert.deepEqual(tasks?.items.map((i) => i.value), ["#task:AURA-42", "#task:AURA-424"]);
+  const wiki = await suggestAt(provider, "#wiki:eng/", 9);
+  assert.deepEqual(wiki?.items.map((i) => i.value), ["#wiki:eng/process/pr-conventions"]);
+}
+
+console.log("unavailable interface (no credentials): cache-only pane for every kind: ok");
+
 
 // ---------------------------------------------------------------------------
 // REFERENCE_INSTRUCTION grows the wiki-ref shape (the one-block-documents-
@@ -3988,10 +4120,10 @@ console.log("factory: ok");
 {
   // A registry with all four production adapters, mirroring the factory.
   const registry = createReferenceRegistry([
-    createTaskAdapter({ createClient: noopClient }),
+    createTaskAdapter({ createInterface: noopInterface }),
     createRuleAdapter({ getRules: () => [] }),
-    createArtifactAdapter({ createClient: noopClient }),
-    createWikiAdapter({ createClient: noopClient }),
+    createArtifactAdapter({ createInterface: noopInterface }),
+    createWikiAdapter({ createInterface: noopInterface }),
   ]);
   const current = fakeCurrent();
   const provider = createReferenceAutocompleteProvider(current.provider, registry, () => null);
@@ -4049,5 +4181,311 @@ console.log("factory: ok");
 }
 
 console.log("kind menu: bare # offers task/artifact/wiki, rule hidden: ok");
+
+// ---------------------------------------------------------------------------
+// The production construction path (session_start): the real loader over the
+// fake keyring/settings fixtures, the default caller, a reachable fake
+// aura-mcp-dev instance
+//
+// Regression guard for the construction blocker: the factory once built
+// `createAuraMcpInterface({ notify })` with no credentials, so the default
+// caller resolved the connection from its (empty) arguments, threw on the
+// missing PAT, and the rejection latched `clientAvailable` false for every
+// session: no warmup, no SWR refresh, every mention cache-only for every
+// user. The suite stayed green because every other test injects a fake
+// caller at the adapter seam. This block drives the factory's own
+// construction path with NO injected caller anywhere: the real
+// `loadAuraMcpCredentials` runs over its fixture seams (a tmp settings file
+// plus a fake keyring), the real pi-mcp client connects over real loopback
+// HTTP to a reachable fake aura-mcp-dev, and the LOADED credentials must
+// reach the wire and light the whole session up (warmups, gates, renders).
+// ---------------------------------------------------------------------------
+
+/** One recorded request at the fake aura-mcp-dev instance: the JSON-RPC
+ *  method, the tool name and arguments of a tools/call, and the auth header
+ *  the production caller sent. */
+interface FakeInstanceCall {
+  method: string | undefined;
+  tool: string | undefined;
+  args: Record<string, unknown> | undefined;
+  authorization: string | undefined;
+  url: string | undefined;
+}
+
+/** A minimal recording fake keyring: the loader seam's keyring fixture (the
+ *  same shape the aura-mcp-client credential-seam tests pass). */
+function recordingFakeKeyring(pat: string | null) {
+  const calls: Array<{ service: string; name: string }> = [];
+  return {
+    calls,
+    async getSecret(key: { service: string; name: string }): Promise<string | null> {
+      calls.push({ ...key });
+      return pat;
+    },
+  } as never;
+}
+
+/** A reachable stand-in for the live aura-mcp-dev server: the minimal
+ *  streamable-HTTP MCP handshake (initialize, notifications/initialized,
+ *  tools/list) plus the tool calls the session exercises, served over real
+ *  loopback HTTP so the production construction path (the default caller
+ *  built from the loaded credentials) connects end to end. Notifications
+ *  get 202, GET gets 405 (no server-to-client stream), the shipped tool
+ *  contracts are served for the self-check (drift-free), and unknown tools
+ *  get a JSON-RPC error (an application failure, the adapter-degrade
+ *  shape). */
+async function fakeAuraInstance(handlers: Record<string, (args: Record<string, unknown>) => unknown>) {
+  const calls: FakeInstanceCall[] = [];
+  const { createServer } = await import("node:http");
+  const server = createServer((req, res) => {
+    if (req.method === "GET") {
+      res.writeHead(405);
+      res.end();
+      return;
+    }
+    if (req.method === "DELETE") {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk: Buffer) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      let message: {
+        id?: unknown;
+        method?: string;
+        params?: { protocolVersion?: string; name?: string; arguments?: Record<string, unknown> };
+      } = {};
+      try {
+        message = JSON.parse(body) as typeof message;
+      } catch {
+        // Malformed body: handled by the fallthrough error reply below.
+      }
+      calls.push({
+        method: message.method,
+        tool: message.params?.name,
+        args: message.params?.arguments,
+        authorization: req.headers.authorization,
+        url: req.url,
+      });
+      const json = (payload: unknown) => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, ...payload }));
+      };
+      if (message.id === undefined) {
+        // A notification: acknowledged with 202, no reply body.
+        res.writeHead(202);
+        res.end();
+        return;
+      }
+      if (message.method === "initialize") {
+        json({
+          result: {
+            protocolVersion: message.params?.protocolVersion,
+            capabilities: {},
+            serverInfo: { name: "aura-mcp-dev", version: "test-instance" },
+          },
+        });
+        return;
+      }
+      if (message.method === "tools/list") {
+        json({ result: { tools: SHIPPED_AURA_MCP_TOOLS.map(toLiveTool) } });
+        return;
+      }
+      if (message.method === "tools/call") {
+        const handler = handlers[message.params?.name ?? ""];
+        if (handler === undefined) {
+          json({ error: { code: -32601, message: `no fake handler for ${message.params?.name}` } });
+          return;
+        }
+        json({ result: { content: [{ type: "text", text: JSON.stringify(handler(message.params?.arguments ?? {})) }] } });
+        return;
+      }
+      json({ error: { code: -32601, message: `method not found: ${message.method}` } });
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  return {
+    calls,
+    baseUrl: `http://127.0.0.1:${port}/api`,
+    close: async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      server.closeAllConnections();
+    },
+  };
+}
+
+/** Wait until the fake instance has recorded at least the expected tool
+ *  calls and the in-flight chains drained (macrotask hops), so the
+ *  fire-and-forget session warmups landed before the assertions read the
+ *  cache. On a broken construction the warmups never land; the loop just
+ *  exhausts and the assertions report the shortfall. */
+async function untilWarmupLanded(calls: FakeInstanceCall[]): Promise<void> {
+  const minima: Array<[string, number]> = [
+    ["listTasks", 1],
+    ["listArtifacts", 1],
+    ["listKnowledgeSpaces", 1],
+    ["getKnowledgeTree", 2],
+  ];
+  for (let hop = 0; hop < 500; hop++) {
+    const landed = minima.every(([tool, count]) => calls.filter((call) => call.tool === tool).length >= count);
+    if (landed) break;
+    await settle();
+  }
+  await settle();
+  await settle();
+}
+
+{
+  // The session's data: three tasks, two artifacts, two knowledge spaces
+  // (one tree nested), one task reachable only by the targeted by-key read.
+  const tasks = [
+    { id: "t-1", human_key: "AURA-11", title: "Login bug", status: "OPEN" },
+    { id: "t-2", human_key: "AURA-12", title: "Cache race", status: "IN_REVIEW" },
+    { id: "t-3", human_key: "AURA-13", title: "Wiki walk", status: "DONE" },
+  ];
+  const artifacts = [
+    { id: "9f3c2e8a-1111-4222-8333-444444444444", title: "Q3 plan", latest_version: 3, kind: "PLAN" },
+    { id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", title: "Review note", latest_version: 1, kind: "OPINION" },
+  ];
+  const instance = await fakeAuraInstance({
+    // A short page (< the warmup page size): pagination stops after page 1.
+    listTasks: () => ({ items: tasks }),
+    listArtifacts: () => ({ items: artifacts }),
+    listKnowledgeSpaces: () => ({ items: [{ slug: "eng", title: "Engineering" }, { slug: "legal-qa", title: "Legal QA" }] }),
+    getKnowledgeTree: (args) =>
+      args.slug === "eng"
+        ? {
+            nodes: [
+              { id: "n-process", slug: "process", title: "Process", children: [{ id: "n-pr", slug: "pr-conventions", title: "PR conventions" }] },
+              { id: "n-guides", slug: "guides", title: "Guides" },
+            ],
+          }
+        : { nodes: [{ id: "n-qa", slug: "faq", title: "FAQ" }] },
+    getTaskByHumanKey: (args) => {
+      if (args.human_key === "AURA-777") return { id: "t-777", human_key: "AURA-777", title: "Late task", status: "OPEN" };
+      throw new Error(`unknown task ${String(args.human_key)}`);
+    },
+  });
+
+  // The loader-seam fixtures: a tmp settings file whose aura.baseUrl points
+  // at the reachable fake instance, and a recording fake keyring holding the
+  // PAT. The REAL loadAuraMcpCredentials runs over these seams.
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "aura-refs-construction-"));
+  const settingsPath = join(dir, "settings.json");
+  writeFileSync(settingsPath, JSON.stringify({ aura: { baseUrl: instance.baseUrl } }), "utf8");
+  const keyring = recordingFakeKeyring("pat-construction-test");
+
+  // The unit-test cache fake (never the real sqlite store or real settings).
+  const cache = createInMemoryReferenceCache();
+
+  const notifications: Array<{ message: string; type?: string }> = [];
+  // The factory registers a provider FACTORY (`(current) => provider`): it is
+  // handed pi's built-in provider and returns the overlay. Capture the
+  // factory, build the overlay over the established fake built-in provider.
+  let providerFactory: ((current: unknown) => ReturnType<typeof createReferenceAutocompleteProvider>) | null = null;
+  const current = fakeCurrent();
+  const sessionHandlers: Record<string, (event: unknown, ctx: unknown) => Promise<unknown> | void> = {};
+  const fakePi = { on: (name: string, handler: never) => { (sessionHandlers as Record<string, unknown>)[name] = handler; } };
+  const ctx = {
+    cwd: dir,
+    ui: {
+      notify: (message: string, type?: "info" | "warning" | "error") => notifications.push({ message, type }),
+      addAutocompleteProvider: (factory: (current: unknown) => ReturnType<typeof createReferenceAutocompleteProvider>) => {
+        providerFactory = factory;
+      },
+    },
+  };
+
+  // The production factory with its two fixture seams: the credential read
+  // goes through the REAL loader (over the fake keyring/settings fixtures,
+  // NOT a fake caller) and the cache is the unit-test fake. No caller is
+  // injected anywhere: the construction builds the real default caller.
+  auraReferences(fakePi as never, {
+    loadCredentials: () => loadAuraMcpCredentials({ settingsPath, keyring }),
+    createCache: async () => ({ cache, shouldSkipWarmup: () => false }),
+  });
+
+  await sessionHandlers.session_start({}, ctx);
+
+  // The construction (and the warmups it feeds) run fire-and-forget inside
+  // session_start: wait until the session's tool calls landed on the fake
+  // instance before asserting on any of it.
+  await untilWarmupLanded(instance.calls);
+
+  // The real loader was consulted over its fixture seams.
+  assert.deepEqual(keyring.calls, [{ service: "aura", name: "pat" }], "the construction path consulted the real loader over the fake keyring fixture");
+
+  // The construction succeeded with the LOADED credentials: the default
+  // caller connected to the derived endpoint and the loaded PAT rode the
+  // production caller's Authorization header.
+  const initialize = instance.calls.find((call) => call.method === "initialize");
+  assert.notEqual(initialize, undefined, "the default caller connected (the initialize handshake reached the instance)");
+  assert.equal(initialize?.url, "/mcp", "the endpoint was derived from the loaded settings baseUrl");
+  assert.equal(initialize?.authorization, "Bearer pat-construction-test", "the loaded keyring PAT rode the production caller");
+  assert.equal(notifications.length, 0, "a reachable drift-free instance warns nothing at construction");
+
+  // Criterion 2 at this path: after the session's warmup over the reachable
+  // instance, the cache holds fresh rows for all three kinds, including wiki
+  // rows (the kind the old REST-era walk never populated).
+  assert.deepEqual(
+    cache.read("task").map((item) => `${item.key}:${item.status}`),
+    ["AURA-11:OPEN", "AURA-12:IN_REVIEW", "AURA-13:DONE"],
+    "task rows warmed from the reachable instance",
+  );
+  assert.deepEqual(
+    cache.read("artifact").map((item) => `${item.key}:${item.title}`),
+    artifacts.map((a) => `${a.id}:${a.title}`),
+    "artifact rows warmed from the reachable instance",
+  );
+  assert.deepEqual(
+    cache.read("wiki").map((item) => item.key),
+    ["eng/process", "eng/process/pr-conventions", "eng/guides", "legal-qa/faq"],
+    "wiki rows warmed from the slim trees of every listed space",
+  );
+  const wikiRow = cache.read("wiki").find((item) => item.key === "eng/process/pr-conventions");
+  assert.equal((wikiRow as { space?: string } | undefined)?.space, "eng", "the wiki row carries its space extra");
+  assert.equal((wikiRow as { path?: string } | undefined)?.path, "process/pr-conventions", "the wiki row carries its path extra");
+
+  // The warmup pages rode the corrected live wire contract (archived
+  // visibility, paging, sorting; the stale search/status keys are gone).
+  const warmupPage = instance.calls.find((call) => call.tool === "listTasks");
+  assert.deepEqual(warmupPage?.args, { archived: "all", limit: 100, page: 1, sort_by: "updated_at", sort_dir: "desc" });
+
+  // The expansion gate latched from the successful construction: a task
+  // mention the cache does not hold resolves through the targeted by-key
+  // read over the production interface (on the broken path the gate stays
+  // off and the mention stays as typed with no lookup at all).
+  const submitted = await sessionHandlers.input({ text: "see #task:AURA-777 later" }, ctx);
+  assert.deepEqual(submitted, {
+    action: "transform",
+    text: 'see <task-ref key="AURA-777" status="OPEN">Late task</task-ref> later',
+  }, "the construction success armed the per-mention resolution gate");
+
+  // Criterion 1 at this path: typing renders candidates instantly from the
+  // cache, never waiting on the network. The instance is CLOSED (the network
+  // is gone entirely) and all three kinds still render their warmed rows.
+  await instance.close();
+  const provider = providerFactory?.(current.provider);
+  assert.notEqual(provider, undefined, "the session registered its autocomplete provider");
+  const taskRender = await provider?.getSuggestions(["#task:login"], 0, 11, { signal: new AbortController().signal });
+  assert.deepEqual(taskRender?.items.map((item) => item.value), ["#task:AURA-11"], "tasks render from the cache with the network gone");
+  const artifactRender = await provider?.getSuggestions(["#artifact:q3"], 0, 12, { signal: new AbortController().signal });
+  assert.deepEqual(artifactRender?.items.map((item) => item.value), [`#artifact:${artifacts[0]?.id}`], "artifacts render from the cache with the network gone");
+  const wikiRender = await provider?.getSuggestions(["#wiki:eng/"], 0, 10, { signal: new AbortController().signal });
+  assert.deepEqual(
+    wikiRender?.items.map((item) => item.value),
+    ["#wiki:eng/process", "#wiki:eng/process/pr-conventions", "#wiki:eng/guides"],
+    "wiki renders from the cache with the network gone",
+  );
+
+  console.log("construction path: real loader over fixture seams, loaded credentials on the wire, warmup fills all three kinds, gate armed, cache-only render: ok");
+}
 
 console.log("\nall aura-references tests passed");
