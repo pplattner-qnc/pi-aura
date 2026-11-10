@@ -1,4 +1,4 @@
-# Aura Development Process — Overview
+# Aura Development Process: Overview
 
 This directory describes how work flows through Aura from a developer
 perspective. Each file covers one aspect of the process in enough detail for
@@ -6,16 +6,25 @@ an agent to act correctly within it.
 
 ## Source of truth
 
-The canonical process description lives in the Aura wiki:
+The canonical process description lives in the Aura wiki, in the
+way-of-working section that replaced the archived single article:
 
-> **`getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "prozesse/how-we-work-in-aura-a-practical-guide" })`**
->
-> Node ID: `2a6d4f32-5d33-47fb-b073-4ec6b04db637`
-> Space: `knowledge-hub` | Path: `prozesse/how-we-work-in-aura-a-practical-guide`
+> **`getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "way-of-working-and-structures/1-how-we-work-together-purpose-principles" })`**
 
-When in doubt about process rules, fetch the wiki article. The files here
-encode the operational knowledge an agent needs — the wiki article is the
-human-readable reference.
+The section covers one page per topic here:
+
+| Wiki page | Local file |
+|---|---|
+| `1-how-we-work-together-purpose-principles` | this overview |
+| `1-1-roles` | [roles.md](roles.md) |
+| `1-2-workflow-phases` | [workflow-phases.md](workflow-phases.md) |
+| `1-3-capacity-resourcing` | [capacity.md](capacity.md) |
+| `1-4-alignment-review-escalation` | [review-modes.md](review-modes.md), [escalation.md](escalation.md) |
+| `1-5-tooling-aura-jira-asana` | [integrations.md](integrations.md) |
+
+When in doubt about process rules, fetch the matching wiki page. The files
+here encode the operational knowledge an agent needs; the wiki pages are
+the human-readable reference.
 
 ## The workflow at a glance
 
@@ -38,9 +47,9 @@ Open → Refinement → Alignment → Development → Review → Deployment → 
 | File | What it covers |
 |---|---|
 | [workflow-phases.md](workflow-phases.md) | Detailed phase descriptions, gates, and transitions |
-| [roles.md](roles.md) | Owner, Contributor, Stakeholder — responsibilities and how to get assigned |
+| [roles.md](roles.md) | Owner, Contributor, Stakeholder: responsibilities and how to get assigned |
 | [capacity.md](capacity.md) | How capacity tracking works, rules for commitments |
-| [review-modes.md](review-modes.md) | Three review modes (async solo, sync multi-perspective, sync 1:1) |
+| [review-modes.md](review-modes.md) | Three review modes (async solo, sync multi-perspective, sync 1:1) and the opinions flow |
 | [escalation.md](escalation.md) | When and how to escalate, escalation paths |
 | [integrations.md](integrations.md) | How Aura, JIRA, and Asana fit together |
 
@@ -49,13 +58,15 @@ Open → Refinement → Alignment → Development → Review → Deployment → 
 1. **Aura is the source of truth.** Task status, plans, decisions, and
    documentation live in Aura. JIRA and Asana are mirrors.
 2. **Always update task status** when you complete work on a task. Use
-   `updateTask` with the appropriate status and `status_change_reason`.
+   `updateTask` with the appropriate status, and a `status_change_reason`
+   when one is required (skipped statuses, backward moves, rejected gates).
 3. **Record progress** with `recordTaskProgress` so the Aura Timeline
    reflects agent activity.
 4. **Async-first.** Decisions and feedback happen in Aura comments and
    artifacts, not in meetings. Document outcomes in Aura.
 5. **Search before creating.** Check for existing tasks, artifacts, and
    documents before creating new ones.
-6. **Respect gates.** Do not move a task past Alignment without stakeholder
-   approval. Do not move past Review without passing review.
+6. **Respect gates.** The Alignment and Review gates are formal sign-offs:
+   disciplines give `APPROVED` or `REJECTED` verdicts, and moving on past a
+   rejected gate requires a reason (`status_change_reason`).
 7. **Set `is_ai_generated: true`** on all comments posted by an agent.
