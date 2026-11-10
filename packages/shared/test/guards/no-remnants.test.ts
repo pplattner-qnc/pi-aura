@@ -1459,6 +1459,70 @@ describe("no-remnants guard: usecase resources current (code search)", () => {
   });
 });
 
+describe("no-remnants guard: usecase resources current (artifacts)", () => {
+  it("lists the live listArtifacts filters", () => {
+    const file = readUsecase("artifact-management.md");
+    assert.doesNotMatch(
+      file,
+      /pending_review/,
+      "the nonexistent pending_review filter should be gone",
+    );
+    assert.match(
+      file,
+      /opinion_requested/,
+      "the live opinion_requested filter should be documented",
+    );
+    assert.match(
+      file,
+      /broad_shared/,
+      "the ownership scopes should include broad_shared",
+    );
+  });
+
+  it("documents listArtifactTasks for task discovery from an artifact", () => {
+    const file = readUsecase("artifact-management.md");
+    assert.match(
+      file,
+      /listArtifactTasks/,
+      "the linked-tasks listing should be documented",
+    );
+    assert.match(
+      file,
+      /non-paginated|updated_at DESC/i,
+      "the linked-tasks listing's shape should be stated",
+    );
+  });
+
+  it("documents the whole-mode replace contract with expected-version", () => {
+    const file = readUsecase("artifact-management.md");
+    assert.match(
+      file,
+      /expected_version/,
+      "the expected_version merge-base parameter should be documented",
+    );
+    assert.match(
+      file,
+      /merge base/i,
+      "expected_version's merge-base meaning should be stated",
+    );
+    assert.match(
+      file,
+      /BASE_VERSION_REQUIRED/,
+      "the dirty-draft whole-mode requirement should be named",
+    );
+    assert.match(
+      file,
+      /confirm_full_replace/,
+      "the destructive-replace confirmation should be documented",
+    );
+    assert.match(
+      file,
+      /DESTRUCTIVE_WHOLE_REPLACE/,
+      "the rejection that demands confirmation should be named",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
