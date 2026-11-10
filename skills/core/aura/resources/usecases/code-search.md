@@ -1,8 +1,8 @@
 # Code Search
 
 > **⚠️ Prefer local repos.** Always use local copies of repositories over
-> Aura's code search. Local repos give you full access — codegraph, grep,
-> read, LSP, git history — with no network round-trips and no risk of stale
+> Aura's code search. Local repos give you full access (codegraph, grep,
+> read, LSP, git history) with no network round-trips and no risk of stale
 > indexes.
 >
 > If the repo you need is not available locally, **ask the user** before
@@ -42,11 +42,13 @@ code_search({
 **Parameters:**
 - `repo` (required) — Bitbucket repo slug (e.g. "aura", "anwalt-de-frontend")
 - `query` (required) — natural language description
-- `top_k` — number of results
-- `ref` — git ref (branch, tag, commit)
+- `top_k` — number of results (default 5)
 - `mode` — search mode (default: hybrid)
 - `filter_languages` — filter by programming language
 - `filter_paths` — filter by file path pattern
+
+There is no ref parameter: ref-scoped search (branch, tag, commit) is not
+available via MCP.
 
 **Results** include file path and line range. Always cite as
 `<file>:<start_line>-<end_line>`.
@@ -55,7 +57,7 @@ code_search({
 
 | Mode | Best for |
 |---|---|
-| `hybrid` | General use — combines semantic + keyword |
+| `hybrid` | General use: combines semantic + keyword |
 | `semantic` | Conceptual queries ("how does X work") |
 | `bm25` | Exact terms, identifiers, error messages |
 
@@ -114,10 +116,11 @@ Use this to discover callers, implementations, or related logic.
 
 ## Repository documentation
 
-Aura also indexes repository documentation:
+Aura also indexes repository documentation. Both arguments are required;
+`repo_slug` uses the "source/workspace/slug" format:
 
 ```
-mcpGetRepoDocument({ repo_slug: "aura", path: "docs/architecture.md" })
+mcpGetRepoDocument({ repo_slug: "bitbucket/anwaltde/aura", path: "docs/architecture.md" })
 ```
 
 ## Tips
@@ -125,5 +128,5 @@ mcpGetRepoDocument({ repo_slug: "aura", path: "docs/architecture.md" })
 1. **Ask the user which repo** if it's not clear from context.
 2. **Start with `code_search`**, then drill into files with `code_read_file`.
 3. **Use `filter_paths`** to narrow results (e.g. `filter_paths: ["src/server"]`).
-4. **Use `ref`** to search a specific branch or tag.
+4. **Use `mode: "bm25"`** for exact terms, identifiers, and error messages.
 5. **Cite results** as `file:start-end` for traceability.

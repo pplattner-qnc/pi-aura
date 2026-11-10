@@ -1420,6 +1420,45 @@ describe("no-remnants guard: usecase resources current (unified search)", () => 
   });
 });
 
+describe("no-remnants guard: usecase resources current (code search)", () => {
+  it("teaches no ref parameter", () => {
+    const file = readUsecase("code-search.md");
+    assert.doesNotMatch(
+      file,
+      /`ref`/,
+      "the nonexistent ref parameter should be gone",
+    );
+    assert.doesNotMatch(
+      file,
+      /search a specific branch/,
+      "ref-scoped search should not be taught",
+    );
+  });
+
+  it("documents the repository-slug format for repo documents", () => {
+    const file = readUsecase("code-search.md");
+    assert.match(
+      file,
+      /source\/workspace\/slug/,
+      "the mcpGetRepoDocument slug format should be documented",
+    );
+    assert.match(
+      file,
+      /bitbucket\/anwaltde\/aura/,
+      "a concrete live-format example should be shown",
+    );
+  });
+
+  it("states the top_k default", () => {
+    const file = readUsecase("code-search.md");
+    assert.match(
+      file,
+      /top_k[^\n]*default 5|default 5[^\n]*top_k/i,
+      "the top_k default should be stated",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
