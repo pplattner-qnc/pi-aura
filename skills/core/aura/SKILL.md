@@ -1,6 +1,6 @@
 ---
 name: aura
-description: Work with Aura — the AI-native project management and knowledge platform. Use when the user mentions Aura, tasks, artifacts, wiki, knowledge base, or project planning in the context of the aura-mcp-dev MCP server.
+description: Work with Aura, the AI-native project management and knowledge platform. Use when the user mentions Aura, tasks, artifacts, wiki, knowledge base, or project planning in the context of the aura-mcp-dev MCP server.
 ---
 
 # Aura MCP
@@ -13,30 +13,44 @@ commit 4aa37833; every claim below is checked against that build).
 
 ## What Aura can do
 
-- **Task management** — hierarchical tasks (SAGA → EPIC → STORY → SUBTASK) with
+- **Task management**: hierarchical tasks (SAGA → EPIC → STORY → SUBTASK) with
   status workflows, owner/crew assignment, priority ordering, capacity tracking,
   and relations between tasks (blocks, relates-to, part-of, duplicates)
-- **Artifacts** — versioned Markdown documents (plans, reviews, generic docs)
-  with review workflows, approval gates, and access control
-- **Knowledge base / Wiki** — hierarchical knowledge spaces with folders and
-  documents, supporting full-text + semantic search, versioning, and images
-- **Code search** — semantic and BM25 search across allowlisted Bitbucket
+- **Artifacts**: versioned Markdown documents (plans, opinions, generic docs)
+  with versioning, the opinion flow, and access control
+- **Knowledge base / Wiki**: hierarchical knowledge spaces with folders, files,
+  and documents, supporting full-text + semantic search, versioning, restore,
+  and images
+- **Code search**: semantic and BM25 search across allowlisted Bitbucket
   repositories, with file reading and related-chunk discovery
-- **Unified search** — cross-entity semantic search across tasks, artifacts,
+- **Unified search**: cross-entity semantic search across tasks, artifacts,
   knowledge documents, skills, glossary entries, Jira issues, and more
-- **Memory / Knowledge graph** — entity-relationship graph connecting products,
-  services, people, tasks, and concepts with confidence-scored edges
-- **Signals** — inbound planning signals that can be triaged into tasks
-- **Skills** — reusable skill documents with assets, plugins, and import/export
-- **Glossary** — shared vocabulary with proposal/approval workflow:
-  - `createGlossaryEntry` — create an entry with `term`, `definition`, `category` (`ACRONYM`/`DOMAIN_CONCEPT`/`PRODUCT`/`PROCESS`), optional `language` (`DE`/`EN`), `aliases`, `source`; triggers embedding on create.
-  - `getGlossaryEntry` — fetch a single entry by `uuid`.
-  - `listGlossaryEntries` — paginated list (all authenticated users); `q` search, `category` filter, `sort_by` (`term`/`category`/`created_at`/`updated_at`).
-  - `updateGlossaryEntry` — update `term`/`definition`/`category`/`language`/`aliases`/`source` by `uuid`; re-embeds the entry.
-  - `listPendingGlossaryEntries` — list entries awaiting review (admin-only, `MANAGE_GLOSSARY` capability; `PENDING` entries are never embedded/searchable until approved).
-- **Notifications** — per-user preference matrix and notification inbox
-- **Capacity** — team capacity tracking and leadership overview
-- **Comments** — threaded comments on tasks and artifacts with mentions
+- **Memory / Knowledge graph**: entity-relationship graph connecting products,
+  services, people, tasks, and concepts with confidence-scored edges, plus
+  aura-native memory ingest from artifacts
+- **Signals**: inbound planning signals that can be triaged into tasks
+- **Skills**: reusable skill documents organized in plugins
+- **Glossary**: shared vocabulary with proposal/approval workflow:
+  - `createGlossaryEntry`: create an entry with `term`, `definition`, `category` (`ACRONYM`/`DOMAIN_CONCEPT`/`PRODUCT`/`PROCESS`), optional `language` (`DE`/`EN`), `aliases`, `source`; triggers embedding on create.
+  - `getGlossaryEntry`: fetch a single entry by `uuid`.
+  - `listGlossaryEntries`: paginated list (all authenticated users); `q` search, `category` filter, `sort_by` (`term`/`category`/`created_at`/`updated_at`).
+  - `updateGlossaryEntry`: update `term`/`definition`/`category`/`language`/`aliases`/`source` by `uuid`; re-embeds the entry.
+  - `listPendingGlossaryEntries`: list entries awaiting review (admin-only, `MANAGE_GLOSSARY` capability; `PENDING` entries are never embedded/searchable until approved).
+- **Roadmap goals**: dated goals with owners and manual progress, time-window
+  queries, closure verdicts, and a drafted-then-confirmed update flow
+  (Leadership/Admin create)
+- **Story points**: AI-assisted estimates for Stories and Sub-Tasks; a human
+  correction always outranks the AI estimate (see the task-management use case)
+- **User groups**: Leadership/Admin-managed groups with LEAD/MEMBER roles (the
+  groups `readCapacity` scope=group reads)
+- **Projects and tags**: project detail with linked repositories; tags with
+  usage counts that attach to tasks by slug
+- **Notifications**: per-user preference matrix and notification inbox (no MCP
+  tool; see the scorecard below)
+- **Capacity**: team capacity tracking and leadership overview (live on MCP
+  again; see the scorecard below)
+- **Comments**: flat comments on tasks and artifacts with mentions
+- **System**: `systemHealth` reports process uptime and the build identity
 
 ## Common use cases
 
@@ -59,9 +73,9 @@ Detailed instructions for each use case are in the referenced resource files.
 
 ## Development process
 
-Aura has a structured workflow (Open → Refinement → Alignment → Development →
-Review → Deployment → Done) with defined roles, capacity rules, and review
-gates. The process resources encode this knowledge for agents:
+Aura's workflow runs on a level- and variant-resolved status series with
+defined roles, capacity rules, and quality gates. The process resources encode
+this knowledge for agents:
 
 | Topic | Resource file |
 |---|---|
@@ -75,12 +89,12 @@ gates. The process resources encode this knowledge for agents:
 
 ## How to interact with the Aura MCP
 
-All tools are prefixed with `aura_2d_mcp_2d_dev_`. There are two families:
+In pi's tool list every tool carries the `mcp__aura_mcp_dev__` prefix; this
+page lists the short names. There are two families:
 
-1. **`mcp*` tools** — agent-facing tools designed for MCP clients. These use
+1. **`mcp*` tools**: agent-facing tools designed for MCP clients. These use
    the caller's PAT for authentication and are the primary interface for
-   agent workflows. All **10 `mcp*` tools** on the live 120-tool
-   server:
+   agent workflows. All **10 `mcp*` tools** on the live 120-tool server:
    - `mcpAnswerQuestion`: answer a question directed at you.
    - `mcpCreateArtifact`: create a new artifact (PLAN, OPINION, or GENERIC;
      chat-only TEMPORARY is created by the chat, not by tools).
@@ -163,21 +177,25 @@ UI; do not fall back to hand-crafted API calls.
   with relevant source types.
 - **Use human keys** (e.g. `AURA-42`) to reference tasks when possible;
   `getTaskByHumanKey` resolves them in a single call.
-- **Prefer the surviving `mcp*` variants** when one exists (the 10 listed
-  above). For capabilities with no `mcp*` variant, use the matching base tool:
-  `getTask`, `getArtifact`, `getSkill`, `unifiedSearch`, `searchKnowledge`.
+- **Mind the response tiers**: a default read returns the compact payload; when
+  a result feels too thin, pass `response_format: "detail"` (on the tools that
+  declare it) or `"full"` on `getTask` / `getTaskByHumanKey` before concluding
+  data is missing.
+- **Prefer the `mcp*` variants** when one exists (the 10 listed above). For
+  capabilities with no `mcp*` variant, use the matching base tool: `getTask`,
+  `getArtifact`, `getSkill`, `unifiedSearch`, `searchKnowledge`.
 - **Section-mode updates** for artifacts: use `mcpUpdateArtifact` with
   `mode: "section"` and `target_heading` for large documents to avoid
   output budget issues.
-- **Comments** support `is_ai_generated: true` — always set this flag when
+- **Comments** support `is_ai_generated: true`: always set this flag when
   posting as an AI agent.
 - **Progress tracking**: use `recordTaskProgress` to log agent activity on
   tasks for visibility in the Aura Timeline.
 
 ## Submitting feedback about Aura
 
-If you encounter issues with AURA — whether they be bugs, missing features, or workflow friction that is caused by **Aura itself** (not by the way we use Aura) — use the **`aura_feedback`** tool to propose a feedback submission to the Aura maintainers that the user has to sign off on.
+If you encounter issues with Aura, whether they be bugs, missing features, or workflow friction that is caused by **Aura itself** (not by the way we use Aura), use the **`aura_feedback`** tool to propose a feedback submission to the Aura maintainers that the user has to sign off on.
 
-`aura_feedback` is an **undocumented tool**: it is available at all times but is not advertised in the system prompt, so you will not see it listed under "Available tools". It exists specifically for this sign-off-gated feedback path. It takes the same parameters as the feedback creation API call (`title`, `body`, `is_anonymous`, `notify_author`) — except for `source`, which it always sends as `MCP` internally. When you call it, an interactive prompt is shown to the user with the proposed title and body and the two checkboxes; the user can answer **Yes** (send as-is), **No** (reject, optional comment), **Refine** (reject with a required comment so you can re-propose), or **Edit** (open all four fields for manual editing, then Submit or Cancel). On a successful submit the row is created in Aura and appended to `~/.pi/aura/feedback.jsonl`.
+`aura_feedback` is an **undocumented tool**: it is available at all times but is not advertised in the system prompt, so you will not see it listed under "Available tools". It exists specifically for this sign-off-gated feedback path. It takes the same parameters as the server's `createFeedback` tool (`title`, `body`, `is_anonymous`, `notify_author`), minus `source`, which it always sends as `MCP` internally. When you call it, an interactive prompt is shown to the user with the proposed title and body and the two checkboxes; the user can answer **Yes** (send as-is), **No** (reject, optional comment), **Refine** (reject with a required comment so you can re-propose), or **Edit** (open all four fields for manual editing, then Submit or Cancel). On a successful submit the row is created in Aura and appended to `~/.pi/aura/feedback.jsonl`.
 
-**Do not use the `aura-mcp-dev_createFeedback` MCP tool** for this. It submits directly to Aura with no interactive sign-off with the user — which is exactly why the `aura_feedback` tool exists as the sanctioned path. See [resources/usecases/feedback-submission.md](resources/usecases/feedback-submission.md) for the full pipeline and how to read the local log.
+**Do not use the `mcp__aura_mcp_dev__createFeedback` MCP tool** for this. It submits directly to Aura with no interactive sign-off with the user, which is exactly why the `aura_feedback` tool exists as the sanctioned path. See [resources/usecases/feedback-submission.md](resources/usecases/feedback-submission.md) for the full pipeline and how to read the local log.

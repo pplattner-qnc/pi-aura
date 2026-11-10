@@ -952,6 +952,42 @@ describe("no-remnants guard: aura skill rewrite", () => {
       "the same-PAT-through-REST note should be present",
     );
   });
+  it("carries no unaddressed drift row: flat comments, current bullets, fixed naming", () => {
+    const skill = readSkillFile();
+    // Comments: flat per the live listComments description.
+    assert.match(skill, /flat comments/i, "comments should be taught as flat");
+    assert.doesNotMatch(skill, /threaded/i, "the threaded wording should be gone");
+    // The stale feedback tool-name token is fixed to the current pi naming.
+    assert.match(
+      skill,
+      /mcp__aura_mcp_dev__createFeedback/,
+      "the feedback tool to avoid should carry its current pi name",
+    );
+    assert.doesNotMatch(
+      skill,
+      /aura-mcp-dev_createFeedback/,
+      "the stale feedback tool-name token should be gone",
+    );
+    // The tool-name prefix is the current pi rendering, not the old one.
+    assert.match(skill, /mcp__aura_mcp_dev__/);
+    assert.doesNotMatch(skill, /aura_2d_mcp_2d_dev_/);
+    // The What-Aura-can-do bullets carry the live truth.
+    assert.doesNotMatch(
+      skill,
+      /assets, plugins, and import\/export/,
+      "the stale skills bullet (assets, import/export) should be gone",
+    );
+    assert.doesNotMatch(
+      skill,
+      /plans, reviews, generic docs/,
+      "the stale artifact kind wording should be gone",
+    );
+    assert.doesNotMatch(
+      skill,
+      /review workflows, approval gates/,
+      "the stale review-flow wording should be gone",
+    );
+  });
 });
 
 // root-docs-refresh: the README describes the package as it now is. The
