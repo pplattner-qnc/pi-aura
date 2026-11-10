@@ -1160,6 +1160,42 @@ describe("no-remnants guard: usecase resources current (capacity)", () => {
   });
 });
 
+describe("no-remnants guard: usecase resources current (signals)", () => {
+  it("addresses all three signal tools by id, not uuid", () => {
+    const file = readUsecase("signals.md");
+    assert.match(file, /getSignal\(\{ id:/, "getSignal should be called with id");
+    assert.match(
+      file,
+      /reviewSignal\(\{[\s\S]*?id:/,
+      "reviewSignal should be called with id",
+    );
+    assert.match(
+      file,
+      /createTaskFromSignal\(\{ id:/,
+      "createTaskFromSignal should be called with id",
+    );
+    assert.doesNotMatch(
+      file,
+      /uuid:/,
+      "no signal tool takes a uuid parameter anymore",
+    );
+  });
+
+  it("states when reason_code is required on a review", () => {
+    const file = readUsecase("signals.md");
+    assert.match(
+      file,
+      /reason_code[\s\S]{0,200}(required when|only when|Required when)[\s\S]{0,80}DISMISS/i,
+      "reason_code should be documented as required when action is DISMISS",
+    );
+    assert.match(
+      file,
+      /reason_text/,
+      "the optional free-text reason should be named",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
