@@ -145,6 +145,25 @@ function fakePi(): FakePi {
     /which take precedence/,
     "the precedence documentation in pi's MCP extension must still be present",
   );
+  // The connect flow (criterion 1's mechanism): on session_start pi reads
+  // the extension-registered servers and connects each enabled one, so a
+  // registration made during extension load (as this extension's is) gets
+  // its tools into a fresh session that configured no MCP server.
+  assert.match(
+    source,
+    /pi\.on\("session_start"/,
+    "pi's MCP extension must still wire its servers on session_start",
+  );
+  assert.match(
+    source,
+    /registeredServers\(\)/,
+    "pi's MCP extension must still read the servers extensions registered (pi.getMcpServers)",
+  );
+  assert.match(
+    source,
+    /startConnection\(/,
+    "pi's MCP extension must still connect each enabled server at session start",
+  );
   console.log("guard: pi-level user-config precedence contract intact: ok");
 }
 
