@@ -1025,6 +1025,19 @@ describe("no-remnants guard: aura skill rewrite", () => {
       "getBlueprintFiles is expected to be dropped by Aura and must not be documented",
     );
   });
+  it("carries no em-dash in its own prose", () => {
+    const skill = readSkillFile();
+    const offenders = skill
+      .split("\n")
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => line.includes("\u2014"))
+      .map(({ index, line }) => `${SKILL_FILE}:${index + 1}: ${line.trim()}`);
+    assert.deepEqual(
+      offenders,
+      [],
+      "SKILL.md should carry no em-dash (the repo's prose rule)",
+    );
+  });
 });
 
 // root-docs-refresh: the README describes the package as it now is. The
