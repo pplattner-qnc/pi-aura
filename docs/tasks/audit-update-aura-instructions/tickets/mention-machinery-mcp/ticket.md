@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Mention machinery on MCP
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by:
 - aura-mcp-interface
 size: l
