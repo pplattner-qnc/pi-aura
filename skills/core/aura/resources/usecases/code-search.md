@@ -40,12 +40,12 @@ code_search({
 ```
 
 **Parameters:**
-- `repo` (required) — Bitbucket repo slug (e.g. "aura", "anwalt-de-frontend")
-- `query` (required) — natural language description
-- `top_k` — number of results (default 5)
-- `mode` — search mode (default: hybrid)
-- `filter_languages` — filter by programming language
-- `filter_paths` — filter by file path pattern
+- `repo` (required): Bitbucket repo slug (e.g. "aura", "anwalt-de-frontend")
+- `query` (required): natural language description
+- `top_k`: number of results (default 5)
+- `mode`: search mode (default: hybrid)
+- `filter_languages`: filter by programming language
+- `filter_paths`: filter by file path pattern
 
 There is no ref parameter: ref-scoped search (branch, tag, commit) is not
 available via MCP.

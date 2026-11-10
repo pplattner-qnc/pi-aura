@@ -1749,6 +1749,90 @@ describe("no-remnants guard: usecase resources current (task management)", () =>
   });
 });
 
+describe("no-remnants guard: usecase resources current (questions and uploads)", () => {
+  it("cross-references the question-reporting tool from the questions file", () => {
+    const file = readUsecase("questions-workflow.md");
+    assert.match(
+      file,
+      /reportMemoryEntityQuestion/,
+      "the question-reporting tool should be cross-referenced",
+    );
+    assert.match(
+      file,
+      /memory-graph\.md/,
+      "the cross-reference should point at the memory-graph use case",
+    );
+  });
+
+  it("keeps the re-verified upload baseline pinned", () => {
+    const file = readUsecase("upload-documents.md");
+    assert.match(
+      file,
+      /mcpCreateUploadDocument/,
+      "the upload tool should stay documented",
+    );
+    assert.match(
+      file,
+      /10 MB/,
+      "the upload size limit should stay stated",
+    );
+    assert.match(
+      file,
+      /base64/i,
+      "the base64 ingest shape should stay stated",
+    );
+    assert.match(
+      file,
+      /mcpGetUploadDocument/,
+      "the retrieval tool should stay documented",
+    );
+    assert.match(
+      file,
+      /mcpLinkUploadToTask/,
+      "the linking tool should stay documented",
+    );
+  });
+});
+
+// usecase-resources-current: no em-dash anywhere in the twelve usecase
+// resource files (the repo's prose rule; every file is touched by this
+// ticket's corrections).
+const USECASE_FILES = [
+  "artifact-management.md",
+  "capacity-planning.md",
+  "code-search.md",
+  "feedback-submission.md",
+  "memory-graph.md",
+  "questions-workflow.md",
+  "signals.md",
+  "skills-management.md",
+  "task-management.md",
+  "unified-search.md",
+  "upload-documents.md",
+  "wiki-knowledge.md",
+];
+
+describe("no-remnants guard: usecase resources current (prose)", () => {
+  it("carries no em-dash in any usecase file", () => {
+    const offenders: string[] = [];
+    for (const file of USECASE_FILES) {
+      const content = readUsecase(file);
+      content
+        .split("\n")
+        .forEach((line, index) => {
+          if (line.includes("\u2014")) {
+            offenders.push(`${USECASES_DIR}/${file}:${index + 1}: ${line.trim()}`);
+          }
+        });
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "the usecase files should carry no em-dash (the repo's prose rule)",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package

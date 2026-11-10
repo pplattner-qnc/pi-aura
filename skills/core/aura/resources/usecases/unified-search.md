@@ -9,12 +9,12 @@ authorization is enforced silently: unauthorized types are excluded from
 results without returning 403.
 
 **Parameters:**
-- `query` (string, required) — natural language search query
-- `source_types` (array, required) — one or more of: `TASK`,
+- `query` (string, required): natural language search query
+- `source_types` (array, required): one or more of: `TASK`,
   `UPLOAD_DOCUMENT`, `ARTIFACT`, `GLOSSARY`, `QUESTION`, `JIRA_ISSUE`,
   `KNOWLEDGE_DOCUMENT`, `SKILL`, `TEAMS_THREAD`, `CHAT_ASSERTION`,
   `ASANA_TASK`, `TOOL`, `FEEDBACK`
-- `limit` (number, optional) — maximum number of hits **per source type**;
+- `limit` (number, optional): maximum number of hits **per source type**;
   an integer from 1 to 20, default 5. Searching three types with the
   default returns up to 15 hits.
 
@@ -43,14 +43,14 @@ listMentionCandidates({ entity_type: "TASK", entity_id: "<task-uuid>" })
 
 ## Best practices
 
-1. **Always search before creating** — check for existing tasks, artifacts, or
+1. **Always search before creating**: check for existing tasks, artifacts, or
    documents on the same topic to avoid duplicates.
-2. **Use specific queries** — "authentication token refresh logic" works better
+2. **Use specific queries**: "authentication token refresh logic" works better
    than "auth".
-3. **Narrow source types** — searching fewer types gives more relevant results.
-4. **Start broad, then narrow** — if unsure, search across `TASK`, `ARTIFACT`,
+3. **Narrow source types**: searching fewer types gives more relevant results.
+4. **Start broad, then narrow**: if unsure, search across `TASK`, `ARTIFACT`,
    and `KNOWLEDGE_DOCUMENT` first, then drill into specific results.
-5. **Follow up with get tools** — after finding an entity, use the corresponding
+5. **Follow up with get tools**: after finding an entity, use the corresponding
    get tool (`getTask`, `getArtifact`, `mcpGetKnowledgeDocument`) for full
    details.
 

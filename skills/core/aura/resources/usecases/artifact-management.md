@@ -179,8 +179,8 @@ flow is visible as the `opinion_requested` filter on `listArtifacts`.
 
 | Action | Tool |
 |---|---|
-| Grant/update access | `grantArtifactAccess` — not available via MCP; use the Aura UI |
-| View access overview | `getArtifactAccessOverview` — not available via MCP; use the Aura UI |
+| Grant/update access | `grantArtifactAccess` (not available via MCP; use the Aura UI) |
+| View access overview | `getArtifactAccessOverview` (not available via MCP; use the Aura UI) |
 | Accept into memory | `acceptArtifactMemory` |
 
 ## Comments
