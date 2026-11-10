@@ -2586,6 +2586,10 @@ const ROOT_DOCS = [
   "docs/dev-env.md",
 ];
 
+function readRootDoc(relative: string): string {
+  return fs.readFileSync(path.join(repoRoot, relative), "utf-8");
+}
+
 describe("no-remnants guard: root docs content", () => {
   it("carries no digest or Atlassian-provisioning mentions in the five root docs", () => {
     const offenders: string[] = [];
@@ -2718,6 +2722,142 @@ describe("no-remnants guard: no CLI or REST access teaching", () => {
       offenders,
       [],
       "no shipped file should teach reaching Aura through the CLI or REST (MCP-first access, UI pointers for REST-only capabilities)",
+    );
+  });
+});
+
+// root-docs-current: the five root documents describe the final package per
+// the root-docs-drift report's claim list against the settled post-teardown
+// tree: the six surviving extensions, the package's own aura-mcp-dev server
+// registration with a user's entry as the optional override, the released
+// install pin, the current credential story, and no removed surface named
+// as current. The report's stale rows are pinned gone here in the existing
+// guard style; a retired claim reappearing in a root doc fails the suite.
+describe("no-remnants guard: root docs current (README)", () => {
+  it("corrects the false no-commands claim to the shipped command and tool surface", () => {
+    const readme = readRootDoc("README.md");
+    assert.doesNotMatch(
+      readme,
+      /No user-facing commands/,
+      "the false no-commands claim should be gone",
+    );
+    assert.ok(
+      readme.includes("/aura secrets discover"),
+      "the secrets command should be named",
+    );
+    assert.ok(
+      readme.includes("/aura secrets edit"),
+      "the secrets edit subcommand should be named",
+    );
+    assert.ok(
+      readme.includes("aura_feedback"),
+      "the feedback tool should be named",
+    );
+  });
+
+  it("drops the unused pi-subagents and pi-mcp-adapter prerequisites", () => {
+    const readme = readRootDoc("README.md");
+    assert.doesNotMatch(
+      readme,
+      /pi-subagents|pi-mcp-adapter/i,
+      "the unused add-on prerequisites should be gone (pi's MCP support is built in)",
+    );
+  });
+
+  it("teaches the package's own registration as the default and a user entry as the optional override", () => {
+    const readme = readRootDoc("README.md");
+    assert.match(
+      readme,
+      /MCP configuration \(optional/i,
+      "the MCP section should be framed as an optional override",
+    );
+    assert.match(
+      readme,
+      /registers the `aura-mcp-dev` MCP server/i,
+      "the package's own registration should be stated",
+    );
+    assert.match(
+      readme,
+      /No manual MCP setup is required/i,
+      "manual setup should be explicitly not required",
+    );
+    assert.match(
+      readme,
+      /your own `aura-mcp-dev` entry/i,
+      "the user's own entry should be the override mechanism",
+    );
+    assert.match(
+      readme,
+      /wins over the package's registration/i,
+      "the user entry's precedence should be stated",
+    );
+    assert.doesNotMatch(
+      readme,
+      /bearerToken|"auth":\s*"bearer"/,
+      "the retired mcp.json config shape should be gone",
+    );
+    assert.match(
+      readme,
+      /"headers"/,
+      "the pi-native config shape (url plus headers) should be shown",
+    );
+  });
+
+  it("pins the install example to the current released version", () => {
+    const readme = readRootDoc("README.md");
+    assert.match(
+      readme,
+      /pi install git:github\.com\/pplattner-qnc\/pi-aura@v0\.8\.0/,
+      "the install pin should name the current released version",
+    );
+    assert.doesNotMatch(readme, /@v0\.1\.0/, "the stale v0.1.0 pin should be gone");
+  });
+
+  it("lists exactly the manifest's six extensions in the extensions table", () => {
+    const readme = readRootDoc("README.md");
+    const extensionsPart = readme.split("## Extensions")[1] ?? "";
+    assert.notEqual(extensionsPart, "", "the README should carry an ## Extensions section");
+    const tableExtensions = extensionsPart
+      .split("\n")
+      .filter((line) => line.startsWith("| `"))
+      .map((line) => line.match(/^\| `([^`]+)`/)?.[1])
+      .filter((name) => name !== undefined)
+      .sort();
+    const pkg = readRootPackageJson();
+    const manifestExtensions = (pkg.pi?.extensions ?? [])
+      .map((entry) => entry.replace("./extensions/", "").replace(".ts", ""))
+      .sort();
+    assert.deepEqual(
+      tableExtensions,
+      manifestExtensions,
+      "the README extensions table should list exactly the manifest's six extensions",
+    );
+  });
+
+  it("describes the cursor-rules library module and the companion-plugin assumption", () => {
+    const readme = readRootDoc("README.md");
+    assert.ok(
+      readme.includes("extensions/cursor-rules.ts"),
+      "the non-manifest rules-loading library module should be named",
+    );
+    assert.match(
+      readme,
+      /plugin repo/i,
+      "the companion plugin's ownership of rules dispatch should be stated",
+    );
+    assert.match(
+      readme,
+      /nothing injects the rule body/i,
+      "the with-pi-aura-alone behavior (mentions expand, no body injection) should be stated",
+    );
+  });
+
+  it("references no removed file, workspace, or target", () => {
+    const readme = readRootDoc("README.md");
+    assert.doesNotMatch(
+      readme,
+      /scripts\/|aura\.mjs|skills\/core\/aura\/dist|HeyApiAuraClient|AuraClient|@pi-aura\/shared\/aura-client|codegen|openapi/i,
+      "the README should name no removed surface",
     );
   });
 });
