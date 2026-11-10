@@ -1089,7 +1089,7 @@ async function createFeedbackViaMcp(
 }
 
 /** Append one JSON line to the JSONL log, creating the parent directory if
- *  needed. Never throws into the caller's success path — the tool caller
+ *  needed. Never throws into the caller's success path: the tool caller
  *  wraps this in try/catch and degrades to a warning. */
 async function appendFeedbackLog(
   payload: CreateFeedbackParams,
