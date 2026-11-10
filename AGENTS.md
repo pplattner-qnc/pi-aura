@@ -36,7 +36,7 @@ Work is planned and executed via a dependency-aware task graph under
 (setup-workflow, task-overview, wayfinder, implement-task, finalize-task,
 to-spec, to-tickets, tdd, code-review, etc.) come from the
 `task-workflow` package and operate on this tree. `docs/tasks/state.yaml`
-holds the current `task`/`slice` pointers and the `schema_version` stamp;
+holds the current `map`/`task` pointers and the `schema_version` stamp;
 it is tracked in git so the freshness stamp persists across clones.
 
 Bugs live under `docs/bugs/` (active reports) with an `archive/` subfolder;

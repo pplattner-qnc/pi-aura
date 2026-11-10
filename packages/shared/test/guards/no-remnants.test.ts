@@ -2927,3 +2927,19 @@ describe("no-remnants guard: root docs current (glossary)", () => {
     );
   });
 });
+
+describe("no-remnants guard: root docs current (project instructions)", () => {
+  it("states the state.yaml pointer keys the file actually holds", () => {
+    const agents = readRootDoc("AGENTS.md");
+    assert.match(
+      agents,
+      /`map`\/`task` pointers/,
+      "the pointer claim should name the map/task keys state.yaml holds",
+    );
+    assert.doesNotMatch(
+      agents,
+      /`task`\/`slice` pointers/,
+      "the stale task/slice pointer claim should be gone",
+    );
+  });
+});
