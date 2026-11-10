@@ -3971,6 +3971,105 @@ console.log("createWikiAdapter resolveFullToken: ok");
 console.log("wiki expansion end-to-end: ok");
 
 // ---------------------------------------------------------------------------
+// Degraded tool paths (the interface self-check's unavailable set): the
+// affected mention kind degrades to its cache-only answers — searches fail
+// fast and write nothing, resolutions stay cache-first, warmup no-ops, and
+// the pane never blocks (never a render lag, never a thrown pane).
+// ---------------------------------------------------------------------------
+
+{
+  // Core drift: the live server no longer carries the `q` parameter the
+  // wrapper sends, so the interface's self-check marks the listTasks path
+  // unavailable and its calls fail fast. The task adapter maps that onto
+  // its cache-only answers.
+  const drifted = SHIPPED_AURA_MCP_TOOLS.map(toLiveTool).map((tool) => {
+    if (tool.name !== "listTasks") return tool;
+    const schema = tool.inputSchema as { properties: Record<string, unknown> };
+    const properties = Object.fromEntries(
+      Object.entries(schema.properties).filter(([name]) => name !== "q"),
+    );
+    return { ...tool, inputSchema: { type: "object", properties } };
+  });
+  let callToolHits = 0;
+  const { caller } = fakeAuraCaller({
+    listTasks: () => {
+      callToolHits += 1;
+      return { items: [], pagination: {} };
+    },
+  });
+  caller.listTools = async () => drifted;
+  const adapter = createTaskAdapter({ createInterface: async () => interfaceOverCaller(caller) });
+
+  // The search fails fast: no call reaches the server, so the SWR merge
+  // gets nothing fresh.
+  assert.deepEqual(await adapter.searchServer("x"), []);
+  assert.equal(callToolHits, 0, "an unavailable path calls nothing");
+
+  // The write-through writes nothing: the cache (items and stamp) stays.
+  const cache = createInMemoryReferenceCache(() => 4242);
+  cache.write("task", taskItems());
+  const stamp = cache.fetchedAt("task");
+  await refreshReferenceKind(cache, adapter, "42");
+  assert.equal(cache.fetchedAt("task"), stamp, "no write, no stamp on an unavailable path");
+
+  // Resolution stays cache-first: the cached row resolves without a
+  // fetch; an uncached key fails fast to null (the mention stays as
+  // typed).
+  assert.equal((await adapter.resolveFullToken("AURA-42", cache))?.key, "AURA-42");
+  assert.equal(callToolHits, 0, "the cached resolution never reached the server");
+  assert.equal(await adapter.resolveFullToken("AURA-999", cache), null, "the uncached key fails fast");
+
+  // Warmup no-ops without throwing, leaving the cache alone.
+  await adapter.warmup(cache);
+  assert.equal(cache.read("task").length, taskItems().length, "warmup left the cache alone");
+
+  // The pane never blocks: with the degraded kind wired, a typed token
+  // renders the cached rows instantly (and fires a background refresh
+  // that harmlessly writes nothing).
+  const registry = createReferenceRegistry([adapter]);
+  const current = fakeCurrent();
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache);
+  const suggestions = await suggestAt(provider, "#task:42", 8);
+  assert.deepEqual(suggestions?.items.map((i) => i.value), ["#task:AURA-42", "#task:AURA-424"]);
+  await settle();
+  assert.equal(callToolHits, 0, "the degraded background refresh also calls nothing");
+}
+
+console.log("degraded task path renders from cache, never blocks: ok");
+
+{
+  // The whole interface unavailable (missing credentials: the construction
+  // rejects): every kind still renders the persisted cache instantly and
+  // never blocks on the doomed lookups — including the wiki kind's
+  // versionless tree rows (they render without any version).
+  const cache = createInMemoryReferenceCache();
+  cache.write("task", taskItems());
+  cache.write("wiki", [
+    {
+      kind: "wiki",
+      id: ENG_PR_ID,
+      key: "eng/process/pr-conventions",
+      title: "PR conventions",
+      space: "eng",
+      path: "process/pr-conventions",
+    },
+  ]);
+  const registry = createReferenceRegistry([
+    createTaskAdapter({ createInterface: noopInterface }),
+    createWikiAdapter({ createInterface: noopInterface }),
+  ]);
+  const current = fakeCurrent();
+  const provider = createReferenceAutocompleteProvider(current.provider, registry, () => cache);
+  const tasks = await suggestAt(provider, "#task:42", 8);
+  assert.deepEqual(tasks?.items.map((i) => i.value), ["#task:AURA-42", "#task:AURA-424"]);
+  const wiki = await suggestAt(provider, "#wiki:eng/", 9);
+  assert.deepEqual(wiki?.items.map((i) => i.value), ["#wiki:eng/process/pr-conventions"]);
+}
+
+console.log("unavailable interface (no credentials): cache-only pane for every kind: ok");
+
+
+// ---------------------------------------------------------------------------
 // REFERENCE_INSTRUCTION grows the wiki-ref shape (the one-block-documents-
 // all-four end state)
 // ---------------------------------------------------------------------------
