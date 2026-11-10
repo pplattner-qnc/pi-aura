@@ -770,6 +770,40 @@ describe("no-remnants guard: consolidation seam", () => {
   });
 });
 
+// aura-skill-rewrite: the skill file teaches the live 120-tool server
+// (build 2026-10-12, commit 4aa37833) per the mcp-inventory report's
+// outline (that report's section 9). The audit's load-bearing facts are
+// pinned here in the existing guard style; the full per-claim mapping of
+// the drift table lives in the ticket's result document. A retired claim
+// reappearing in the skill file fails the suite.
+const SKILL_FILE = "skills/core/aura/SKILL.md";
+
+function readSkillFile(): string {
+  return fs.readFileSync(path.join(repoRoot, SKILL_FILE), "utf-8");
+}
+
+describe("no-remnants guard: aura skill rewrite", () => {
+  it("teaches the live 120-tool server with the build identity cited once", () => {
+    const skill = readSkillFile();
+    assert.match(
+      skill,
+      /\b120 tools\b/,
+      "the skill should state the live 120-tool count",
+    );
+    assert.match(skill, /2026-10-12/, "the skill should cite the build date");
+    assert.equal(
+      (skill.match(/4aa37833/g) ?? []).length,
+      1,
+      "the build commit should be cited exactly once (the drift-detection anchor)",
+    );
+    assert.doesNotMatch(
+      skill,
+      /\b90 tools\b|\b90-tool\b/,
+      "the stale 90-tool count should be gone",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package

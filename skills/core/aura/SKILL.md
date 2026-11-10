@@ -8,7 +8,8 @@ description: Work with Aura — the AI-native project management and knowledge p
 Aura is an AI-native project management and knowledge platform. It combines task
 management, documentation (artifacts), a wiki/knowledge base, code search, and
 organizational memory into a single system. The `aura-mcp-dev` MCP server exposes
-90 tools for interacting with all of these capabilities.
+120 tools for interacting with all of these capabilities (live build 2026-10-12,
+commit 4aa37833; every claim below is checked against that build).
 
 ## What Aura can do
 
@@ -78,7 +79,7 @@ All tools are prefixed with `aura_2d_mcp_2d_dev_`. There are two families:
 
 1. **`mcp*` tools** — agent-facing tools designed for MCP clients. These use
    the caller's PAT for authentication and are the primary interface for
-   agent workflows. Only **10 `mcp*` tools** survive on the live 90-tool
+   agent workflows. All **10 `mcp*` tools** on the live 120-tool
    server:
    - `mcpAnswerQuestion` — answer a question directed at you.
    - `mcpCreateArtifact` — create a new artifact (plan, review, generic doc).
