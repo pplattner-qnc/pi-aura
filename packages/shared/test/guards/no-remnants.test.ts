@@ -1876,10 +1876,9 @@ describe("no-remnants guard: process resources current (canonical references)", 
         content.includes("getKnowledgeNodeByPath"),
         `${file}'s canonical reference should be the fetch call for its page`,
       );
-      assert.doesNotMatch(
-        content,
-        /prozesse\/how-we-work-in-aura/,
-        `${file} still cites the dead pre-archival path`,
+      assert.ok(
+        !content.includes(DEAD_PROCESS_PATH),
+        `${file} still cites the dead pre-archival path ${DEAD_PROCESS_PATH}`,
       );
       assert.ok(
         !content.includes(ARCHIVED_GUIDE_NODE),

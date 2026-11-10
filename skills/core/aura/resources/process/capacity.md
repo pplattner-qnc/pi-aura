@@ -16,9 +16,9 @@ empty.
    fixes under 10%.
 3. **Treat 5% as a soft floor.** Below that, round up to a logged category
    on the placeholder epic.
-4. **Everyone lands honestly at 100%.** The split between task commitments
-   and the placeholder epic is the point: a shorter day shows up as smaller
-   task commitments, not as a hidden reserve.
+4. **Everyone lands honestly at 100%.** Your base capacity for a day is
+   what you can honestly commit to focused task work; a shorter day shows
+   up as smaller task commitments.
 
 ## The daily rhythm
 

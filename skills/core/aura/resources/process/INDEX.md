@@ -49,7 +49,7 @@ Open → Refinement → Alignment → Development → Review → Deployment → 
 | [workflow-phases.md](workflow-phases.md) | Detailed phase descriptions, gates, and transitions |
 | [roles.md](roles.md) | Owner, Contributor, Stakeholder: responsibilities and how to get assigned |
 | [capacity.md](capacity.md) | How capacity tracking works, rules for commitments |
-| [review-modes.md](review-modes.md) | Three review modes (async solo, sync multi-perspective, sync 1:1) |
+| [review-modes.md](review-modes.md) | Three review modes (async solo, sync multi-perspective, sync 1:1) and the opinions flow |
 | [escalation.md](escalation.md) | When and how to escalate, escalation paths |
 | [integrations.md](integrations.md) | How Aura, JIRA, and Asana fit together |
 
@@ -58,7 +58,8 @@ Open → Refinement → Alignment → Development → Review → Deployment → 
 1. **Aura is the source of truth.** Task status, plans, decisions, and
    documentation live in Aura. JIRA and Asana are mirrors.
 2. **Always update task status** when you complete work on a task. Use
-   `updateTask` with the appropriate status and `status_change_reason`.
+   `updateTask` with the appropriate status, and a `status_change_reason`
+   when one is required (skipped statuses, backward moves, rejected gates).
 3. **Record progress** with `recordTaskProgress` so the Aura Timeline
    reflects agent activity.
 4. **Async-first.** Decisions and feedback happen in Aura comments and
