@@ -65,6 +65,7 @@ Open → Refinement → Alignment → Development → Review → Deployment → 
    artifacts, not in meetings. Document outcomes in Aura.
 5. **Search before creating.** Check for existing tasks, artifacts, and
    documents before creating new ones.
-6. **Respect gates.** Do not move a task past Alignment without stakeholder
-   approval. Do not move past Review without passing review.
+6. **Respect gates.** The Alignment and Review gates are formal sign-offs:
+   disciplines give `APPROVED` or `REJECTED` verdicts, and moving on past a
+   rejected gate requires a reason (`status_change_reason`).
 7. **Set `is_ai_generated: true`** on all comments posted by an agent.

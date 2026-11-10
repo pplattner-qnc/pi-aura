@@ -1899,6 +1899,165 @@ describe("no-remnants guard: process resources current (canonical references)", 
   });
 });
 
+describe("no-remnants guard: process resources current (workflow phases)", () => {
+  it("teaches the three series resolved by level and workflow variant", () => {
+    const file = readProcess("workflow-phases.md");
+    assert.match(
+      file,
+      /workflow variant|workflowVariant/i,
+      "the series resolution should name the workflow variant",
+    );
+    assert.match(
+      file,
+      /STANDARD/,
+      "the STANDARD variant should be named",
+    );
+    assert.match(
+      file,
+      /DISCOVERY/,
+      "the DISCOVERY variant should be named",
+    );
+    assert.match(
+      file,
+      /set at creation[\s\S]{0,80}immutable|immutable[\s\S]{0,80}set at creation/i,
+      "the variant should be documented as immutable and set at creation",
+    );
+    assert.match(
+      file,
+      /LEAN|lean series/i,
+      "the lean series for sagas and subtasks should be named",
+    );
+  });
+
+  it("shows the standard series without the two retired waiting statuses", () => {
+    const file = readProcess("workflow-phases.md");
+    for (const status of [
+      "OPEN",
+      "READY_FOR_REFINEMENT",
+      "IN_REFINEMENT",
+      "IN_ALIGNMENT",
+      "READY_FOR_DEVELOPMENT",
+      "IN_DEVELOPMENT",
+      "IN_REVIEW",
+      "READY_FOR_DEPLOYMENT",
+      "IN_DEPLOYMENT",
+      "DONE",
+    ]) {
+      assert.ok(
+        file.includes(status),
+        `the standard series should include ${status}`,
+      );
+    }
+    assert.doesNotMatch(
+      file,
+      /READY_FOR_ALIGNMENT\s*→\s*IN_ALIGNMENT[\s\S]{0,200}READY_FOR_REVIEW/,
+      "the retired flat series (waiting statuses before both gates) should be gone",
+    );
+  });
+
+  it("documents the lean series and the discovery series' alignment ending", () => {
+    const file = readProcess("workflow-phases.md");
+    assert.match(
+      file,
+      /READY_FOR_DEVELOPMENT[\s\S]{0,40}IN_DEVELOPMENT[\s\S]{0,40}READY_FOR_REVIEW/,
+      "the lean series (sagas and subtasks) should start at READY_FOR_DEVELOPMENT",
+    );
+    assert.match(
+      file,
+      /IN_ALIGNMENT\s*→?\s*DONE|IN_ALIGNMENT[\s\S]{0,120}DONE/,
+      "the discovery series should end after alignment",
+    );
+  });
+
+  it("documents the quality gates with verdicts and the rejected-gate reason rule", () => {
+    const file = readProcess("workflow-phases.md");
+    assert.match(
+      file,
+      /Alignment Gate|ALIGNMENT gate/i,
+      "the Alignment Gate should be named",
+    );
+    assert.match(
+      file,
+      /Review Gate|REVIEW gate/i,
+      "the Review Gate should be named",
+    );
+    assert.match(
+      file,
+      /disciplines?/i,
+      "the discipline sign-offs should be described",
+    );
+    assert.match(file, /APPROVED/, "the approved verdict should be named");
+    assert.match(file, /REJECTED/, "the rejected verdict should be named");
+    assert.match(
+      file,
+      /status_change_reason[\s\S]{0,120}rejected( quality)? gate|rejected( quality)? gate[\s\S]{0,120}status_change_reason/,
+      "leaving a rejected gate should require a status_change_reason",
+    );
+  });
+
+  it("carries the live status-change contract (id, not uuid; one-step walk)", () => {
+    const file = readProcess("workflow-phases.md");
+    assert.match(
+      file,
+      /updateTask\(\{\s*id:/,
+      "updateTask should be keyed by id (the live parameter)",
+    );
+    assert.doesNotMatch(
+      file,
+      /updateTask\(\{\s*uuid:/,
+      "updateTask must not be keyed by uuid (retired parameter name)",
+    );
+    assert.match(
+      file,
+      /one (task )?status at a time|one-step walk|one status at a time/i,
+      "the one-step walk discipline (tracker-aura) should be carried",
+    );
+    assert.match(
+      file,
+      /override a disallowed status jump|disallowed status jump/,
+      "the status_change_reason contract should follow the live description",
+    );
+  });
+
+  it("carries the v19 contributor phase starts and the live discard and reopen contracts", () => {
+    const file = readProcess("workflow-phases.md");
+    assert.match(
+      file,
+      /contributor[\s\S]{0,120}start[\s\S]{0,120}phase|start the next phase/i,
+      "contributors starting the next phase themselves (v19) should be documented",
+    );
+    assert.match(
+      file,
+      /deploy[\s\S]{0,120}not|not[\s\S]{0,80}deployment/i,
+      "the deployment exception should be stated",
+    );
+    assert.match(
+      file,
+      /discardTask[\s\S]{0,120}owner-only|owner-only[\s\S]{0,120}discardTask/i,
+      "discardTask's owner-only rule should be documented",
+    );
+    assert.match(
+      file,
+      /reopenTask/,
+      "reopenTask should be documented",
+    );
+  });
+
+  it("keeps the overview's gate principle matching the live gate mechanics", () => {
+    const index = readProcess("INDEX.md");
+    assert.doesNotMatch(
+      index,
+      /Do not move a task past Alignment without stakeholder approval/,
+      "the retired gate principle wording should be gone (gates are sign-offs with verdicts)",
+    );
+    assert.match(
+      index,
+      /gate|verdict/i,
+      "the overview should teach the gate mechanics",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
