@@ -144,6 +144,11 @@ Added a `rest` command group to the `aura` CLI that exposes every Aura REST oper
 
 
 
+
+## 2026-11-10, Apply the consumer rule to the internal REST library (rest-library-consumer-rule)
+
+The internal REST library is retired whole, on counted evidence: the consumer enumeration found zero production consumers (the extensions migrated to the typed MCP interface, the CLI was already removed), so the generated client, its wrapper, the REST credential path, the spec source, the sync and codegen targets with their dev dependency, and the library's tests all left the tree, about 49,900 lines. The two type-only fixture imports in the feedback test were inlined as local fixture types rather than keeping the library alive; the guard flipped from keep-targets to removal pins, and the suite settled at 99 shared tests plus the ten extension suites, all green on the landed state. With this, the package's Aura access is the MCP interface alone: the registration, the mention machinery, and the feedback tool, with no REST code path left in production anywhere in the package.
+
 ## 2026-11-10, Feedback submission on MCP (feedback-mcp-submission)
 
 The feedback tool submits through the MCP server: the confirmed sign-off flow now drives the typed interface's create-feedback method with the forced MCP source tag, the local JSONL audit record is byte-identical to the REST-era one, and the injected warning names the current tool spelling while still forbidding unsupervised model calls. No production extension file imports the shared REST client anymore, which completes the extension layer's migration onto the interface. The factory grew three injectable seams for tests (credential loading, interface construction, the audit file path), the interface is built per submission from freshly loaded credentials so the contract self-check runs on every send, and the suite verifies the whole path hermetically against a loopback fake instance (no live feedback rows are ever created by tests). The hermetic construction-path pattern landed with the mention machinery is reused here. The full gate (178 shared tests, ten extension suites, typecheck) is green on the landed state.

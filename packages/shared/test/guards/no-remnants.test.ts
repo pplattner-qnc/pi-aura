@@ -273,7 +273,7 @@ describe("no-remnants guard: shared digest core", () => {
 
   it("keeps the surviving subpath exports", () => {
     const exports = readSharedExports();
-    for (const key of [".", "./keyring", "./aura-client", "./*"]) {
+    for (const key of [".", "./keyring", "./*"]) {
       assert.ok(
         key in exports,
         `package.json should keep the ${key} export (guard against over-deletion)`,
@@ -517,13 +517,15 @@ describe("no-remnants guard: root manifest and infra", () => {
   });
 });
 
-// remove-cli-rest-surface: the agent-facing CLI and REST access surface is
-// removed unconditionally (the operator's settled retirement). The bundle,
-// its serving scripts, and the generated REST reference resource are gone;
-// the build surface carries no target that produces them; the root manifest
-// no longer lists the scripts workspace. The shared package's spec sync and
-// codegen targets stay (the internal REST library follows the consumer
-// rule in a later ticket).
+// remove-cli-rest-surface, then rest-library-consumer-rule: the agent-facing
+// CLI and REST access surface is removed unconditionally (the operator's
+// settled retirement), and the internal REST library followed the consumer
+// rule (zero production consumers after the MCP migrations; the two
+// type-only fixture imports inlined test-side). The bundle, its serving
+// scripts, and the generated REST reference resource are gone; the build
+// surface carries no target that produces them; the root manifest no longer
+// lists the scripts workspace; and the shared package's spec sync and
+// codegen targets went with the library.
 describe("no-remnants guard: CLI and REST reference removal", () => {
   it("has no CLI bundle in the aura skill directory", () => {
     const dir = path.join(repoRoot, "skills", "core", "aura", "dist");
@@ -587,12 +589,124 @@ describe("no-remnants guard: CLI and REST reference removal", () => {
     );
   });
 
-  it("keeps the Taskfile targets the shared package still needs", () => {
+  it("keeps the Taskfile target the package still needs", () => {
     const taskfile = fs.readFileSync(path.join(repoRoot, "Taskfile.yml"), "utf-8");
-    for (const needle of ["codegen", "openapi-sync", "typecheck"]) {
-      assert.ok(
-        taskfile.includes(needle),
-        `Taskfile.yml should keep the ${needle} target (guard against over-deletion; the consumer-rule ticket owns the REST library's targets)`,
+    assert.ok(
+      taskfile.includes("typecheck"),
+      "Taskfile.yml should keep the typecheck target (guard against over-deletion)",
+    );
+  });
+});
+
+// rest-library-consumer-rule: the internal REST library followed the
+// consumer rule. The count after the MCP migrations and the CLI removal:
+// zero production consumers; the only remaining import sites were two
+// type-only fixture imports in extensions/aura-feedback.test.ts
+// (CreateFeedbackInput, FeedbackDetail), inlined as local fixture types.
+// Removed: the generated client (src/generated/), its wrapper
+// (aura-client.ts, hey-api-aura-client.ts), the REST credential path
+// (aura-credentials.ts), the spec loader and the generic-invoker helpers
+// (src/openapi/, src/rest/), the spec source (openapi/openapi.yaml), the
+// sync and codegen targets (the Taskfile targets, scripts/openapi-sync.sh,
+// openapi-ts.config.ts, tsconfig.codegen.json, the codegen devDependency),
+// and the library's tests. The embedding provider (src/embed/) is not the
+// REST library and survives the removal.
+const REST_LIBRARY_FILES_GONE = [
+  "packages/shared/src/aura-client.ts",
+  "packages/shared/src/hey-api-aura-client.ts",
+  "packages/shared/src/aura-credentials.ts",
+  "packages/shared/openapi-ts.config.ts",
+  "packages/shared/tsconfig.codegen.json",
+  "scripts/openapi-sync.sh",
+  "packages/shared/test/hey-api-aura-client.test.ts",
+  "packages/shared/test/blueprint-version-verbs.test.ts",
+  "packages/shared/test/review-verbs.test.ts",
+  "packages/shared/test/aura-credentials.test.ts",
+  "packages/shared/test/openapi-loader.test.ts",
+];
+
+const REST_LIBRARY_DIRS_GONE = [
+  "packages/shared/src/generated",
+  "packages/shared/src/openapi",
+  "packages/shared/src/rest",
+  "packages/shared/openapi",
+  "packages/shared/test/rest",
+  "packages/shared/test/openapi-fixtures",
+];
+
+describe("no-remnants guard: REST library removal", () => {
+  it("has no REST library source, spec, or test files", () => {
+    const offenders = REST_LIBRARY_FILES_GONE.filter((file) =>
+      fs.existsSync(path.join(repoRoot, file)),
+    );
+    assert.deepEqual(
+      offenders,
+      [],
+      `the REST library files should be deleted (zero production consumers; the consumer rule removes the library), still found: ${offenders.join(", ") || "none"}`,
+    );
+  });
+
+  it("has no generated client, spec, invoker, or fixture directories", () => {
+    const offenders = REST_LIBRARY_DIRS_GONE.filter((dir) =>
+      fs.existsSync(path.join(repoRoot, dir)),
+    );
+    assert.deepEqual(
+      offenders,
+      [],
+      `the REST library directories should be deleted with the library, still found: ${offenders.join(", ") || "none"}`,
+    );
+  });
+
+  it("registers no aura-client subpath export and no codegen tooling in the shared package", () => {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(sharedRoot, "package.json"), "utf-8"),
+    ) as {
+      exports?: Record<string, string>;
+      scripts?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    assert.equal(
+      "./aura-client" in (pkg.exports ?? {}),
+      false,
+      "package.json should not export the removed ./aura-client subpath",
+    );
+    assert.equal(
+      "codegen" in (pkg.scripts ?? {}),
+      false,
+      "package.json should carry no codegen script (the generated client is removed)",
+    );
+    assert.equal(
+      "@hey-api/openapi-ts" in (pkg.devDependencies ?? {}),
+      false,
+      "package.json should carry no @hey-api/openapi-ts devDependency (the codegen target is removed)",
+    );
+  });
+
+  it("carries no sync or codegen target in the Taskfile", () => {
+    const taskfile = fs.readFileSync(path.join(repoRoot, "Taskfile.yml"), "utf-8");
+    const banned = /^  (codegen|gen|openapi-sync|openapi-sync-and-codegen):$/m;
+    const offenders = taskfile
+      .split("\n")
+      .filter((line) => banned.test(line));
+    assert.deepEqual(
+      offenders,
+      [],
+      `Taskfile.yml should carry no sync or codegen target (the REST library is removed), still found: ${offenders.join(" | ") || "none"}`,
+    );
+  });
+
+  it("keeps the surviving shared package surface and the remaining seam suite", () => {
+    for (const kept of [
+      "packages/shared/src/embed",
+      "packages/shared/src/settings.ts",
+      "packages/shared/src/keyring",
+      "packages/shared/test/embed/local-provider.test.ts",
+      "extensions/aura-mcp-client.test.ts",
+    ]) {
+      assert.equal(
+        fs.existsSync(path.join(repoRoot, kept)),
+        true,
+        `${kept} should survive the REST library removal (guard against over-deletion)`,
       );
     }
   });
@@ -721,12 +835,8 @@ describe("no-remnants guard: testing doc", () => {
     );
   });
 
-  it("re-points the FakeKeyring seam at the remaining hey-api-aura-client suite", () => {
+  it("keeps the FakeKeyring seam suite on disk after the REST library removal", () => {
     const testing = fs.readFileSync(path.join(repoRoot, "docs", "testing.md"), "utf-8");
-    assert.ok(
-      testing.includes("packages/shared/test/hey-api-aura-client.test.ts"),
-      "the keyring mock convention should reference the remaining hey-api-aura-client suite",
-    );
     assert.ok(
       testing.includes("FakeKeyring"),
       "the keyring mock convention should name the FakeKeyring seam",
@@ -735,8 +845,13 @@ describe("no-remnants guard: testing doc", () => {
       fs.existsSync(
         path.join(repoRoot, "packages", "shared", "test", "hey-api-aura-client.test.ts"),
       ),
+      false,
+      "the hey-api-aura-client suite should be deleted with the REST library",
+    );
+    assert.equal(
+      fs.existsSync(path.join(repoRoot, "extensions", "aura-mcp-client.test.ts")),
       true,
-      "the re-pointed seam suite should exist on disk",
+      "the remaining FakeKeyring seam suite (extensions/aura-mcp-client.test.ts) should exist on disk",
     );
   });
 });

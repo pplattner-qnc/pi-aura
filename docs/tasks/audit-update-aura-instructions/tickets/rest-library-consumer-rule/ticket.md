@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Apply the consumer rule to the internal REST library
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by:
 - mention-machinery-mcp
 - feedback-mcp-submission
@@ -35,3 +35,13 @@ Guard tests pin the outcome either way. The final package layout this ticket pro
 - mention-machinery-mcp
 - feedback-mcp-submission
 - remove-cli-rest-surface
+
+## Implementation notes
+
+Landed as merge 00d53d4 on task/rest-library-consumer-rule (the task branch cut from develop, carrying the working branch's single removal commit 36593ff, 45 files, 171 insertions, 49,865 deletions) plus the land docs commit a430f82 staging the deviation report and the state pointer. The land worker timed out composing its result document after completing every landing mechanic; the parent's close-out CI gate re-ran the full always set on the landed branch green (shared suite, ten extension suites, typecheck).
+
+The consumer count (the ticket's first evidence obligation, recorded here and in the ticket's .work report): zero production consumers. No extension or shared source file imports the REST client, the wrapper modules, the generated SDK, or the spec loader; the reference engine's import died with the mention-machinery seam rename, the feedback tool's with its migration, the CLI's with the removal ticket. The remaining in-package consumers were the two type-only fixture imports in the feedback test (inlined as local fixture types), the library's own seven suites (removed with it), and guard keep-pins (flipped, not consumed).
+
+The decision, on that counted evidence: remove, whole. Gone with the library: the generated client, the wrapper, the REST credential path (its sole consumer was the wrapper), the spec loader and the generic-invoker helpers under it, the spec source itself, the sync and codegen targets and their dev dependency, and the library's tests. Zero-consumer stragglers were removed under the no-half-state criterion rather than inlined (nothing was left to inline into). The guard's keep-target assertions for codegen and openapi-sync were dropped as the sanctioned outcome; the typecheck target pin survives; the stale scripts-tree comments were cleaned. The shared suite is 99 tests after the removal (the count drop is the library's suites leaving).
+
+Export to the documentation tickets: the final package layout is settled. The package ships the six-extension manifest, the three interface modules, the rules loader, the reference engine and cache, and nothing else; the shared package holds the keyring, the settings, and their tests.
