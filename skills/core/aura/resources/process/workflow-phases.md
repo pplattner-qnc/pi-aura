@@ -49,8 +49,10 @@ status of the task's series, reason required).
 
 **Backward rework jumps** are a fixed set: `IN_ALIGNMENT` → `IN_REFINEMENT`,
 `IN_DEVELOPMENT` → `IN_REFINEMENT`, `IN_REVIEW` → `IN_DEVELOPMENT`, and
-`IN_REVIEW` → `IN_REFINEMENT`. Anything else that moves backward or skips a
-phase needs a `status_change_reason`.
+`IN_REVIEW` → `IN_REFINEMENT`. Together with the forward next status, these
+are the allowed moves; a jump outside them (any other backward move, or a
+skipped phase) is a disallowed jump and only goes through with a
+`status_change_reason`.
 
 ## Phase details
 
