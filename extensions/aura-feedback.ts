@@ -15,7 +15,7 @@
  *
  * Interactive flow (TUI only; non-interactive modes get a clear error result):
  *
- *   1. Confirm screen — shows the proposed `title` + `body` as text and two
+ *   1. Confirm screen: shows the proposed `title` + `body` as text and two
  *      checkboxes (`is_anonymous`, `notify_author`) below. Four actions:
  *        - Yes     → submit as-is, append to the local log, return the UUID.
  *        - No      → do not send; user may add an optional comment; the LLM
@@ -25,7 +25,7 @@
  *                    should lead to another `aura_feedback` call).
  *        - Edit    → open the edit screen.
  *
- *   2. Edit screen — all four fields editable (title/body text inputs, the two
+ *   2. Edit screen: all four fields editable (title/body text inputs, the two
  *      flags as checkboxes), Submit + Cancel at the bottom.
  *        - Submit  → same as Yes, but with the edited payload, and the result
  *                    names the edited fields so the LLM knows what changed.
@@ -47,7 +47,7 @@
  * See `skills/core/aura/SKILL.md` → "Submitting feedback about Aura" and
  * `skills/core/aura/resources/usecases/feedback-submission.md`.
  *
- * One concern per extension — this file owns the feedback-proposal tool and
+ * One concern per extension: this file owns the feedback-proposal tool and
  * its interactive sign-off; it does not touch the reference engine
  * (`aura-references.ts`, which also owns the legacy `@AURA-<number>` alias),
  * the reachability probe (`aura-tasks.ts`), or the skill reminder
@@ -206,7 +206,7 @@ export function formatRejectedResultText(
  *  proposal was sent verbatim. */
 export function formatEditedResultText(created: FeedbackCreated): string {
   return [
-    `Feedback created in Aura (UUID ${created.id}, status ${created.status}) — the user edited the payload before submitting.`,
+    `Feedback created in Aura (UUID ${created.id}, status ${created.status}); the user edited the payload before submitting.`,
     `Logged to ${FEEDBACK_LOG_PATH}.`,
   ].join("\n");
 }
@@ -301,7 +301,7 @@ export default function (pi: ExtensionAPI, options: AuraFeedbackExtensionOptions
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const input = params as AuraFeedbackInput;
 
-      // Fail fast on validation before opening the prompt — saves the user a
+      // Fail fast on validation before opening the prompt: it saves the user a
       // round-trip and keeps the API's hard limits as a local guard.
       const validationError = validatePayload(input);
       if (validationError) {
@@ -327,7 +327,7 @@ export default function (pi: ExtensionAPI, options: AuraFeedbackExtensionOptions
         };
       }
 
-      // The working payload — the confirm screen reads from this, the edit
+      // The working payload: the confirm screen reads from this, the edit
       // screen mutates it. Starts as the agent's proposal.
       const payload: AuraFeedbackInput = {
         title: input.title,
@@ -340,7 +340,7 @@ export default function (pi: ExtensionAPI, options: AuraFeedbackExtensionOptions
       // also carries the (possibly edited) payload.
       const decision = await runFeedbackPrompt(ctx, payload);
       if (!decision) {
-        // Escaped at the top level — treat as a No without a comment.
+        // Escaped at the top level: treat as a No without a comment.
         return {
           content: [
             { type: "text", text: formatRejectedResultText("no", undefined) },
@@ -368,7 +368,7 @@ export default function (pi: ExtensionAPI, options: AuraFeedbackExtensionOptions
         };
       }
 
-      // decision.action === "submit" — send to Aura.
+      // decision.action === "submit": send to Aura.
       const sendPayload = buildSendPayload(decision.payload);
       const logPath = options.logPath ?? FEEDBACK_LOG_PATH;
       try {
@@ -379,7 +379,7 @@ export default function (pi: ExtensionAPI, options: AuraFeedbackExtensionOptions
         try {
           await appendFeedbackLog(sendPayload, created, logPath);
         } catch (logErr) {
-          // Surface in the result text but do not fail the tool — the row
+          // Surface in the result text but do not fail the tool: the row
           // exists in Aura either way.
           const logNote = ` (WARNING: failed to log locally: ${
             logErr instanceof Error ? logErr.message : String(logErr)
@@ -515,7 +515,7 @@ async function runFeedbackPrompt(
 }
 
 // ---------------------------------------------------------------------------
-// Confirm screen — Yes / No / Refine / Edit
+// Confirm screen: Yes / No / Refine / Edit
 // ---------------------------------------------------------------------------
 
 async function confirmScreen(
@@ -628,7 +628,7 @@ const CONFIRM_ACTION_DESCRIPTIONS: Record<ConfirmAction, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Edit screen — title / body / anonymous / notify + Submit / Cancel
+// Edit screen: title / body / anonymous / notify + Submit / Cancel
 // ---------------------------------------------------------------------------
 
 /** The editable field that currently has focus. */
@@ -702,7 +702,7 @@ async function editScreen(
     }
 
     titleEditor.onSubmit = () => {
-      // Enter in the title field moves to the body rather than submitting —
+      // Enter in the title field moves to the body rather than submitting:
       // a single-line field shouldn't end the whole form.
       commit();
       field = "body";
@@ -803,7 +803,7 @@ async function editScreen(
         return; // no text input for checkbox fields
       }
 
-      // Text field — route to the editor.
+      // Text field: route to the editor.
       activeEditor().handleInput(data);
       refresh();
     }
@@ -915,7 +915,7 @@ async function editScreen(
 }
 
 // ---------------------------------------------------------------------------
-// Comment screen — free text the user leaves on No / Refine
+// Comment screen: free text the user leaves on No / Refine
 // ---------------------------------------------------------------------------
 
 async function commentScreen(
@@ -925,8 +925,8 @@ async function commentScreen(
 ): Promise<string | undefined> {
   const prompt =
     action === "refine"
-      ? "Refine requested — leave a comment for the agent (required to refine the proposal):"
-      : "Rejected — leave an optional comment for the agent (or submit empty):";
+      ? "Refine requested. Leave a comment for the agent (required to refine the proposal):"
+      : "Rejected. Leave an optional comment for the agent (or submit empty):";
 
   return ctx.ui.custom<string | undefined>((tui, theme, _kb, done) => {
     let cachedLines: string[] | undefined;
@@ -950,7 +950,7 @@ async function commentScreen(
     editor.onSubmit = (value) => {
       const trimmed = value.trim();
       if (action === "refine" && !trimmed) {
-        // Refuse an empty refine comment — keep the user in the editor so
+        // Refuse an empty refine comment: keep the user in the editor so
         // they can type one. (No action; just don't call done.)
         refresh();
         return;
@@ -963,7 +963,7 @@ async function commentScreen(
         // Esc from the comment screen: for `no` this is "no comment"; for
         // `refine` we still need a comment, so treat Esc as "stay" unless the
         // editor is empty (then allow exit with a prompt to the caller that
-        // refinement needs input — the caller's result text already tells the
+        // refinement needs input; the caller's result text already tells the
         // agent to ask the user).
         if (action === "refine") {
           // Keep the requirement: Esc does nothing here. The user must type

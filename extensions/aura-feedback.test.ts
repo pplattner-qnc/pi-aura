@@ -4,12 +4,14 @@
  * Run with:
  *   node --experimental-strip-types extensions/aura-feedback.test.ts
  *
- * Covers the pure, pi-session-free surface only: payload validation, the
+ * Covers the pure, pi-session-free surface: payload validation, the
  * `source: "MCP"` forcing in {@link buildSendPayload}, log-entry shape and
- * serialization, and the tool-result text formatters. The interactive prompt
- * (confirm/edit/comment screens) and the live Aura `POST /feedback` call are
- * exercised by the pi runtime once settings + a PAT are configured, mirroring
- * how the rest of the extension suite is verified.
+ * serialization, the tool-result text formatters, and the submission path
+ * itself (the MCP createFeedback call over a fake caller and over a loopback
+ * fake server, the core-drift degrade path, the JSONL record). The sign-off
+ * decisions are driven through the real prompt code with scripted answers;
+ * only the screens' rendering and key handling are exercised by the pi
+ * runtime, mirroring how the rest of the extension suite is verified.
  */
 
 import assert from "node:assert/strict";
@@ -94,7 +96,7 @@ function createdRow(overrides: Partial<FeedbackDetail> = {}): FeedbackDetail {
 }
 
 // ---------------------------------------------------------------------------
-// buildSendPayload — always forces source: "MCP"
+// buildSendPayload always forces source: "MCP"
 // ---------------------------------------------------------------------------
 
 {
@@ -161,7 +163,7 @@ function createdRow(overrides: Partial<FeedbackDetail> = {}): FeedbackDetail {
 }
 
 // ---------------------------------------------------------------------------
-// formatRejectedResultText — No vs Refine
+// formatRejectedResultText: No vs Refine
 // ---------------------------------------------------------------------------
 
 {
