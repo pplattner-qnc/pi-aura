@@ -157,12 +157,15 @@
  * one-block-documents-all-four end state.
  *
  * Credentials: the server kinds talk to Aura through the typed aura-mcp
- * interface (`createAuraMcpInterface`, which reads `aura.baseUrl` from
- * settings plus the Aura PAT from the OS keyring, and runs the contract
- * self-check at construction). When credentials are missing the
- * construction rejects, every lookup degrades to its cache-only answer,
- * and nothing ever throws into the session. Rule references never need
- * credentials (local kind).
+ * interface. The factory loads the real credentials through the exported
+ * loader (`loadAuraMcpCredentials`, the package's dynamic-import seams over
+ * settings and keyring, the same read the registration extension does) and
+ * passes them into `createAuraMcpInterface` beside the notify hook; the
+ * construction then derives the endpoint from `aura.baseUrl`, authenticates
+ * with the keyring PAT, and runs the contract self-check. When credentials
+ * are missing the construction rejects, every lookup degrades to its
+ * cache-only answer, and nothing ever throws into the session. Rule
+ * references never need credentials (local kind).
  *
  * Tests: the pure seams are unit-tested in
  * `extensions/aura-references.test.ts`. Run with:
@@ -172,7 +175,13 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadRules, type Rule } from "./cursor-rules.ts";
-import { auraMcpJson, createAuraMcpInterface, type AuraMcpInterface } from "./aura-mcp-client.ts";
+import {
+  auraMcpJson,
+  createAuraMcpInterface,
+  loadAuraMcpCredentials,
+  type AuraMcpCredentials,
+  type AuraMcpInterface,
+} from "./aura-mcp-client.ts";
 
 // ---------------------------------------------------------------------------
 // Autocomplete types (minimal structural shapes matching pi-tui's interface)
@@ -2089,7 +2098,22 @@ async function createSessionCache(): Promise<{
 // Extension factory
 // ---------------------------------------------------------------------------
 
-export default function (pi: ExtensionAPI): void {
+/** Injection points for the extension factory (the same hook pattern the
+ *  registration extension uses). Production wiring passes nothing: the
+ *  credentials load through the real loader over the package's
+ *  dynamic-import seams, and the session cache is the real sqlite-backed
+ *  builder. */
+export interface AuraReferencesExtensionOptions {
+  /** Inject the credential read (test hook; defaults to
+   *  {@link loadAuraMcpCredentials} over the package's dynamic-import
+   *  seams). */
+  loadCredentials?: () => Promise<AuraMcpCredentials>;
+  /** Inject the session cache builder (test hook; defaults to the real
+   *  sqlite-backed {@link createSessionCache}). */
+  createCache?: () => Promise<{ cache: ReferenceCache; shouldSkipWarmup: (kind: string) => boolean }>;
+}
+
+export default function (pi: ExtensionAPI, options: AuraReferencesExtensionOptions = {}): void {
   // The session's typed aura-mcp interface: constructed once per session_start
   // (its construction runs the contract self-check; the notify hook surfaces
   // drift warnings through the UI). A failed construction (missing
@@ -2180,7 +2204,23 @@ export default function (pi: ExtensionAPI): void {
     if (previousInterface !== null) {
       void previousInterface.then((ai) => ai.close()).catch(() => {});
     }
+    // The previous session's interface was released above; now the session's
+    // credentials, loaded through the same exported loader the registration
+    // extension uses (settings plus keyring over the dynamic-import seams).
+    // The construction consumes them: without this read the default caller
+    // would resolve the connection from its (empty) arguments and throw on
+    // the missing PAT, latching every session cache-only. A broken loader
+    // read degrades to the empty set, so the construction below rejects into
+    // the existing catch and the gates stay off for the session.
+    let credentials: AuraMcpCredentials = { pat: null };
+    try {
+      credentials = options.loadCredentials ? await options.loadCredentials() : await loadAuraMcpCredentials();
+    } catch {
+      // Degrade to the no-credentials state; never throw into the session.
+    }
     sessionInterface = createAuraMcpInterface({
+      ...(credentials.baseUrl !== undefined ? { baseUrl: credentials.baseUrl } : {}),
+      ...(credentials.pat !== null ? { pat: credentials.pat } : {}),
       notify: (message, type) => ctx.ui.notify(message, type ?? "warning"),
     });
     void sessionInterface
@@ -2216,7 +2256,7 @@ export default function (pi: ExtensionAPI): void {
     // unit-test fake and the silent fallback when the store cannot be
     // built. A /reload re-emits session_start and swaps in a fresh session
     // cache backed by the same file.
-    const { cache, shouldSkipWarmup } = await createSessionCache();
+    const { cache, shouldSkipWarmup } = options.createCache ? await options.createCache() : await createSessionCache();
     sessionCache = cache;
     warnLegacySyntax = createDeprecationWarningDecision();
 

@@ -82,7 +82,7 @@ import auraReferences, {
   type WikiTreeNode,
 } from "./aura-references.ts";
 import type { Rule } from "./cursor-rules.ts";
-import { createAuraMcpInterface, type AuraMcpCaller } from "./aura-mcp-client.ts";
+import { createAuraMcpInterface, loadAuraMcpCredentials, type AuraMcpCaller } from "./aura-mcp-client.ts";
 import {
   SHIPPED_AURA_MCP_TOOLS,
   type AuraMcpLiveTool,
@@ -4181,5 +4181,311 @@ console.log("factory: ok");
 }
 
 console.log("kind menu: bare # offers task/artifact/wiki, rule hidden: ok");
+
+// ---------------------------------------------------------------------------
+// The production construction path (session_start): the real loader over the
+// fake keyring/settings fixtures, the default caller, a reachable fake
+// aura-mcp-dev instance
+//
+// Regression guard for the construction blocker: the factory once built
+// `createAuraMcpInterface({ notify })` with no credentials, so the default
+// caller resolved the connection from its (empty) arguments, threw on the
+// missing PAT, and the rejection latched `clientAvailable` false for every
+// session: no warmup, no SWR refresh, every mention cache-only for every
+// user. The suite stayed green because every other test injects a fake
+// caller at the adapter seam. This block drives the factory's own
+// construction path with NO injected caller anywhere: the real
+// `loadAuraMcpCredentials` runs over its fixture seams (a tmp settings file
+// plus a fake keyring), the real pi-mcp client connects over real loopback
+// HTTP to a reachable fake aura-mcp-dev, and the LOADED credentials must
+// reach the wire and light the whole session up (warmups, gates, renders).
+// ---------------------------------------------------------------------------
+
+/** One recorded request at the fake aura-mcp-dev instance: the JSON-RPC
+ *  method, the tool name and arguments of a tools/call, and the auth header
+ *  the production caller sent. */
+interface FakeInstanceCall {
+  method: string | undefined;
+  tool: string | undefined;
+  args: Record<string, unknown> | undefined;
+  authorization: string | undefined;
+  url: string | undefined;
+}
+
+/** A minimal recording fake keyring: the loader seam's keyring fixture (the
+ *  same shape the aura-mcp-client credential-seam tests pass). */
+function recordingFakeKeyring(pat: string | null) {
+  const calls: Array<{ service: string; name: string }> = [];
+  return {
+    calls,
+    async getSecret(key: { service: string; name: string }): Promise<string | null> {
+      calls.push({ ...key });
+      return pat;
+    },
+  } as never;
+}
+
+/** A reachable stand-in for the live aura-mcp-dev server: the minimal
+ *  streamable-HTTP MCP handshake (initialize, notifications/initialized,
+ *  tools/list) plus the tool calls the session exercises, served over real
+ *  loopback HTTP so the production construction path (the default caller
+ *  built from the loaded credentials) connects end to end. Notifications
+ *  get 202, GET gets 405 (no server-to-client stream), the shipped tool
+ *  contracts are served for the self-check (drift-free), and unknown tools
+ *  get a JSON-RPC error (an application failure, the adapter-degrade
+ *  shape). */
+async function fakeAuraInstance(handlers: Record<string, (args: Record<string, unknown>) => unknown>) {
+  const calls: FakeInstanceCall[] = [];
+  const { createServer } = await import("node:http");
+  const server = createServer((req, res) => {
+    if (req.method === "GET") {
+      res.writeHead(405);
+      res.end();
+      return;
+    }
+    if (req.method === "DELETE") {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk: Buffer) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      let message: {
+        id?: unknown;
+        method?: string;
+        params?: { protocolVersion?: string; name?: string; arguments?: Record<string, unknown> };
+      } = {};
+      try {
+        message = JSON.parse(body) as typeof message;
+      } catch {
+        // Malformed body: handled by the fallthrough error reply below.
+      }
+      calls.push({
+        method: message.method,
+        tool: message.params?.name,
+        args: message.params?.arguments,
+        authorization: req.headers.authorization,
+        url: req.url,
+      });
+      const json = (payload: unknown) => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, ...payload }));
+      };
+      if (message.id === undefined) {
+        // A notification: acknowledged with 202, no reply body.
+        res.writeHead(202);
+        res.end();
+        return;
+      }
+      if (message.method === "initialize") {
+        json({
+          result: {
+            protocolVersion: message.params?.protocolVersion,
+            capabilities: {},
+            serverInfo: { name: "aura-mcp-dev", version: "test-instance" },
+          },
+        });
+        return;
+      }
+      if (message.method === "tools/list") {
+        json({ result: { tools: SHIPPED_AURA_MCP_TOOLS.map(toLiveTool) } });
+        return;
+      }
+      if (message.method === "tools/call") {
+        const handler = handlers[message.params?.name ?? ""];
+        if (handler === undefined) {
+          json({ error: { code: -32601, message: `no fake handler for ${message.params?.name}` } });
+          return;
+        }
+        json({ result: { content: [{ type: "text", text: JSON.stringify(handler(message.params?.arguments ?? {})) }] } });
+        return;
+      }
+      json({ error: { code: -32601, message: `method not found: ${message.method}` } });
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  return {
+    calls,
+    baseUrl: `http://127.0.0.1:${port}/api`,
+    close: async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      server.closeAllConnections();
+    },
+  };
+}
+
+/** Wait until the fake instance has recorded at least the expected tool
+ *  calls and the in-flight chains drained (macrotask hops), so the
+ *  fire-and-forget session warmups landed before the assertions read the
+ *  cache. On a broken construction the warmups never land; the loop just
+ *  exhausts and the assertions report the shortfall. */
+async function untilWarmupLanded(calls: FakeInstanceCall[]): Promise<void> {
+  const minima: Array<[string, number]> = [
+    ["listTasks", 1],
+    ["listArtifacts", 1],
+    ["listKnowledgeSpaces", 1],
+    ["getKnowledgeTree", 2],
+  ];
+  for (let hop = 0; hop < 500; hop++) {
+    const landed = minima.every(([tool, count]) => calls.filter((call) => call.tool === tool).length >= count);
+    if (landed) break;
+    await settle();
+  }
+  await settle();
+  await settle();
+}
+
+{
+  // The session's data: three tasks, two artifacts, two knowledge spaces
+  // (one tree nested), one task reachable only by the targeted by-key read.
+  const tasks = [
+    { id: "t-1", human_key: "AURA-11", title: "Login bug", status: "OPEN" },
+    { id: "t-2", human_key: "AURA-12", title: "Cache race", status: "IN_REVIEW" },
+    { id: "t-3", human_key: "AURA-13", title: "Wiki walk", status: "DONE" },
+  ];
+  const artifacts = [
+    { id: "9f3c2e8a-1111-4222-8333-444444444444", title: "Q3 plan", latest_version: 3, kind: "PLAN" },
+    { id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", title: "Review note", latest_version: 1, kind: "OPINION" },
+  ];
+  const instance = await fakeAuraInstance({
+    // A short page (< the warmup page size): pagination stops after page 1.
+    listTasks: () => ({ items: tasks }),
+    listArtifacts: () => ({ items: artifacts }),
+    listKnowledgeSpaces: () => ({ items: [{ slug: "eng", title: "Engineering" }, { slug: "legal-qa", title: "Legal QA" }] }),
+    getKnowledgeTree: (args) =>
+      args.slug === "eng"
+        ? {
+            nodes: [
+              { id: "n-process", slug: "process", title: "Process", children: [{ id: "n-pr", slug: "pr-conventions", title: "PR conventions" }] },
+              { id: "n-guides", slug: "guides", title: "Guides" },
+            ],
+          }
+        : { nodes: [{ id: "n-qa", slug: "faq", title: "FAQ" }] },
+    getTaskByHumanKey: (args) => {
+      if (args.human_key === "AURA-777") return { id: "t-777", human_key: "AURA-777", title: "Late task", status: "OPEN" };
+      throw new Error(`unknown task ${String(args.human_key)}`);
+    },
+  });
+
+  // The loader-seam fixtures: a tmp settings file whose aura.baseUrl points
+  // at the reachable fake instance, and a recording fake keyring holding the
+  // PAT. The REAL loadAuraMcpCredentials runs over these seams.
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "aura-refs-construction-"));
+  const settingsPath = join(dir, "settings.json");
+  writeFileSync(settingsPath, JSON.stringify({ aura: { baseUrl: instance.baseUrl } }), "utf8");
+  const keyring = recordingFakeKeyring("pat-construction-test");
+
+  // The unit-test cache fake (never the real sqlite store or real settings).
+  const cache = createInMemoryReferenceCache();
+
+  const notifications: Array<{ message: string; type?: string }> = [];
+  // The factory registers a provider FACTORY (`(current) => provider`): it is
+  // handed pi's built-in provider and returns the overlay. Capture the
+  // factory, build the overlay over the established fake built-in provider.
+  let providerFactory: ((current: unknown) => ReturnType<typeof createReferenceAutocompleteProvider>) | null = null;
+  const current = fakeCurrent();
+  const sessionHandlers: Record<string, (event: unknown, ctx: unknown) => Promise<unknown> | void> = {};
+  const fakePi = { on: (name: string, handler: never) => { (sessionHandlers as Record<string, unknown>)[name] = handler; } };
+  const ctx = {
+    cwd: dir,
+    ui: {
+      notify: (message: string, type?: "info" | "warning" | "error") => notifications.push({ message, type }),
+      addAutocompleteProvider: (factory: (current: unknown) => ReturnType<typeof createReferenceAutocompleteProvider>) => {
+        providerFactory = factory;
+      },
+    },
+  };
+
+  // The production factory with its two fixture seams: the credential read
+  // goes through the REAL loader (over the fake keyring/settings fixtures,
+  // NOT a fake caller) and the cache is the unit-test fake. No caller is
+  // injected anywhere: the construction builds the real default caller.
+  auraReferences(fakePi as never, {
+    loadCredentials: () => loadAuraMcpCredentials({ settingsPath, keyring }),
+    createCache: async () => ({ cache, shouldSkipWarmup: () => false }),
+  });
+
+  await sessionHandlers.session_start({}, ctx);
+
+  // The construction (and the warmups it feeds) run fire-and-forget inside
+  // session_start: wait until the session's tool calls landed on the fake
+  // instance before asserting on any of it.
+  await untilWarmupLanded(instance.calls);
+
+  // The real loader was consulted over its fixture seams.
+  assert.deepEqual(keyring.calls, [{ service: "aura", name: "pat" }], "the construction path consulted the real loader over the fake keyring fixture");
+
+  // The construction succeeded with the LOADED credentials: the default
+  // caller connected to the derived endpoint and the loaded PAT rode the
+  // production caller's Authorization header.
+  const initialize = instance.calls.find((call) => call.method === "initialize");
+  assert.notEqual(initialize, undefined, "the default caller connected (the initialize handshake reached the instance)");
+  assert.equal(initialize?.url, "/mcp", "the endpoint was derived from the loaded settings baseUrl");
+  assert.equal(initialize?.authorization, "Bearer pat-construction-test", "the loaded keyring PAT rode the production caller");
+  assert.equal(notifications.length, 0, "a reachable drift-free instance warns nothing at construction");
+
+  // Criterion 2 at this path: after the session's warmup over the reachable
+  // instance, the cache holds fresh rows for all three kinds, including wiki
+  // rows (the kind the old REST-era walk never populated).
+  assert.deepEqual(
+    cache.read("task").map((item) => `${item.key}:${item.status}`),
+    ["AURA-11:OPEN", "AURA-12:IN_REVIEW", "AURA-13:DONE"],
+    "task rows warmed from the reachable instance",
+  );
+  assert.deepEqual(
+    cache.read("artifact").map((item) => `${item.key}:${item.title}`),
+    artifacts.map((a) => `${a.id}:${a.title}`),
+    "artifact rows warmed from the reachable instance",
+  );
+  assert.deepEqual(
+    cache.read("wiki").map((item) => item.key),
+    ["eng/process", "eng/process/pr-conventions", "eng/guides", "legal-qa/faq"],
+    "wiki rows warmed from the slim trees of every listed space",
+  );
+  const wikiRow = cache.read("wiki").find((item) => item.key === "eng/process/pr-conventions");
+  assert.equal((wikiRow as { space?: string } | undefined)?.space, "eng", "the wiki row carries its space extra");
+  assert.equal((wikiRow as { path?: string } | undefined)?.path, "process/pr-conventions", "the wiki row carries its path extra");
+
+  // The warmup pages rode the corrected live wire contract (archived
+  // visibility, paging, sorting; the stale search/status keys are gone).
+  const warmupPage = instance.calls.find((call) => call.tool === "listTasks");
+  assert.deepEqual(warmupPage?.args, { archived: "all", limit: 100, page: 1, sort_by: "updated_at", sort_dir: "desc" });
+
+  // The expansion gate latched from the successful construction: a task
+  // mention the cache does not hold resolves through the targeted by-key
+  // read over the production interface (on the broken path the gate stays
+  // off and the mention stays as typed with no lookup at all).
+  const submitted = await sessionHandlers.input({ text: "see #task:AURA-777 later" }, ctx);
+  assert.deepEqual(submitted, {
+    action: "transform",
+    text: 'see <task-ref key="AURA-777" status="OPEN">Late task</task-ref> later',
+  }, "the construction success armed the per-mention resolution gate");
+
+  // Criterion 1 at this path: typing renders candidates instantly from the
+  // cache, never waiting on the network. The instance is CLOSED (the network
+  // is gone entirely) and all three kinds still render their warmed rows.
+  await instance.close();
+  const provider = providerFactory?.(current.provider);
+  assert.notEqual(provider, undefined, "the session registered its autocomplete provider");
+  const taskRender = await provider?.getSuggestions(["#task:login"], 0, 11, { signal: new AbortController().signal });
+  assert.deepEqual(taskRender?.items.map((item) => item.value), ["#task:AURA-11"], "tasks render from the cache with the network gone");
+  const artifactRender = await provider?.getSuggestions(["#artifact:q3"], 0, 12, { signal: new AbortController().signal });
+  assert.deepEqual(artifactRender?.items.map((item) => item.value), [`#artifact:${artifacts[0]?.id}`], "artifacts render from the cache with the network gone");
+  const wikiRender = await provider?.getSuggestions(["#wiki:eng/"], 0, 10, { signal: new AbortController().signal });
+  assert.deepEqual(
+    wikiRender?.items.map((item) => item.value),
+    ["#wiki:eng/process", "#wiki:eng/process/pr-conventions", "#wiki:eng/guides"],
+    "wiki renders from the cache with the network gone",
+  );
+
+  console.log("construction path: real loader over fixture seams, loaded credentials on the wire, warmup fills all three kinds, gate armed, cache-only render: ok");
+}
 
 console.log("\nall aura-references tests passed");
