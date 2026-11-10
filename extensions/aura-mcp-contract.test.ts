@@ -374,4 +374,134 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
   console.log("auraMcpEndpointFromBaseUrl: ok");
 }
 
+// ---------------------------------------------------------------------------
+// Provenance guard: shipped data vs the introspection dump
+// ---------------------------------------------------------------------------
+
+{
+  // The shipped contracts claim to be transcribed from the effort's
+  // introspection dump. This guard makes the claim true or fails the
+  // suite: every shipped tool must exist in the dump with the same
+  // normalized description, and every shipped parameter must exist there
+  // with the same requiredness, type, enum values, and normalized
+  // description. The dump is the independent evidence source (recorded
+  // live from the server); the shipped module is the derived artifact, so
+  // agreement here is not a tautology. When the package re-audits the
+  // server, refresh the dump first, then re-transcribe, and this guard
+  // validates the refresh.
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const repoRoot = join(import.meta.dirname, "..");
+  const dumpPath = join(
+    repoRoot,
+    "docs",
+    "tasks",
+    "audit-update-aura-instructions",
+    "tasks",
+    "mcp-inventory-drift",
+    ".work",
+    "introspection-dump.md",
+  );
+  const dump = readFileSync(dumpPath, "utf8");
+
+  // Parse the dump: per-tool sections headed by
+  // `### mcp__aura_mcp_dev__<tool>`, each carrying a description block and
+  // one fenced ```ts codemode declaration with the parameter list.
+  interface DumpTool {
+    descriptionBlock: string;
+    params: Map<string, { required: boolean; type: string; enum?: string[]; description: string }>;
+  }
+  const dumpTools = new Map<string, DumpTool>();
+  const sectionRe = /^### mcp__aura_mcp_dev__(\w+)\s*$/gm;
+  let match: RegExpExecArray | null;
+  const sectionStarts: Array<{ name: string; start: number; end: number }> = [];
+  while ((match = sectionRe.exec(dump)) !== null) {
+    sectionStarts.push({ name: match[1], start: match.index, end: dump.length });
+  }
+  for (let i = 0; i < sectionStarts.length; i++) {
+    sectionStarts[i].end = i + 1 < sectionStarts.length ? sectionStarts[i + 1].start : dump.length;
+  }
+  const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+  for (const section of sectionStarts) {
+    const body = dump.slice(section.start, section.end);
+    const fenceStart = body.indexOf("```ts");
+    // The description block sits between the heading line and the codemode
+    // declaration preamble.
+    const headingEnd = body.indexOf("\n");
+    const blockEnd = body.indexOf("codemode tool declaration:");
+    const descriptionBlock = normalize(
+      body.slice(headingEnd + 1, blockEnd === -1 ? fenceStart : blockEnd),
+    );
+    const params = new Map<string, { required: boolean; type: string; enum?: string[]; description: string }>();
+    if (fenceStart !== -1) {
+      const argsStart = body.indexOf("args: {", fenceStart);
+      const argsEnd = body.indexOf("}): Promise<", argsStart);
+      const argsBody = body.slice(argsStart, argsEnd);
+      let pendingDescription = "";
+      for (const rawLine of argsBody.split("\n")) {
+        const line = rawLine.trim();
+        if (line.startsWith("//")) {
+          const text = line.replace(/^\/\/+/, "").trim();
+          // Schema metadata markers (@minLength, @default, ...) are not
+          // part of the human-readable description.
+          if (!/^@\w+/.test(text)) {
+            pendingDescription = normalize((pendingDescription + " " + text).trim());
+          }
+          continue;
+        }
+        const paramMatch = /^([A-Za-z_]\w*)(\?)?:\s*(.+?);\s*$/.exec(line);
+        if (paramMatch) {
+          const [, name, optional, typeText] = paramMatch;
+          if (name === "key") continue; // index signatures carry no contract
+          const enumMatch = /^"([^"]*)"(?:\s*\|\s*"([^"]*)")*$/.exec(typeText);
+          const enumValues = enumMatch ? (typeText.match(/"([^"]*)"/g) ?? []).map((v) => v.slice(1, -1)) : undefined;
+          const baseType = typeText.includes("number") ? "number" : typeText.includes("boolean") ? "boolean" : "string";
+          params.set(name, {
+            required: optional === undefined,
+            type: baseType,
+            ...(enumValues !== undefined ? { enum: enumValues } : {}),
+            description: pendingDescription,
+          });
+          pendingDescription = "";
+        }
+      }
+    }
+    dumpTools.set(section.name, { descriptionBlock, params });
+  }
+
+  // All ten shipped tools must be present in the dump.
+  for (const shipped of SHIPPED_AURA_MCP_TOOLS) {
+    const dumped = dumpTools.get(shipped.name);
+    assert.ok(dumped, `tool ${shipped.name} must exist in the introspection dump`);
+    assert.equal(
+      normalize(shipped.description),
+      dumped.descriptionBlock,
+      `tool ${shipped.name}: shipped description must be the dump's verbatim block (whitespace-normalized)`,
+    );
+    for (const [paramName, shippedParam] of Object.entries(shipped.params)) {
+      const dumpedParam = dumped.params.get(paramName);
+      assert.ok(dumpedParam, `tool ${shipped.name}: shipped parameter "${paramName}" must exist in the dump`);
+      assert.equal(
+        shippedParam.required,
+        dumpedParam.required,
+        `tool ${shipped.name}.${paramName}: requiredness must match the dump`,
+      );
+      assert.equal(shippedParam.type, dumpedParam.type, `tool ${shipped.name}.${paramName}: type must match the dump`);
+      if (shippedParam.enum !== undefined) {
+        assert.deepEqual(
+          [...shippedParam.enum].sort(),
+          [...(dumpedParam.enum ?? [])].sort(),
+          `tool ${shipped.name}.${paramName}: enum values must match the dump`,
+        );
+      }
+      assert.equal(
+        normalize(shippedParam.description),
+        dumpedParam.description,
+        `tool ${shipped.name}.${paramName}: description must match the dump`,
+      );
+    }
+  }
+  console.log(`provenance guard: ${SHIPPED_AURA_MCP_TOOLS.length} shipped tools verified against the dump: ok`);
+}
+
 console.log("\nall aura-mcp-contract tests passed");
