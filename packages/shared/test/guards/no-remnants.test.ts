@@ -2943,3 +2943,46 @@ describe("no-remnants guard: root docs current (project instructions)", () => {
     );
   });
 });
+
+describe("no-remnants guard: root docs current (testing doc)", () => {
+  it("carries no removed build, codegen, or REST-library surface", () => {
+    const testing = readRootDoc("docs/testing.md");
+    assert.doesNotMatch(
+      testing,
+      /codegen|openapi|hey-api|HeyApiAuraClient|tsConfigPath|src\/generated|task gen\b|task build\b/i,
+      "the testing doc should name no removed codegen, spec-sync, or REST-library surface",
+    );
+  });
+
+  it("names the shipped seams and the always set", () => {
+    const testing = readRootDoc("docs/testing.md");
+    for (const needle of [
+      "cd packages/shared && npm test",
+      "task typecheck",
+      "extensions/*.test.ts",
+      "createAuraMcpInterface",
+      "loadCredentials",
+      "createInterface",
+      "FakeKeyring",
+      "extensions/aura-mcp-client.test.ts",
+    ]) {
+      assert.ok(
+        testing.includes(needle),
+        `docs/testing.md should carry the shipped seam or gate: ${needle}`,
+      );
+    }
+  });
+
+  it("keeps the run-if-asked list to what still exists", () => {
+    const testing = readRootDoc("docs/testing.md");
+    assert.ok(
+      testing.includes("extensions/aura-reference-cache.test.ts"),
+      "the cross-process concurrency driver should stay the run-if-asked item",
+    );
+    assert.doesNotMatch(
+      testing,
+      /git diff --exit-code|byte-stability/,
+      "the codegen byte-stability check should be gone with the codegen target",
+    );
+  });
+});
