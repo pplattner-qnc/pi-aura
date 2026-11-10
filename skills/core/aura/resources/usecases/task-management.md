@@ -43,8 +43,8 @@ and other tasks.
 
 > **Note:** The project task tree is not available via MCP after
 > the overhaul. Use `listProjects` (paginated; `archived` filter) to find a
-> project and `getProject` (UUID) for its detail, then the REST endpoint
-> `/projects/{uuid}/tasks` (GET) for the tree, or the Aura UI.
+> project and `getProject` (UUID) for its detail, or browse the tree in
+> the Aura UI.
 
 ## Creating tasks
 
@@ -149,5 +149,4 @@ people-finding use `searchUsers` (min 2 chars, all authenticated users) or
 ## Owner and crew management
 
 Owner/crew assignment is not available via MCP after the overhaul. Use the
-Aura UI, or the REST endpoints in `openapi-new.yaml` (`/tasks/{uuid}/owner-search*`,
-`/tasks/{uuid}/crew-search*`).
+Aura UI.

@@ -761,3 +761,65 @@ describe("no-remnants guard: bug archive", () => {
     );
   });
 });
+
+// remove-cli-rest-surface: no shipped file teaches reaching Aura through
+// the CLI or REST. The bundled CLI and the generated REST reference are
+// deleted, and the docs teach MCP-first access with UI pointers for the
+// REST-only capabilities, so the retired names, the removed command
+// surface, and the REST-teaching patterns fail the suite if they reappear.
+// Scanned: every file under skills/ (the shipped skill tree) and the five
+// root docs. Labels like "REST-only" and a non-teaching note that the REST
+// API exists stay legal; the patterns pin instructions that reach Aura
+// through REST or the removed CLI, and descriptive API-shape mentions that
+// name no access path (e.g. the feedback tool's wrapped POST /feedback
+// endpoint) are out of scope.
+const CLI_REST_TEACHING_PATTERNS: Array<[RegExp, string]> = [
+  [/aura\.mjs/, "the removed CLI bundle's name"],
+  [/rest-api\.md/, "a reference to the removed REST reference resource"],
+  [/openapi-new\.yaml/, "the stale REST-teaching spec pointer"],
+  [/\buse (the )?REST\b/i, "REST-access teaching (use REST)"],
+  [/\bvia (the |a )?REST\b/i, "REST-access teaching (via REST)"],
+  [/\bREST endpoint/, "REST-access teaching (REST endpoints)"],
+  [/\(REST\)/, "REST-access teaching (REST method tag)"],
+  [/UI \/ REST/, "REST-access teaching (UI / REST pointer)"],
+  [/REST \(?`(GET|POST|PATCH|PUT|DELETE)\b/, "REST-access teaching (REST plus HTTP verb)"],
+  [/review-(get|approvals|request|start|decide|reopen)/, "a removed artifact review subcommand"],
+  [/\brest (list|describe|call|search)\b/, "a removed rest CLI subcommand"],
+];
+
+function walkFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkFiles(entryPath));
+    else out.push(entryPath);
+  }
+  return out;
+}
+
+describe("no-remnants guard: no CLI or REST access teaching", () => {
+  it("carries no CLI or REST access teaching in the shipped skills and root docs", () => {
+    const offenders: string[] = [];
+    const scanned = [
+      ...walkFiles(path.join(repoRoot, "skills")),
+      ...ROOT_DOCS.map((doc) => path.join(repoRoot, doc)),
+    ];
+    for (const absPath of scanned) {
+      const lines = fs.readFileSync(absPath, "utf-8").split("\n");
+      for (const [index, line] of lines.entries()) {
+        for (const [pattern, reason] of CLI_REST_TEACHING_PATTERNS) {
+          if (pattern.test(line)) {
+            offenders.push(
+              `${path.relative(repoRoot, absPath)}:${index + 1} (${reason}): ${line.trim()}`,
+            );
+          }
+        }
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "no shipped file should teach reaching Aura through the CLI or REST (MCP-first access, UI pointers for REST-only capabilities)",
+    );
+  });
+});

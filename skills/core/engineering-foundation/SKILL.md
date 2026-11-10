@@ -26,14 +26,12 @@ its own tree (e.g. `.cursor/rules/*.mdc`).
 | The blueprint skills (task-lifecycle, ai-setup/sync, pr-review, …) | `blueprint/skills/` (browse, or see `blueprint/manifest.yaml` for the authoritative list + install target + checksum + version) |
 | The authoritative building-block list (install target, checksum, version, source commit) | `blueprint/manifest.yaml` |
 
-**How to fetch a node** — two handoffs (prefer the first for short docs, the
-second for long ones):
+**How to fetch a node** — through MCP:
 
-- **MCP (short docs, body into context):**
-  `getKnowledgeNodeByPath({ slug: "engineering-foundation", path: "guides/developer-guides" })`
-- **`aura.mjs` workdir model (long docs, body kept out of context):**
-  `node skills/core/aura/dist/aura.mjs wiki get --slug "engineering-foundation/guides/developer-guides"`
-  → body lands at `$WD/body.md`; read it with the `read` tool.
+- `getKnowledgeNodeByPath({ slug: "engineering-foundation", path: "guides/developer-guides" })`
+
+For long docs, write the returned body to disk with the `write` tool, so
+follow-up edits work from the file instead of the context.
 
 See the `aura` skill (`skills/core/aura/SKILL.md` → resources/usecases/wiki-knowledge.md)
 for the full wiki verb set (`getKnowledgeTree`, `searchKnowledge`, …).

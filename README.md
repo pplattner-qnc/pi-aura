@@ -51,7 +51,7 @@ The `aura` skill is discoverable by the agent whenever you mention Aura, tasks, 
 
 ## Design principles
 
-- **File-based for large content.** Artifact bodies and wiki documents travel via the `aura` skill's `aura.mjs` script and local files — never through the LLM context as tool arguments. The script owns a workdir per round-trip (pairs the entity id with the body file, auto-cleans on upload), so id↔body mismatch and stale files are impossible. This avoids re-generation waste, context pollution, and hallucination risk.
+- **Files for large content.** Large artifact and wiki bodies are read through MCP and written to local files with the `write` tool; edits happen on disk, and the updated content travels back through the MCP update tools. This keeps re-generation waste, context pollution, and hallucination risk down — the file on disk is the ground truth while editing.
 - **Process-aware.** The skill encodes the Aura development process (workflow phases, roles, capacity rules, escalation paths) so agents follow it correctly.
 - **Consent-first for sensitive operations.** Escalations, capacity changes for others, and wiki modifications all require explicit user approval.
 

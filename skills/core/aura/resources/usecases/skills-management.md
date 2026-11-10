@@ -35,17 +35,11 @@ setSkillVisibility({ uuid: "<skill-uuid>", ... })
 
 Publish or retract a skill (owner only).
 
-## Assets, plugins, and import pipeline (REST-ONLY)
+## Assets, plugins, and import pipeline
 
 The following skill-administration capabilities are not available via MCP —
-use REST or the Aura UI:
+use the Aura UI:
 
-- **Skill assets** — `listSkillAssets` (REST-ONLY): `GET /skills/{uuid}/assets`
-- **Skill assets** — `uploadSkillAsset` (REST-ONLY): `POST /skills/{uuid}/assets`
-- **Skill plugins** — `listSkillPlugins` (REST-ONLY): `GET /skills/plugins`
-- **Import pipeline** — `validateSkillImport` (REST-ONLY): `POST /skills/import/validate`
-- **Import pipeline** — `confirmSkillImport` (REST-ONLY): `POST /skills/import/confirm`
-- **Import pipeline** — `getSkillImportRun` (REST-ONLY): `GET /skills/import/runs/{uuid}`
-- **Import pipeline** — `getActiveSkillImportRun` (REST-ONLY): `GET /skills/import/runs/active`
-
-See `openapi-new.yaml` for the full REST endpoint details.
+- **Skill assets** — list and upload a skill's asset files
+- **Skill plugins** — manage a skill's plugins
+- **Import pipeline** — validate, confirm, and track skill imports
