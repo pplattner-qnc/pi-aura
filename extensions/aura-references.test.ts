@@ -2270,13 +2270,10 @@ console.log("production @rule: alias autocomplete: ok");
   assert.equal(await expandReferenceMentions("see @rule:tracker-aura.", registry, lookup), `see ${expansion}.`);
   // Uppercase typed name: case-insensitive resolution, canonical output.
   assert.equal(await expandReferenceMentions("see @RULE:TRACKER-AURA", registry, lookup), `see ${expansion}`);
-  // Both syntaxes side by side expand to the same tag shape; the rule
-  // bodies still inject from both forms (the dual matching).
+  // Both syntaxes side by side expand to the same tag shape (the plugin
+  // repo's rules dispatch injects the bodies from either form).
   const both = await expandReferenceMentions("@rule:tracker-aura and #rule:tracker-jira", registry, lookup);
   assert.equal(both, `${expansion} and ${jira}`);
-  const injected = resolveRuleMentions(both, testRules());
-  assert.ok(injected.includes("Use the Aura tracker."));
-  assert.ok(injected.includes("Use Jira."));
   // Unknown names stay exactly as typed (left for the agent to resolve).
   assert.equal(await expandReferenceMentions("see @rule:ghost", registry, lookup), "see @rule:ghost");
   // An empty name is not a mention.
