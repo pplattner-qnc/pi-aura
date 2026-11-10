@@ -2058,6 +2058,110 @@ describe("no-remnants guard: process resources current (workflow phases)", () =>
   });
 });
 
+describe("no-remnants guard: process resources current (review modes)", () => {
+  it("teaches opinions as the successor flow with the graded scale", () => {
+    const file = readProcess("review-modes.md");
+    assert.match(
+      file,
+      /opinion/i,
+      "the opinions flow should be taught as the successor of artifact reviews",
+    );
+    assert.match(
+      file,
+      /Looks good/,
+      "the graded scale's positive end should be named",
+    );
+    assert.match(
+      file,
+      /Rethink the approach/,
+      "the graded scale's critical end should be named",
+    );
+    assert.match(
+      file,
+      /Neutral/,
+      "the neutral option should be named",
+    );
+  });
+
+  it("teaches the opinions flow's shape: no locks, no rounds, edit after submit", () => {
+    const file = readProcess("review-modes.md");
+    assert.match(
+      file,
+      /nothing is locked|no locks|not locked/i,
+      "the no-locks property should be stated",
+    );
+    assert.match(
+      file,
+      /no rounds|there are no rounds|no approval rounds/i,
+      "the no-rounds property should be stated",
+    );
+    assert.match(
+      file,
+      /edit[^\n]{0,60}submit|submitted opinion[^\n]{0,60}edit|edit a submitted opinion/i,
+      "the edit-after-submit capability (v19) should be stated",
+    );
+  });
+
+  it("names the MCP visibility of opinions and the UI pointer", () => {
+    const file = readProcess("review-modes.md");
+    assert.match(
+      file,
+      /opinion_requested/,
+      "the listing filter should be named as the flow's MCP trace",
+    );
+    assert.match(
+      file,
+      /listArtifacts/,
+      "the filter's tool should be named",
+    );
+    assert.match(
+      file,
+      /Aura UI/,
+      "opinion management should carry a UI pointer",
+    );
+  });
+
+  it("carries no CLI review command and no dead review tool names", () => {
+    const file = readProcess("review-modes.md");
+    assert.doesNotMatch(
+      file,
+      /aura\.mjs/,
+      "no CLI command should appear",
+    );
+    for (const dead of [
+      "requestArtifactReview",
+      "getArtifactReview",
+      "submitArtifactDecision",
+      "startArtifactReview",
+      "reopenArtifactReview",
+      "getArtifactApprovals",
+      "review-request",
+    ]) {
+      assert.ok(
+        !file.includes(dead),
+        `the dead review surface ${dead} should be gone`,
+      );
+    }
+  });
+
+  it("keeps the three modes with the async-solo default and the AI flag", () => {
+    const file = readProcess("review-modes.md");
+    assert.match(file, /Mode 1/, "mode 1 should stay");
+    assert.match(file, /Mode 2/, "mode 2 should stay");
+    assert.match(file, /Mode 3/, "mode 3 should stay");
+    assert.match(
+      file,
+      /Default to Mode 1/,
+      "the async-solo default should stay",
+    );
+    assert.match(
+      file,
+      /is_ai_generated: true/,
+      "the AI-comment flag should stay",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
