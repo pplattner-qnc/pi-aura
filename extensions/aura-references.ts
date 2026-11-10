@@ -1158,28 +1158,17 @@ export const ARTIFACT_KIND = "artifact";
  */
 export const MAX_ARTIFACTS = 500;
 
-/** Page size for `listArtifacts` (Aura's max is 100, like tasks). */
+/** Page size for `searchArtifacts` (the live listArtifacts tool caps a page
+ *  at 100, like listTasks). */
 export const ARTIFACT_PAGE_SIZE = 100;
 
-/** The subset of an artifact the engine reads (mirrors the shared client's
- *  Artifact / ArtifactListItem without importing them). */
+/** The subset of an artifact the engine reads (mirrors the live listArtifacts
+ *  / getArtifact payloads without importing them). */
 export interface ArtifactSummary {
   id: string;
   title: string;
   latest_version: number;
   kind: string;
-}
-
-/**
- * The structural subset of the shared AuraClient the artifact adapter needs
- * (same pattern as TaskAuraClient: structural, no import of the live client,
- * which only arrives through the dynamic-import seam; tests pass fakes).
- */
-export interface ArtifactAuraClient {
-  listArtifacts(
-    opts?: Record<string, unknown>,
-  ): Promise<{ items: ArtifactSummary[]; pagination: unknown }>;
-  getArtifact(id: string): Promise<ArtifactSummary>;
 }
 
 /**
@@ -1229,19 +1218,50 @@ export function artifactItemMetadata(
 /**
  * The artifact kind adapter: the first metadata-driven kind (the expansion
  * attributes come from the item's metadata extras, not from the engine's
- * own item fields). Warmup pages `listArtifacts` into the cache at
+ * own item fields). Warmup pages `searchArtifacts` into the cache at
  * session_start; local search matches the uuid prefix OR the title
  * substring, case-insensitively; the server search passes the typed partial
- * as `q` through the SWR seam. Rows follow the prototype's artifact UX: the
+ * as `q` through the SWR seam (parameters already aligned with the live
+ * listArtifacts tool). Rows follow the prototype's artifact UX: the
  * title is the label (uuids are unreadable), the uuid rides the description,
  * and selection inserts the full uuid token, so the uuid appears in the
- * text box only after selection. Aura access goes through the injectable
- * `createClient` factory, exactly as the task adapter does.
+ * text box only after selection. Aura access goes through the typed
+ * aura-mcp interface via the injectable `createInterface` factory, exactly
+ * as the task adapter does (a `AuraMcpToolUnavailableError` degrades to the
+ * cache-only answers like any other failure).
  */
 export function createArtifactAdapter(options: {
-  createClient: () => Promise<ArtifactAuraClient>;
+  createInterface: () => Promise<AuraMcpInterface>;
 }): KindAdapter {
-  const { createClient } = options;
+  const { createInterface } = options;
+
+  /** The artifact list of a searchArtifacts payload (its JSON `items`, or
+   *  nothing when the payload carries no list). */
+  const artifactItemsOf = (payload: unknown): ArtifactSummary[] => {
+    const items = (payload as { items?: unknown } | undefined)?.items;
+    return Array.isArray(items) ? (items as ArtifactSummary[]) : [];
+  };
+
+  /** The artifact object of a getArtifact payload, validated lightly: a
+   *  payload without its identity fields is unresolvable, not a crash. */
+  const artifactPayloadOf = (payload: unknown): ArtifactSummary | null => {
+    if (payload === null || typeof payload !== "object") return null;
+    const candidate = payload as Partial<ArtifactSummary>;
+    if (
+      typeof candidate.id !== "string" ||
+      typeof candidate.title !== "string" ||
+      typeof candidate.latest_version !== "number" ||
+      typeof candidate.kind !== "string"
+    ) {
+      return null;
+    }
+    return {
+      id: candidate.id,
+      title: candidate.title,
+      latest_version: candidate.latest_version,
+      kind: candidate.kind,
+    };
+  };
 
   const formatRow = (item: ReferenceItem): AutocompleteItem => ({
     // The value doubles as the inserted token: `#artifact:` plus the full
@@ -1273,18 +1293,24 @@ export function createArtifactAdapter(options: {
 
     async searchServer(partial, searchOptions = {}) {
       try {
-        const client = await createClient();
-        const res = await client.listArtifacts({
-          q: partial,
-          limit: searchOptions.limit ?? MAX_SUGGESTIONS,
-          sort_by: "updated_at",
-          sort_dir: "desc",
-        });
+        const ai = await createInterface();
+        // The listArtifacts parameters are already aligned with the live
+        // tool: the typed partial is the title-search `q`, capped and
+        // sorted newest-updated first.
+        const payload = auraMcpJson(
+          await ai.searchArtifacts({
+            q: partial,
+            limit: searchOptions.limit ?? MAX_SUGGESTIONS,
+            sort_by: "updated_at",
+            sort_dir: "desc",
+          }),
+        );
         if (searchOptions.signal?.aborted) return [];
-        return res.items.map(artifactToReferenceItem);
+        return artifactItemsOf(payload).map(artifactToReferenceItem);
       } catch {
-        // Missing credentials or a failed search: the SWR merge gets nothing
-        // fresh and skips the write; the session is never disturbed.
+        // A failed call, an unavailable tool path (contract drift), or
+        // missing credentials: the SWR merge gets nothing fresh and skips
+        // the write; the session is never disturbed.
         return [];
       }
     },
@@ -1313,43 +1339,47 @@ export function createArtifactAdapter(options: {
       // ...then via the targeted by-id lookup (uuids match
       // case-insensitively; the server is the authority on casing).
       try {
-        const client = await createClient();
-        return artifactToReferenceItem(await client.getArtifact(token));
+        const ai = await createInterface();
+        const artifact = artifactPayloadOf(auraMcpJson(await ai.getArtifact(token)));
+        return artifact === null ? null : artifactToReferenceItem(artifact);
       } catch {
-        // Missing credentials, 404/403, or network: leave the reference as
-        // typed so the agent can resolve it via the `aura` skill.
+        // Missing credentials, an unavailable tool path (contract drift),
+        // 404/403, or network: leave the reference as typed so the agent can
+        // resolve it via the `aura` skill.
         return null;
       }
     },
 
     async warmup(cache, warmupOptions = {}) {
       try {
-        const client = await createClient();
+        const ai = await createInterface();
         let page = 1;
         let collected = 0;
         while (collected < MAX_ARTIFACTS) {
           if (warmupOptions.signal?.aborted) return;
           // The default (unfiltered) list is the broadest view; newest first
           // so the freshest artifacts land in the cache head.
-          const res = await client.listArtifacts({
-            limit: ARTIFACT_PAGE_SIZE,
-            page,
-            sort_by: "updated_at",
-            sort_dir: "desc",
-          });
-          const mapped = res.items.map(artifactToReferenceItem);
+          const payload = auraMcpJson(
+            await ai.searchArtifacts({
+              limit: ARTIFACT_PAGE_SIZE,
+              page,
+              sort_by: "updated_at",
+              sort_dir: "desc",
+            }),
+          );
+          const mapped = artifactItemsOf(payload).map(artifactToReferenceItem);
           // Write page by page so partial progress (later page failure or
           // an abort mid-flight) still lands.
           cache.write(ARTIFACT_KIND, mapped);
           collected += mapped.length;
-          if (res.items.length < ARTIFACT_PAGE_SIZE) return;
+          if (mapped.length < ARTIFACT_PAGE_SIZE) return;
           page += 1;
         }
       } catch {
-        // Missing credentials (createDefaultAuraClient throws) or a failed
-        // page: warmup is best-effort. Whatever pages landed stay cached; the
-        // session is never disturbed and the provider keeps deferring until
-        // data exists.
+        // Missing credentials (the interface construction rejects), a failed
+        // page, or an unavailable tool path: warmup is best-effort. Whatever
+        // pages landed stay cached; the session is never disturbed and the
+        // provider keeps deferring until data exists.
       }
     },
   };
@@ -1966,7 +1996,7 @@ export function createReferenceAutocompleteProvider(
  * imports, so we dynamic-import the client factory here to keep the
  * unit-test entry point runnable with `node --experimental-strip-types`.
  */
-async function createDefaultClient(): Promise<ArtifactAuraClient & WikiAuraClient> {
+async function createDefaultClient(): Promise<WikiAuraClient> {
   const { createDefaultAuraClient } = await import("@pi-aura/shared/aura-client");
   return createDefaultAuraClient();
 }
@@ -2063,7 +2093,7 @@ export default function (pi: ExtensionAPI): void {
   // cache, the SWR refresh, and the TTL-gated warmup exactly as the task
   // kind does; its items carry the artifact kind + latest version as
   // metadata extras.
-  const artifactAdapter = createArtifactAdapter({ createClient: createDefaultClient });
+  const artifactAdapter = createArtifactAdapter({ createInterface });
   // The wiki kind (the dual-identity kind): same ride (persistent cache,
   // SWR refresh, TTL-gated warmup) with its own sources: the server search
   // is mcpWikiSearch and the warmup is search-seeded (one generic seed

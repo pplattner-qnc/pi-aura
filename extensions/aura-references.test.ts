@@ -2416,35 +2416,27 @@ function fakeArtifacts(count: number, offset = 0): FakeArtifact[] {
   }));
 }
 
-/** Fake artifact client: one array of pages (page 1 by default, so search
- *  queries resolve against pages[0]); option to fail on a page. */
-function fakeArtifactClient(pages: FakeArtifact[][], behavior?: { failOnPage?: number }) {
+/** Fake aura-mcp-dev artifact surface: one array of pages served by the
+ *  listArtifacts handler (paged by the `page` arg, so search queries resolve
+ *  against pages[0]), with call recording (the full args of every call) and
+ *  a failure switch. */
+function fakeArtifactCaller(pages: FakeArtifact[][], behavior?: { failOnPage?: number }) {
   const pageCalls: number[] = [];
   const queries: Array<Record<string, unknown>> = [];
-  return {
-    client: {
-      listArtifacts: async (query?: Record<string, unknown>) => {
-        const page = (query?.page as number | undefined) ?? 1;
-        pageCalls.push(page);
-        queries.push({ ...query });
-        if (behavior?.failOnPage === page) throw new Error("network down");
-        return { items: pages[page - 1] ?? [], pagination: {} };
-      },
-      getArtifact: async () => {
-        throw new Error("not used here");
-      },
+  const { caller } = fakeAuraCaller({
+    listArtifacts: (args) => {
+      const page = typeof args.page === "number" ? args.page : 1;
+      pageCalls.push(page);
+      queries.push({ ...args });
+      if (behavior?.failOnPage === page) throw new Error("network down");
+      return { items: pages[page - 1] ?? [], pagination: {} };
     },
-    pageCalls,
-    queries,
-  };
+  });
+  return { caller, pageCalls, queries };
 }
 
 {
-  const adapter = createArtifactAdapter({
-    createClient: async () => {
-      throw new Error("no credentials in this test");
-    },
-  });
+  const adapter = createArtifactAdapter({ createInterface: noopInterface });
 
   assert.equal(ARTIFACT_KIND, "artifact");
   assert.equal(adapter.kind, ARTIFACT_KIND);
@@ -2583,11 +2575,11 @@ console.log("createArtifactAdapter rows + local filtering: ok");
   // Multi-page pagination: page 1 full (100 items), page 2 partial. Writes
   // land page by page so partial progress survives, and the cached items
   // carry the artifact kind and latest version (the metadata extras).
-  const { client, pageCalls, queries } = fakeArtifactClient([
+  const { caller, pageCalls, queries } = fakeArtifactCaller([
     fakeArtifacts(100),
     fakeArtifacts(3, 100),
   ]);
-  const adapter = createArtifactAdapter({ createClient: async () => client });
+  const adapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   await adapter.warmup(cache);
   assert.equal(cache.read("artifact").length, 103);
@@ -2605,7 +2597,7 @@ console.log("createArtifactAdapter rows + local filtering: ok");
 
   // Cap: at most MAX_ARTIFACTS artifacts are pulled (5 full pages of 100
   // reach the 500 cap, so a 6th page is never requested).
-  const big = fakeArtifactClient([
+  const big = fakeArtifactCaller([
     fakeArtifacts(100, 0),
     fakeArtifacts(100, 100),
     fakeArtifacts(100, 200),
@@ -2613,7 +2605,7 @@ console.log("createArtifactAdapter rows + local filtering: ok");
     fakeArtifacts(100, 400),
     fakeArtifacts(100, 500),
   ]);
-  const capped = createArtifactAdapter({ createClient: async () => big.client });
+  const capped = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(big.caller) });
   const cappedCache = createInMemoryReferenceCache();
   await capped.warmup(cappedCache);
   assert.equal(cappedCache.read("artifact").length, MAX_ARTIFACTS);
@@ -2621,11 +2613,7 @@ console.log("createArtifactAdapter rows + local filtering: ok");
 
   // Missing credentials: createDefaultAuraClient throws. Warmup no-ops
   // (resolves, empty cache, nothing thrown into the session).
-  const noCreds = createArtifactAdapter({
-    createClient: async () => {
-      throw new Error("missing PAT");
-    },
-  });
+  const noCreds = createArtifactAdapter({ createInterface: noopInterface });
   const emptyCache = createInMemoryReferenceCache();
   await noCreds.warmup(emptyCache);
   assert.deepEqual(emptyCache.read("artifact"), []);
@@ -2635,26 +2623,23 @@ console.log("createArtifactAdapter rows + local filtering: ok");
   // and nothing throws into the session.
   const controller = new AbortController();
   const abortPageCalls: number[] = [];
-  const aborting = {
-    listArtifacts: async (query?: { page?: number }) => {
-      const page = query?.page ?? 1;
+  const { caller: abortCaller } = fakeAuraCaller({
+    listArtifacts: (args) => {
+      const page = typeof args.page === "number" ? args.page : 1;
       abortPageCalls.push(page);
       if (page >= 2) controller.abort();
       return { items: fakeArtifacts(100, (page - 1) * 100), pagination: {} };
     },
-    getArtifact: async () => {
-      throw new Error("not used here");
-    },
-  };
-  const abortAdapter = createArtifactAdapter({ createClient: async () => aborting });
+  });
+  const abortAdapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(abortCaller) });
   const abortCache = createInMemoryReferenceCache();
   await abortAdapter.warmup(abortCache, { signal: controller.signal });
   assert.deepEqual(abortPageCalls, [1, 2], "pagination stops after the abort");
   assert.equal(abortCache.read("artifact").length, 200, "landed pages stay cached");
 
   // A page fetch that rejects: warmup resolves (no throw), earlier pages stay.
-  const failing = fakeArtifactClient([fakeArtifacts(100), fakeArtifacts(100, 100)], { failOnPage: 2 });
-  const failAdapter = createArtifactAdapter({ createClient: async () => failing.client });
+  const failing = fakeArtifactCaller([fakeArtifacts(100), fakeArtifacts(100, 100)], { failOnPage: 2 });
+  const failAdapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(failing.caller) });
   const failCache = createInMemoryReferenceCache();
   await failAdapter.warmup(failCache);
   assert.equal(failCache.read("artifact").length, 100, "page 1 survived the page 2 failure");
@@ -2670,8 +2655,8 @@ console.log("createArtifactAdapter warmup: ok");
   // The typed partial lands in `q`; the query is capped and sorted
   // newest-updated first; the result items map to reference items carrying
   // the metadata extras.
-  const { client, queries } = fakeArtifactClient([fakeArtifacts(2)]);
-  const adapter = createArtifactAdapter({ createClient: async () => client });
+  const { caller, queries } = fakeArtifactCaller([fakeArtifacts(2)]);
+  const adapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const results = await adapter.searchServer("onboard");
   assert.deepEqual(queries, [
     { q: "onboard", limit: MAX_SUGGESTIONS, sort_by: "updated_at", sort_dir: "desc" },
@@ -2679,15 +2664,15 @@ console.log("createArtifactAdapter warmup: ok");
   assert.deepEqual(results, fakeArtifacts(2).map(artifactToReferenceItem));
 
   // A custom limit is honored (the SWR seam passes one).
-  const { client: limited, queries: limitedQueries } = fakeArtifactClient([fakeArtifacts(2)]);
-  const limitedAdapter = createArtifactAdapter({ createClient: async () => limited });
+  const { caller: limited, queries: limitedQueries } = fakeArtifactCaller([fakeArtifacts(2)]);
+  const limitedAdapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(limited) });
   await limitedAdapter.searchServer("x", { limit: 1 });
   assert.equal(limitedQueries[0]?.limit, 1);
 
   // An aborted request: the late in-flight results are dropped ([]).
   const controller = new AbortController();
-  const { client: late } = fakeArtifactClient([fakeArtifacts(1)]);
-  const lateAdapter = createArtifactAdapter({ createClient: async () => late });
+  const { caller: late } = fakeArtifactCaller([fakeArtifacts(1)]);
+  const lateAdapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(late) });
   const pending = lateAdapter.searchServer("x", { signal: controller.signal });
   controller.abort(); // abort while the fetch is in flight
   assert.deepEqual(await pending, [], "late results after an abort are dropped");
@@ -2695,14 +2680,9 @@ console.log("createArtifactAdapter warmup: ok");
   // A failed search (missing credentials, network): [] (nothing fresh for
   // the SWR merge, nothing thrown into the session).
   const failingSearch = createArtifactAdapter({
-    createClient: async () => ({
-      listArtifacts: async () => {
-        throw new Error("network down");
-      },
-      getArtifact: async () => {
-        throw new Error("not used here");
-      },
-    }),
+    createInterface: async () => {
+      throw new Error("network down");
+    },
   });
   assert.deepEqual(await failingSearch.searchServer("x"), []);
 }
@@ -2717,8 +2697,8 @@ console.log("createArtifactAdapter searchServer: ok");
   // A server-only match (an artifact outside the local cache window) is
   // added by the write-through, so the next query finds it by title
   // substring one keystroke after the refresh lands.
-  const { client } = fakeArtifactClient([fakeArtifacts(1, 500)]);
-  const adapter = createArtifactAdapter({ createClient: async () => client });
+  const { caller } = fakeArtifactCaller([fakeArtifacts(1, 500)]);
+  const adapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   cache.write("artifact", [
     artifactToReferenceItem({ id: "9f3c0001-1111-4222-8333-444444444444", title: "Onboarding flow review", latest_version: 2, kind: "REVIEW" }),
@@ -2747,8 +2727,8 @@ console.log("refreshReferenceKind server-only artifact match: ok");
     latest_version: 4,
     kind: "PLAN",
   };
-  const { client } = fakeArtifactClient([[renamed]]);
-  const adapter = createArtifactAdapter({ createClient: async () => client });
+  const { caller } = fakeArtifactCaller([[renamed]]);
+  const adapter = createArtifactAdapter({ createInterface: async () => interfaceOverCaller(caller) });
   const cache = createInMemoryReferenceCache();
   cache.write("artifact", [
     artifactToReferenceItem({ id: renamed.id, title: "Old planning doc", latest_version: 3, kind: "PLAN" }),
@@ -2767,11 +2747,7 @@ console.log("refreshReferenceKind artifact rename correction: ok");
 // ---------------------------------------------------------------------------
 
 {
-  const adapter = createArtifactAdapter({
-    createClient: async () => {
-      throw new Error("no credentials in this test");
-    },
-  });
+  const adapter = createArtifactAdapter({ createInterface: noopInterface });
 
   // The expansion shape: <artifact-ref id kind version>title</artifact-ref>,
   // with the kind and version read from the item's metadata extras.
@@ -2803,22 +2779,24 @@ console.log("createArtifactAdapter formatExpansion: ok");
   // A counting client factory: a cache hit with complete metadata must
   // build no client at all (no targeted fetch); only the fallbacks reach
   // Aura.
-  let clientBuilds = 0;
+  let interfaceBuilds = 0;
+  const { caller } = fakeAuraCaller({
+    listArtifacts: () => ({ items: [], pagination: {} }),
+    getArtifact: (args) => {
+      const id = String(args.id);
+      if (id === "77e00001-1111-4222-8333-444444444444") {
+        return { id, title: "Server-known artifact", latest_version: 9, kind: "REVIEW" };
+      }
+      if (id === "0a1b0001-1111-4222-8333-444444444444") {
+        return { id, title: "Refreshed metadata row", latest_version: 5, kind: "PLAN" };
+      }
+      throw new Error("404 not found");
+    },
+  });
   const adapter = createArtifactAdapter({
-    createClient: async () => {
-      clientBuilds += 1;
-      return {
-        listArtifacts: async () => ({ items: [], pagination: {} }),
-        getArtifact: async (id: string) => {
-          if (id === "77e00001-1111-4222-8333-444444444444") {
-            return { id, title: "Server-known artifact", latest_version: 9, kind: "REVIEW" };
-          }
-          if (id === "0a1b0001-1111-4222-8333-444444444444") {
-            return { id, title: "Refreshed metadata row", latest_version: 5, kind: "PLAN" };
-          }
-          throw new Error("404 not found");
-        },
-      };
+    createInterface: async () => {
+      interfaceBuilds += 1;
+      return interfaceOverCaller(caller);
     },
   });
   const cache = createInMemoryReferenceCache(() => 5000);
@@ -2839,7 +2817,7 @@ console.log("createArtifactAdapter formatExpansion: ok");
       fetchedAt: 5000,
     },
   );
-  assert.equal(clientBuilds, 0, "a cache hit builds no client");
+  assert.equal(interfaceBuilds, 0, "a cache hit builds no interface");
 
   // A cached row lacking the version metadata falls back to the targeted
   // fetch (a half-metadata row must not expand with missing attributes);
@@ -2848,7 +2826,7 @@ console.log("createArtifactAdapter formatExpansion: ok");
     await adapter.resolveFullToken("0a1b0001-1111-4222-8333-444444444444", cache),
     artifactToReferenceItem({ id: "0a1b0001-1111-4222-8333-444444444444", title: "Refreshed metadata row", latest_version: 5, kind: "PLAN" }),
   );
-  assert.equal(clientBuilds, 1, "the metadata-less row fell back to one fetch");
+  assert.equal(interfaceBuilds, 1, "the metadata-less row fell back to one fetch");
 
   // Cache miss: the targeted getArtifact fallback resolves, with the kind
   // and version taken from the targeted fetch.
@@ -2856,18 +2834,14 @@ console.log("createArtifactAdapter formatExpansion: ok");
     await adapter.resolveFullToken("77e00001-1111-4222-8333-444444444444", cache),
     artifactToReferenceItem({ id: "77e00001-1111-4222-8333-444444444444", title: "Server-known artifact", latest_version: 9, kind: "REVIEW" }),
   );
-  assert.equal(clientBuilds, 2, "the cache-miss fallback built exactly one client");
+  assert.equal(interfaceBuilds, 2, "the cache-miss fallback built exactly one interface");
 
   // Targeted fetch miss (unknown uuid): null, so the mention stays as typed.
   assert.equal(await adapter.resolveFullToken("00000000-0000-0000-0000-000000000000", cache), null);
 
   // Targeted fetch throws (network failure, missing credentials): null,
   // and nothing throws into the session.
-  const noCreds = createArtifactAdapter({
-    createClient: async () => {
-      throw new Error("missing PAT");
-    },
-  });
+  const noCreds = createArtifactAdapter({ createInterface: noopInterface });
   const emptyCache = createInMemoryReferenceCache();
   assert.equal(await noCreds.resolveFullToken("9f3c0001-1111-4222-8333-444444444444", emptyCache), null);
 }
@@ -2880,19 +2854,21 @@ console.log("createArtifactAdapter resolveFullToken: ok");
 // ---------------------------------------------------------------------------
 
 {
-  let clientBuilds = 0;
+  let interfaceBuilds = 0;
+  const { caller } = fakeAuraCaller({
+    listArtifacts: () => ({ items: [], pagination: {} }),
+    getArtifact: (args) => {
+      const id = String(args.id);
+      if (id === "77e00001-1111-4222-8333-444444444444") {
+        return { id, title: "Server-known artifact", latest_version: 9, kind: "REVIEW" };
+      }
+      throw new Error("404 not found");
+    },
+  });
   const adapter = createArtifactAdapter({
-    createClient: async () => {
-      clientBuilds += 1;
-      return {
-        listArtifacts: async () => ({ items: [], pagination: {} }),
-        getArtifact: async (id: string) => {
-          if (id === "77e00001-1111-4222-8333-444444444444") {
-            return { id, title: "Server-known artifact", latest_version: 9, kind: "REVIEW" };
-          }
-          throw new Error("404 not found");
-        },
-      };
+    createInterface: async () => {
+      interfaceBuilds += 1;
+      return interfaceOverCaller(caller);
     },
   });
   const registry = createReferenceRegistry([adapter]);
@@ -2915,7 +2891,7 @@ console.log("createArtifactAdapter resolveFullToken: ok");
     await expandReferenceMentions("see #artifact:9f3c0001-1111-4222-8333-444444444444 today", registry, lookup),
     `see ${cachedTag} today`,
   );
-  assert.equal(clientBuilds, 0, "cached metadata resolved without a fetch");
+  assert.equal(interfaceBuilds, 0, "cached metadata resolved without a fetch");
 
   // Mentions at the start and the end of the prompt.
   assert.equal(
@@ -2938,7 +2914,7 @@ console.log("createArtifactAdapter resolveFullToken: ok");
     ),
     `compare ${cachedTag} with ${fetchedTag} and #artifact:00000000-0000-0000-0000-000000000000`,
   );
-  assert.equal(clientBuilds, 2, "the miss and the unknown each built one client");
+  assert.equal(interfaceBuilds, 2, "the miss and the unknown each built one interface");
 
   // Duplicate mentions of the same artifact: one resolution, every
   // occurrence expands.
@@ -2950,7 +2926,7 @@ console.log("createArtifactAdapter resolveFullToken: ok");
     ),
     `${fetchedTag} and ${fetchedTag} again`,
   );
-  assert.equal(clientBuilds, 3, "duplicates shared one resolution");
+  assert.equal(interfaceBuilds, 3, "duplicates shared one resolution");
 
   // A prompt without references passes through unchanged.
   const plain = "a prompt with no references at all";
