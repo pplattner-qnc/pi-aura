@@ -148,6 +148,11 @@ Added a `rest` command group to the `aura` CLI that exposes every Aura REST oper
 
 
 
+
+## 2026-11-10, Root documents current (root-docs-current)
+
+The root documents describe the shipped package again: the README carries an extensions table matching the six-entry manifest, the optional-override MCP configuration note (the package registers the server itself from the keyring, no manual setup required), the released-version install pin, and the companion-plugin assumption for rule-mention body injection; the glossary describes the shipped surfaces with no deleted-module names; the project instructions file matches the settled layout; and the testing and dev-env docs describe the final tree (the 197-test shared suite, the per-file extension convention, the typecheck gate, the runtime-resolved module imports). Nineteen new guard tests pin the corrections so a retired claim reappearing fails the suite. The full gate (197 shared tests, ten extension suites, typecheck) is green on the landed state, and every file, target, and command the docs name exists on disk.
+
 ## 2026-11-10, Process resources current (process-resources-current)
 
 The seven process resources teach the live canon again: every canonical reference repoints from the dead archived-article path to the way-of-working 1.x pages (verified live through the package's own typed-interface caller), workflow-phases.md teaches the split status series with the v18 quality gates and the v19 contributor rules plus the discard, reopen, and blocked contracts, review-modes.md teaches opinions as the review successor on the graded scale, and the capacity model is current (the placeholder epic, commitment steps, full landing, daily reset, no structural reserve; the leadership overview is readCapacity's company scope). Thirty-one new guard tests pin the rewrite per file, including an outright ban on the retired capacity vocabulary so even a negating sentence fails the suite. The full gate (178 shared tests, ten extension suites, typecheck) is green on the landed state.

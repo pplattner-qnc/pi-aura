@@ -41,3 +41,11 @@ This ticket verifies against the final tree delivered by the removal, consumer-r
 - remove-cli-rest-surface
 - rest-library-consumer-rule
 - engineering-surfaces-move-out
+
+## Implementation notes
+
+Landed as merge dc401e5 on task/root-docs-current (8 files, 433 insertions, 100 deletions: the five root documents, the worklist-flagged package.json description line, and 19 new guard tests in six describe blocks; the shared suite is 197, the guard file alone 152). All 19 stale rows of the root-docs worklist are corrected or removed and the current rows re-verified against the tree; the docs teach the post-reshape registration story (the package registers the server from settings plus keyring, a user's own entry wins, no manual setup required) wherever the audit's pre-reshape suggestions were superseded.
+
+Durable facts: retired names are taught by absence, not negation (no AuraClient or HeyApiAuraClient aliases in the glossary, no "no longer" sentences in the testing doc), and the guards pin them outright, so even a negating sentence fails the suite. The README's Extensions section sits after Usage deliberately, keeping the skill-table guard's parse region clean. The install pin names v0.8.0 and takes a one-word update when the 0.9.0 release lands (outside the effort per the phase decision).
+
+Residuals for the coherence pass: the injected system-prompt string in the skill-instruction extension still carries em-dashes (code, outside this ticket's files); two one-line imprecisions found in review (the testing doc attributes createInterface to the reference engine rather than the feedback tool and omits the logPath seam; the "embed modules the extensions resolve at runtime" phrasing overstates the embed half).
