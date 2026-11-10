@@ -99,6 +99,9 @@ export interface ContractSelfCheck {
   /** Tool names whose path is unavailable (the `core` set). Empty when
    *  `skipped`. */
   unavailable: string[];
+  /** The core issues per unavailable tool, so the degraded-path error can
+   *  name exactly what broke. Empty when `skipped`. */
+  coreIssues: Record<string, string[]>;
   /** Why the check was skipped (the underlying fetch error message). */
   reason?: string;
 }
@@ -136,6 +139,7 @@ export function runContractSelfCheck(
   const warnings: string[] = [];
   const failures: string[] = [];
   const unavailable: string[] = [];
+  const coreIssues: Record<string, string[]> = {};
   const liveByName = new Map(liveTools.map((tool) => [tool.name, tool]));
   for (const contract of shipped) {
     const live = liveByName.get(contract.name);
@@ -144,6 +148,7 @@ export function runContractSelfCheck(
         `aura-mcp-dev tool "${contract.name}" is gone from the live server; its path is unavailable`,
       );
       unavailable.push(contract.name);
+      coreIssues[contract.name] = ["the tool is gone from the live server"];
       continue;
     }
     const verdict = compareShippedTool(contract, live);
@@ -154,6 +159,7 @@ export function runContractSelfCheck(
         `aura-mcp-dev tool "${contract.name}" drifted from the shipped contract (core): ${differences}. Its path is unavailable; callers degrade to cached data.`,
       );
       unavailable.push(contract.name);
+      coreIssues[contract.name] = verdict.issues;
     } else {
       warnings.push(`aura-mcp-dev tool "${contract.name}" drifted from the shipped contract (cosmetic): ${differences}`);
     }
@@ -163,6 +169,7 @@ export function runContractSelfCheck(
     warnings,
     failures,
     unavailable,
+    coreIssues,
   };
 }
 
