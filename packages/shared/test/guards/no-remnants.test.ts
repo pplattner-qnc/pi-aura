@@ -2986,3 +2986,58 @@ describe("no-remnants guard: root docs current (testing doc)", () => {
     );
   });
 });
+
+describe("no-remnants guard: root docs current (dev-env doc)", () => {
+  it("describes the root-install flow with no removed build targets", () => {
+    const devenv = readRootDoc("docs/dev-env.md");
+    assert.match(
+      devenv,
+      /npm install/,
+      "the root-workspace install should be the setup step",
+    );
+    assert.doesNotMatch(
+      devenv,
+      /codegen|openapi|scripts\/|dist\/|KeyringBackend|GNOME|aura-access-rewrite/i,
+      "the dev-env doc should name no removed build target or retired surface",
+    );
+  });
+
+  it("carries the current credential story", () => {
+    const devenv = readRootDoc("docs/dev-env.md");
+    assert.match(
+      devenv,
+      /aura\.baseUrl/,
+      "the settings-derived base URL should be the configuration step",
+    );
+    assert.match(
+      devenv,
+      /\/aura secrets discover/,
+      "the PAT import path should be named",
+    );
+    assert.match(
+      devenv,
+      /\/aura secrets edit/,
+      "the PAT edit path should be named",
+    );
+    assert.doesNotMatch(
+      devenv,
+      /read from\s+`~\/\.config\/mcp\/mcp\.json`/,
+      "the stale mcp.json credential story should be gone",
+    );
+  });
+
+  it("names the shipped keyring test seams", () => {
+    const devenv = readRootDoc("docs/dev-env.md");
+    assert.match(devenv, /FakeKeyring/, "the fake keyring seam should be named");
+    assert.match(
+      devenv,
+      /FileKeyring/,
+      "the file backend backing the automated keyring suite should be named",
+    );
+    assert.doesNotMatch(
+      devenv,
+      /live OS keyring/i,
+      "the nonexistent live-keyring smoke test should not be described",
+    );
+  });
+});
