@@ -64,20 +64,6 @@ function readRootPackageJson(): RootPackageJson {
   return JSON.parse(raw) as RootPackageJson;
 }
 
-interface ScriptsPackageJson {
-  name?: string;
-  description?: string;
-  dependencies?: Record<string, string>;
-}
-
-function readScriptsPackageJson(): ScriptsPackageJson {
-  const raw = fs.readFileSync(
-    path.join(repoRoot, "scripts", "package.json"),
-    "utf-8",
-  );
-  return JSON.parse(raw) as ScriptsPackageJson;
-}
-
 interface SharedPackageJson {
   exports?: Record<string, string>;
 }
@@ -248,35 +234,39 @@ describe("no-remnants guard: shared digest core", () => {
   });
 });
 
-// digest-core-and-build-pkg-cleanup: the scripts workspace is digest-free
-// (manifest shape, digest-era files, the e2e families the digest clients
-// had).
-describe("no-remnants guard: scripts workspace", () => {
-  it("carries no digest-era package name", () => {
-    const pkg = readScriptsPackageJson();
-    assert.ok(
-      pkg.name !== undefined && !pkg.name.includes("digest"),
-      `scripts package name should not mention digest, found: ${pkg.name ?? "none"}`,
+// digest-core-and-build-pkg-cleanup, then remove-cli-rest-surface: the
+// scripts workspace carried the digest-era CLI first and the aura skill's
+// CLI bundle afterwards; the remove-cli-rest-surface effort retired the
+// bundled CLI and its build surface, leaving only the two shell scripts
+// that serve the shared package (spec sync, release). The workspace
+// itself is gone: no package.json/tsconfig/esbuild config, no src/ tree.
+// The former per-file assertions on the deleted package manifest
+// (digest-free name, description, no MCP SDK dependency) are superseded
+// by the absence assertions below.
+describe("no-remnants guard: scripts workspace removal", () => {
+  it("has no scripts npm workspace manifests or build config", () => {
+    const gone = [
+      "package.json",
+      "package-lock.json",
+      "tsconfig.json",
+      "esbuild.config.mjs",
+    ];
+    const offenders = gone.filter((file) =>
+      fs.existsSync(path.join(repoRoot, "scripts", file)),
     );
-  });
-
-  it("carries no digest-era description", () => {
-    const pkg = readScriptsPackageJson();
-    assert.ok(
-      pkg.description !== undefined &&
-        !pkg.description.toLowerCase().includes("digest"),
-      `scripts package description should not mention digest, found: ${pkg.description ?? "none"}`,
-    );
-  });
-
-  it("carries no MCP SDK dependency", () => {
-    const pkg = readScriptsPackageJson();
-    const deps = Object.keys(pkg.dependencies ?? {});
-    const offenders = deps.filter((dep) => dep.includes("modelcontextprotocol"));
     assert.deepEqual(
       offenders,
       [],
-      `scripts dependencies should not include the MCP SDK, found: ${offenders.join(", ")}`,
+      `scripts/ should carry no npm workspace or build config after the CLI removal, still found: ${offenders.join(", ") || "none"}`,
+    );
+  });
+
+  it("has no scripts/src CLI source or test tree", () => {
+    const dir = path.join(repoRoot, "scripts", "src");
+    assert.equal(
+      fs.existsSync(dir),
+      false,
+      "scripts/src should be deleted with the bundled CLI (aura.ts, the rest-* command modules, gen-rest-*, their suites and the generated index)",
     );
   });
 
@@ -458,6 +448,87 @@ describe("no-remnants guard: root manifest and infra", () => {
       [],
       "Taskfile.yml should not carry the digest-era bundle note (targets unchanged)",
     );
+  });
+});
+
+// remove-cli-rest-surface: the agent-facing CLI and REST access surface is
+// removed unconditionally (the operator's settled retirement). The bundle,
+// its serving scripts, and the generated REST reference resource are gone;
+// the build surface carries no target that produces them; the root manifest
+// no longer lists the scripts workspace. The shared package's spec sync and
+// codegen targets stay (the internal REST library follows the consumer
+// rule in a later ticket).
+describe("no-remnants guard: CLI and REST reference removal", () => {
+  it("has no CLI bundle in the aura skill directory", () => {
+    const dir = path.join(repoRoot, "skills", "core", "aura", "dist");
+    assert.equal(
+      fs.existsSync(dir),
+      false,
+      "skills/core/aura/dist should be deleted (the bundled aura.mjs CLI)",
+    );
+  });
+
+  it("has no generated REST reference resource in the skill directory", () => {
+    const file = path.join(
+      repoRoot,
+      "skills",
+      "core",
+      "aura",
+      "resources",
+      "rest-api.md",
+    );
+    assert.equal(
+      fs.existsSync(file),
+      false,
+      "skills/core/aura/resources/rest-api.md should be deleted (the generated REST reference)",
+    );
+  });
+
+  it("lists no scripts workspace in the root manifest", () => {
+    const pkg = readRootPackageJson();
+    assert.deepEqual(
+      pkg.workspaces,
+      ["packages/shared"],
+      "package.json workspaces should list only packages/shared (the scripts workspace is deleted)",
+    );
+  });
+
+  it("carries no CLI-bundle or REST-reference target in the Taskfile", () => {
+    const taskfile = fs
+      .readFileSync(path.join(repoRoot, "Taskfile.yml"), "utf-8")
+      .split("\n");
+    const banned = [
+      "gen-rest-doc",
+      "gen-rest-index",
+      "esbuild",
+      "aura.mjs",
+      "AURA_DIST",
+      "ENTRY_OUTS",
+      "SCRIPTS_DIR",
+    ];
+    const offenders: string[] = [];
+    for (const [index, line] of taskfile.entries()) {
+      for (const needle of banned) {
+        if (line.includes(needle)) {
+          offenders.push(`Taskfile.yml:${index + 1}: ${line.trim()}`);
+        }
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "Taskfile.yml should carry no target that builds or regenerates the CLI bundle or the REST reference",
+    );
+  });
+
+  it("keeps the Taskfile targets the shared package still needs", () => {
+    const taskfile = fs.readFileSync(path.join(repoRoot, "Taskfile.yml"), "utf-8");
+    for (const needle of ["codegen", "openapi-sync", "typecheck"]) {
+      assert.ok(
+        taskfile.includes(needle),
+        `Taskfile.yml should keep the ${needle} target (guard against over-deletion; the consumer-rule ticket owns the REST library's targets)`,
+      );
+    }
   });
 });
 
