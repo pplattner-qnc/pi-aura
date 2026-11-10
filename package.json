@@ -11,7 +11,6 @@
       "./extensions/aura-secrets.ts",
       "./extensions/aura-tasks.ts",
       "./extensions/aura-feedback.ts",
-      "./extensions/engineering-rules.ts",
       "./extensions/aura-references.ts",
       "./extensions/aura-mcp-server.ts"
     ],

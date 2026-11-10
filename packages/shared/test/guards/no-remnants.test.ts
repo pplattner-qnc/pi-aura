@@ -149,7 +149,7 @@ describe("no-remnants guard: dashboard extension", () => {
 // digest-skill-and-agents-removal: the aura-digest skill and the two
 // morning agents are gone (tree and manifest registration).
 describe("no-remnants guard: skill and agents", () => {
-  it("leaves only the aura and engineering-foundation skills in the scan", () => {
+  it("leaves only the aura skill in the scan", () => {
     const skillsDir = path.join(repoRoot, "skills", "core");
     const entries = fs
       .readdirSync(skillsDir, { withFileTypes: true })
@@ -158,8 +158,8 @@ describe("no-remnants guard: skill and agents", () => {
       .sort();
     assert.deepEqual(
       entries,
-      ["aura", "engineering-foundation"],
-      `skills/core should contain only the two surviving core skills, found: ${entries.join(", ")}`,
+      ["aura"],
+      `skills/core should contain only the aura skill (engineering-foundation moved out), found: ${entries.join(", ")}`,
     );
   });
 
@@ -187,6 +187,71 @@ describe("no-remnants guard: skill and agents", () => {
       pkg.pi?.subagents,
       undefined,
       "package.json should carry no subagents block",
+    );
+  });
+});
+
+// engineering-surfaces-move-out: the engineering-foundation skill and the
+// engineering-rules extension left this package for the plugin repo, which
+// becomes the sole delivery vehicle for the engineering canon. The package
+// manifest lists exactly the six surviving extensions, both trees carry no
+// moved-out surface, and the README and the project instructions file make
+// no claim about them. Re-introducing either name fails the suite.
+const SURVIVING_EXTENSIONS = [
+  "./extensions/aura-skill-instruction.ts",
+  "./extensions/aura-secrets.ts",
+  "./extensions/aura-tasks.ts",
+  "./extensions/aura-feedback.ts",
+  "./extensions/aura-references.ts",
+  "./extensions/aura-mcp-server.ts",
+];
+
+describe("no-remnants guard: engineering surfaces move-out", () => {
+  it("registers exactly the six surviving extensions in the package manifest", () => {
+    const pkg = readRootPackageJson();
+    assert.deepEqual(
+      [...(pkg.pi?.extensions ?? [])].sort(),
+      [...SURVIVING_EXTENSIONS].sort(),
+      "package.json should list exactly the six surviving extensions (engineering-rules moved out)",
+    );
+  });
+
+  it("has no engineering-foundation skill directory", () => {
+    const dir = path.join(repoRoot, "skills", "core", "engineering-foundation");
+    assert.equal(
+      fs.existsSync(dir),
+      false,
+      "skills/core/engineering-foundation should be deleted (the router skill moved to the plugin repo)",
+    );
+  });
+
+  it("has no engineering-rules extension or its test", () => {
+    for (const file of [
+      "extensions/engineering-rules.ts",
+      "extensions/engineering-rules.test.ts",
+    ]) {
+      assert.equal(
+        fs.existsSync(path.join(repoRoot, file)),
+        false,
+        `${file} should be deleted (the extension moved to the plugin repo)`,
+      );
+    }
+  });
+
+  it("carries no claim about the removed surfaces in the README and the project instructions file", () => {
+    const offenders: string[] = [];
+    for (const doc of ["README.md", "AGENTS.md"]) {
+      const lines = fs.readFileSync(path.join(repoRoot, doc), "utf-8").split("\n");
+      for (const [index, line] of lines.entries()) {
+        if (/engineering-foundation|engineering-rules/i.test(line)) {
+          offenders.push(`${doc}:${index + 1}: ${line.trim()}`);
+        }
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "README.md and AGENTS.md should not name the moved-out engineering surfaces",
     );
   });
 });

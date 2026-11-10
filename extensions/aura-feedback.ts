@@ -47,8 +47,8 @@
  * One concern per extension — this file owns the feedback-proposal tool and
  * its interactive sign-off; it does not touch the reference engine
  * (`aura-references.ts`, which also owns the legacy `@AURA-<number>` alias),
- * the reachability probe (`aura-tasks.ts`), the skill reminder
- * (`aura-skill-instruction.ts`), or the engineering-rules dispatch.
+ * the reachability probe (`aura-tasks.ts`), or the skill reminder
+ * (`aura-skill-instruction.ts`).
  */
 
 import { appendFile, mkdir } from "node:fs/promises";
