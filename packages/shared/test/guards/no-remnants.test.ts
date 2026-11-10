@@ -1596,6 +1596,159 @@ describe("no-remnants guard: usecase resources current (memory graph)", () => {
   });
 });
 
+describe("no-remnants guard: usecase resources current (feedback)", () => {
+  it("names the createFeedback tool with its current pi prefix", () => {
+    const file = readUsecase("feedback-submission.md");
+    assert.match(
+      file,
+      /mcp__aura_mcp_dev__createFeedback/,
+      "the MCP tool to avoid should carry its current pi name",
+    );
+    assert.doesNotMatch(
+      file,
+      /aura-mcp-dev_createFeedback/,
+      "the stale tool-name token should be gone",
+    );
+  });
+
+  it("states the live createFeedback source values and the aura_feedback pin", () => {
+    const file = readUsecase("feedback-submission.md");
+    assert.match(
+      file,
+      /UI.*AGENT.*MCP|AGENT.*MCP/s,
+      "the server tool's source values should be named",
+    );
+    assert.match(
+      file,
+      /source: "MCP"|`source`.*MCP/s,
+      "aura_feedback's MCP pin should be stated",
+    );
+  });
+
+  it("documents the read and triage family", () => {
+    const file = readUsecase("feedback-submission.md");
+    for (const tool of [
+      "getFeedback",
+      "listFeedback",
+      "changeFeedbackStatus",
+      "linkFeedbackTask",
+      "linkRelatedFeedback",
+    ]) {
+      assert.ok(file.includes(tool), `the triage family should include ${tool}`);
+    }
+    assert.match(
+      file,
+      /discard_reason/i,
+      "the DISCARDED discard-reason requirement should be stated",
+    );
+    assert.match(
+      file,
+      /VIEW_FEEDBACK/,
+      "the triage capability gate should be named",
+    );
+  });
+});
+
+describe("no-remnants guard: usecase resources current (task management)", () => {
+  it("carries the placement-map families", () => {
+    const file = readUsecase("task-management.md");
+    for (const tool of [
+      "addTaskMember",
+      "setTaskMemberRoles",
+      "updateTaskBlocked",
+      "estimateTaskStoryPoints",
+      "acceptTaskStoryPointEstimate",
+      "setTaskStoryPoints",
+      "listTaskStoryPointEstimates",
+      "getMyPriorityQueue",
+      "listMyProgress",
+      "listTaskActivity",
+      "getUserGroup",
+      "listUserGroups",
+      "createUserGroup",
+      "addUserGroupMember",
+      "updateUserGroup",
+      "updateUserGroupMemberRole",
+      "linkRepositoryToTask",
+    ]) {
+      assert.ok(file.includes(tool), `the task file should document ${tool}`);
+    }
+    assert.match(
+      file,
+      /workflow_variant/,
+      "the workflow variant should be documented as a create field",
+    );
+  });
+
+  it("drops the false no-member-management claim", () => {
+    const file = readUsecase("task-management.md");
+    assert.doesNotMatch(
+      file,
+      /not available via MCP after the overhaul\. Use the\s+Aura UI\.$/m,
+      "the blanket owner/crew absence claim should be gone",
+    );
+    const section = file.split("## Owner and crew management")[1]?.split("\n## ")[0] ?? "";
+    assert.notEqual(section, "", "the owner/crew section should exist");
+    assert.match(
+      section,
+      /addTaskMember/,
+      "the owner/crew section should teach the MCP member tools",
+    );
+  });
+
+  it("keeps the create fields aligned with the live schema", () => {
+    const file = readUsecase("task-management.md");
+    assert.doesNotMatch(
+      file,
+      /repository_uuids/,
+      "the nonexistent repository_uuids field should be gone",
+    );
+    assert.match(
+      file,
+      /Up to three tags|up to three/i,
+      "the three-tag cap should be stated",
+    );
+  });
+
+  it("calls recordTaskProgress with id", () => {
+    const file = readUsecase("task-management.md");
+    assert.match(
+      file,
+      /recordTaskProgress\(\{[\s\S]*?id:/,
+      "recordTaskProgress should be called with id",
+    );
+    assert.doesNotMatch(
+      file,
+      /uuid: "<task-uuid>"\s*,\s*\n\s*note:/,
+      "the stale uuid-keyed progress example should be gone",
+    );
+  });
+
+  it("keeps the verified planning-hub phrasing for getTask", () => {
+    const file = readUsecase("task-management.md");
+    const row = file.split("| By UUID |")[1]?.split("\n")[0] ?? "";
+    assert.match(
+      row,
+      /planning hub/i,
+      "the planning-hub phrasing should stay (verified against a live full payload)",
+    );
+    assert.match(
+      row,
+      /artifacts/i,
+      "the planning-hub row should name linked artifacts",
+    );
+  });
+
+  it("documents the relation duplicate policy", () => {
+    const file = readUsecase("task-management.md");
+    assert.match(
+      file,
+      /on_duplicate/,
+      "createTaskRelation's on_duplicate should be documented",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
