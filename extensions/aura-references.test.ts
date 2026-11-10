@@ -33,7 +33,7 @@
  * pure wrapper seam. The extension factory (which reaches Aura through the
  * dynamic-import seam and surfaces the deprecation warning via `ctx.ui.notify`)
  * is exercised by the pi runtime once credentials are configured, mirroring
- * the `aura-tasks` and `engineering-rules` test files.
+ * the `aura-tasks` test file.
  */
 
 import assert from "node:assert/strict";
@@ -73,7 +73,7 @@ import auraReferences, {
   type WikiSearchHit,
   type WikiTreeNode,
 } from "./aura-references.ts";
-import { resolveRuleMentions, type Rule } from "./engineering-rules.ts";
+import type { Rule } from "./cursor-rules.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -2097,9 +2097,9 @@ console.log("createRuleAdapter resolveFullToken: ok");
 console.log("provider rule suggestions + deferral: ok");
 
 // ---------------------------------------------------------------------------
-// Rule expansion end-to-end + the input-transform coexistence wrinkle: the
-// engineering-rules resolver must match raw #rule: tokens AND the expanded
-// <rule-ref> elements (the engine rewrites mentions before before_agent_start)
+// Rule expansion end-to-end (the local kind resolves in a credential-less
+// session; the expanded <rule-ref> elements are what the plugin repo's rules
+// dispatch consumes for the body injection)
 // ---------------------------------------------------------------------------
 
 {
@@ -2141,24 +2141,9 @@ console.log("provider rule suggestions + deferral: ok");
     await expandReferenceMentions("#rule:tracker-aura and #task:AURA-42", registry, lookup),
     `${expansion} and #task:AURA-42`,
   );
-
-  // THE WRINKLE: the expanded prompt carries <rule-ref> elements by the
-  // time before_agent_start runs, so the engineering-rules resolver must
-  // inject the rule body from the element form...
-  const expanded = await expandReferenceMentions("work on #rule:tracker-aura today", registry, lookup);
-  assert.ok(
-    resolveRuleMentions(expanded, testRules()).includes("Use the Aura tracker."),
-    "the body injects from the expanded element",
-  );
-  // ...and from the raw token when the mention was left as typed.
-  assert.ok(resolveRuleMentions("work on #rule:tracker-aura today", testRules()).includes("Use the Aura tracker."));
-  // Two different rules: both bodies injected once each.
-  const two = resolveRuleMentions("#rule:tracker-aura and #rule:tracker-jira", testRules());
-  assert.ok(two.includes("Use the Aura tracker."));
-  assert.ok(two.includes("Use Jira."));
 }
 
-console.log("rule expansion + resolver dual matching (the wrinkle): ok");
+console.log("rule expansion end-to-end: ok");
 
 // ---------------------------------------------------------------------------
 // The production `@rule:` alias (createRuleAlias): recognition at

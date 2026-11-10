@@ -81,22 +81,28 @@
  *
  * The reference-rule-kind task made `#rule:` the second kind and the
  * first local-only one: the rule adapter reuses rule loading from
- * `engineering-rules.ts` (`loadRules` + the `Rule` type; no frontmatter
+ * `cursor-rules.ts` (`loadRules` + the `Rule` type; no frontmatter
  * parsing is reimplemented), searches the loaded rules by name substring,
  * expands to `<rule-ref name attach>display-title</rule-ref>`, and marks
  * itself `local` so the factory's expansion gate exempts it (rules resolve
  * in a credential-less session; they never touch the cache or Aura).
  * Because rules are cwd-local they ride engine memory, not the persistent
  * cache: the factory loads them per session and hands them to the adapter
- * through an accessor. The engineering-rules `before_agent_start`
- * resolver still injects mentioned rule bodies, matching raw `#rule:` and
- * legacy `@rule:` tokens AND the expanded `<rule-ref>` elements this
- * engine's input transform leaves in the prompt (the transform runs
- * before `before_agent_start`). The ticket's second slice registered
- * `@rule:` as the second production alias (`createRuleAlias`, sharing the
+ * through an accessor. The ticket's second slice registered `@rule:` as
+ * the second production alias (`createRuleAlias`, sharing the
  * once-per-session deprecation warning latch with `@AURA-`) and deleted
  * the rules extension's own `@rule:` autocomplete provider in the same
  * atomic landing, so the engine owns both rule syntaxes end-to-end.
+ *
+ * Since the engineering-surfaces-move-out landing the mentioned-rule body
+ * injection is not this package's job: the engineering-rules extension
+ * (the `before_agent_start` dispatch that injected rule bodies for raw
+ * `#rule:`/`@rule:` tokens and expanded `<rule-ref>` elements) moved to
+ * the plugin repo, the sole delivery vehicle for the engineering canon.
+ * The engine keeps the mention surface unchanged: autocomplete and
+ * expansion behave exactly as before, and a companion installation of the
+ * plugin repo's rules dispatch consumes the same `.cursor/rules/`
+ * directory and injects the bodies for the elements this engine emits.
  *
  * The reference-artifact-kind task made `#artifact:` the third kind and
  * the first metadata-driven one: artifact items carry the Aura artifact
@@ -159,10 +165,10 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadRules, type Rule } from "./engineering-rules.ts";
+import { loadRules, type Rule } from "./cursor-rules.ts";
 
 // ---------------------------------------------------------------------------
-// Autocomplete types (minimal structural shapes, see engineering-rules.ts)
+// Autocomplete types (minimal structural shapes matching pi-tui's interface)
 // ---------------------------------------------------------------------------
 // `@earendil-works/pi-tui` exports AutocompleteItem / AutocompleteProvider /
 // AutocompleteSuggestions, but this package only declares
@@ -782,12 +788,14 @@ async function resolveMention(
  *  skill for anything beyond reading a reference. This is the only
  *  reference instruction block: the old extension's `<aura-task>` block
  *  was deleted together with its `@AURA-` handling (task-alias ticket),
- *  and rule references carry their body in the system prompt already
- *  (the engineering-rules mention injection). The artifact kind grew the
- *  block to three tag shapes (artifact attributes are metadata-driven:
- *  id, kind, and the version the reference resolved to), and the wiki
- *  kind completed the one-block-documents-all-four end state (wiki
- *  attributes: space, path, and the version the reference resolved to). */
+ *  and rule references carry their body in the system prompt through the
+ *  rules dispatch (the plugin repo's engineering-rules extension since
+ *  the move-out; this engine emits the elements it consumes). The artifact
+ *  kind grew the block to three tag shapes (artifact attributes are
+ *  metadata-driven: id, kind, and the version the reference resolved to),
+ *  and the wiki kind completed the one-block-documents-all-four end state
+ *  (wiki attributes: space, path, and the version the reference resolved
+ *  to). */
 export const REFERENCE_INSTRUCTION = `
 ## Inline references
 

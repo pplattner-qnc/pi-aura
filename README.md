@@ -8,8 +8,7 @@ Aura integration for [pi](https://github.com/badlogic/pi-mono) — skills, agent
 
 | Skill | Description |
 |---|---|
-| `aura` | Reference skill for working with Aura — use cases (tasks, artifacts, wiki, code search, capacity, etc.) and process knowledge (workflow phases, roles, escalation, integrations) |
-| `engineering-foundation` | Router for the anwalt.de engineering canon in the Aura wiki space: fetches the process pages (workflow phases, roles, PR and review conventions, coding standards, deployment, AI-readiness) live from the wiki; this package bundles none of it |
+| `aura` | Reference skill for working with Aura: use cases (tasks, artifacts, wiki, code search, capacity, etc.) and process knowledge (workflow phases, roles, escalation, integrations) |
 
 ### Commands
 

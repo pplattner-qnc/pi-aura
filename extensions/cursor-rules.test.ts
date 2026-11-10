@@ -1,40 +1,35 @@
 /**
- * Smoke + logic tests for the engineering-rules extension.
+ * Tests for the cursor-rules loading module (the rule loader the reference
+ * engine's local `#rule:` kind consumes).
  *
  * Run with:
- *   node --experimental-strip-types extensions/engineering-rules.test.ts
+ *   node --experimental-strip-types extensions/cursor-rules.test.ts
  *
- * Covers the pure logic: frontmatter parsing (all three attach modes),
- * glob compilation + matching, the rule resolver (@rule:/#rule: tokens and
- * expanded <rule-ref> elements), the system-prompt section builders, the
- * display-title loading (frontmatter name falling back to the rule name),
- * the module-surface pin (the @rule: autocomplete provider moved to the
- * shared reference engine), and the settings-driven ignore-glob loader
- * (global + project union). The extension factory itself is verified by
- * jiti load + the pi runtime once a repo populates `.cursor/rules/`.
+ * Covers the pure loading logic: frontmatter parsing (all three attach
+ * modes), glob compilation + matching, the recursive loader with the
+ * settings-driven ignore globs (global + project union), the display-title
+ * loading (frontmatter name falling back to the rule name), and the module
+ * surface pin (loading only: the dispatch half of the former engineering-
+ * rules extension moved to the plugin repo, so no system-prompt section
+ * builder or body-injection resolver regrows here).
  */
 
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import engineeringRules, {
-  buildAlwaysOnSection,
-  buildListedRulesSection,
-  collectRuleMentionNames,
+import {
   globToRegExp,
   loadIgnoreGlobs,
   loadRules,
   matchesAnyGlob,
   parseFrontmatter,
   parseYamlScalar,
-  resolveRuleMentions,
-  type Rule,
-} from "./engineering-rules.ts";
+} from "./cursor-rules.ts";
 
 // Helper to set up a fake "global" settings dir and return its path, so the
 // test does not touch the real ~/.pi/agent/settings.json. We override the
-// HOME env var per-test (loadIgnoreGlobs reads GLOBAL_SETTINGS_PATH which is
+// HOME env var per-test (loadIgnoreGlobs reads the global path, which is
 // built from homedir()).
 function withFakeHome<T>(home: string, fn: () => T): T {
   const oldHome = process.env.HOME;
@@ -125,8 +120,8 @@ console.log("globToRegExp + matchesAnyGlob: ok");
 // ---------------------------------------------------------------------------
 
 {
-  const dir = mkdtempSync(join(tmpdir(), "eng-rules-test-"));
-  const home = mkdtempSync(join(tmpdir(), "eng-rules-home-"));
+  const dir = mkdtempSync(join(tmpdir(), "cursor-rules-test-"));
+  const home = mkdtempSync(join(tmpdir(), "cursor-rules-home-"));
   try {
     // Repo: .cursor/rules/ with nested subdirs (recursive read).
     const rulesDir = join(dir, ".cursor", "rules");
@@ -176,8 +171,8 @@ console.log("loadRules + settings-driven ignore (recursive): ok");
 // ---------------------------------------------------------------------------
 
 {
-  const dir = mkdtempSync(join(tmpdir(), "eng-rules-proj-"));
-  const home = mkdtempSync(join(tmpdir(), "eng-rules-home2-"));
+  const dir = mkdtempSync(join(tmpdir(), "cursor-rules-proj-"));
+  const home = mkdtempSync(join(tmpdir(), "cursor-rules-home2-"));
   try {
     const rulesDir = join(dir, ".cursor", "rules");
     mkdirSync(rulesDir, { recursive: true });
@@ -220,8 +215,8 @@ console.log("loadRules project-local union: ok");
 // ---------------------------------------------------------------------------
 
 {
-  const dir = mkdtempSync(join(tmpdir(), "eng-rules-nosettings-"));
-  const home = mkdtempSync(join(tmpdir(), "eng-rules-home3-"));
+  const dir = mkdtempSync(join(tmpdir(), "cursor-rules-nosettings-"));
+  const home = mkdtempSync(join(tmpdir(), "cursor-rules-home3-"));
   try {
     const rulesDir = join(dir, ".cursor", "rules");
     mkdirSync(rulesDir, { recursive: true });
@@ -247,8 +242,8 @@ console.log("loadRules without ignore globs loads all (no hardcoding): ok");
 // ---------------------------------------------------------------------------
 
 {
-  const dir = mkdtempSync(join(tmpdir(), "eng-globs-"));
-  const home = mkdtempSync(join(tmpdir(), "eng-globs-home-"));
+  const dir = mkdtempSync(join(tmpdir(), "cursor-globs-"));
+  const home = mkdtempSync(join(tmpdir(), "cursor-globs-home-"));
   try {
     mkdirSync(join(home, ".pi", "agent"), { recursive: true });
     writeFileSync(join(home, ".pi", "agent", "settings.json"), JSON.stringify({
@@ -276,7 +271,7 @@ console.log("loadIgnoreGlobs union (global + project, dedup): ok");
 // ---------------------------------------------------------------------------
 
 {
-  const home = mkdtempSync(join(tmpdir(), "eng-rules-home4-"));
+  const home = mkdtempSync(join(tmpdir(), "cursor-rules-home4-"));
   mkdirSync(join(home, ".pi", "agent"), { recursive: true });
   try {
     withFakeHome(home, () => {
@@ -291,194 +286,13 @@ console.log("loadIgnoreGlobs union (global + project, dedup): ok");
 console.log("loadRules absent dir: ok");
 
 // ---------------------------------------------------------------------------
-// buildAlwaysOnSection + buildListedRulesSection
-// ---------------------------------------------------------------------------
-
-{
-  const rules: Rule[] = [
-    {
-      name: "general-code-quality", path: "/x", relPath: "general-code-quality",
-      attach: "always", globs: [], body: "Be excellent.", full: "",
-    },
-    {
-      name: "general-markdown-format", path: "/x", relPath: "general-markdown-format",
-      attach: "glob", globs: ["**/*.md"], body: "Format markdown.", full: "",
-    },
-    {
-      name: "tracker-jira", path: "/x", relPath: "tracker-jira",
-      attach: "manual", globs: [], body: "Manual rule.", full: "",
-    },
-  ];
-
-  const always = buildAlwaysOnSection(rules);
-  assert.ok(always.includes("Engineering Rules (always-on)"), "always-on section header");
-  assert.ok(always.includes("general-code-quality"), "always-on rule name");
-  assert.ok(!always.includes("tracker-jira"), "manual rule not in always-on section");
-
-  const listed = buildListedRulesSection(rules);
-  assert.ok(listed.includes("Engineering Rules (on-demand)"), "on-demand section header");
-  assert.ok(listed.includes("tracker-jira"), "manual rule listed");
-  assert.ok(listed.includes("general-markdown-format"), "glob rule listed");
-  assert.ok(listed.includes("**/*.md"), "glob value listed");
-  assert.ok(!listed.includes("general-code-quality"), "always-on rule not in on-demand list");
-
-  // Empty rules -> empty sections.
-  assert.equal(buildAlwaysOnSection([]), "");
-  assert.equal(buildListedRulesSection([]), "");
-}
-
-console.log("buildAlwaysOnSection + buildListedRulesSection: ok");
-
-// ---------------------------------------------------------------------------
-// Module surface after the alias migration (no double answers)
-// ---------------------------------------------------------------------------
-
-// The module's runtime export surface: rule loading, frontmatter parsing,
-// glob + settings helpers, the section builders, and the body-injection
-// resolver. The `@rule:` autocomplete provider (extractRuleToken,
-// formatRuleItem, createRuleAutocompleteProvider) is GONE: `@rule:` and
-// `#rule:` autocomplete live in the shared reference engine
-// (extensions/aura-references.ts, createRuleAlias + the rule adapter), so
-// nothing here may regrow a second answer for the same tokens. (AttachMode
-// and Rule are type-only exports and do not appear here.) If this pin
-// fails, something was added back to (or removed from) the module.
-{
-  const exports = Object.keys(await import("./engineering-rules.ts")).sort();
-  assert.deepEqual(
-    exports,
-    [
-      "buildAlwaysOnSection",
-      "buildListedRulesSection",
-      "collectRuleMentionNames",
-      "default",
-      "globToRegExp",
-      "loadIgnoreGlobs",
-      "loadRules",
-      "matchesAnyGlob",
-      "parseFrontmatter",
-      "parseYamlListBlock",
-      "parseYamlScalar",
-      "parseYamlScalarList",
-      "resolveRuleMentions",
-    ],
-    "the module exports only rule loading, dispatch, sections, and the resolver",
-  );
-}
-
-console.log("module surface (provider gone): ok");
-
-// ---------------------------------------------------------------------------
-// collectRuleMentionNames (the resolver's mention scan: raw tokens and
-// expanded elements)
-// ---------------------------------------------------------------------------
-
-{
-  // Legacy @rule: tokens and new #rule: tokens, both grammars.
-  assert.deepEqual(collectRuleMentionNames("please @rule:tracker-jira help"), ["tracker-jira"]);
-  assert.deepEqual(collectRuleMentionNames("please #rule:tracker-jira help"), ["tracker-jira"]);
-  // Case-insensitive, canonicalized to lowercase.
-  assert.deepEqual(collectRuleMentionNames("#RULE:Tracker-Jira"), ["tracker-jira"]);
-  assert.deepEqual(collectRuleMentionNames("@RuLe:Tracker-Jira"), ["tracker-jira"]);
-
-  // Expanded <rule-ref> elements (the reference engine's input transform
-  // rewrites #rule: mentions before before_agent_start runs).
-  assert.deepEqual(
-    collectRuleMentionNames('see <rule-ref name="tracker-aura" attach="manual">Tracker Aura</rule-ref> now'),
-    ["tracker-aura"],
-  );
-  // Attributes in any order.
-  assert.deepEqual(
-    collectRuleMentionNames('<rule-ref attach="glob: **/*.md" name="general-markdown-format">t</rule-ref>'),
-    ["general-markdown-format"],
-  );
-  // An element without a name attribute is not a mention.
-  assert.deepEqual(collectRuleMentionNames('<rule-ref attach="manual">x</rule-ref>'), []);
-
-  // All three forms of the same rule dedupe to one name.
-  assert.deepEqual(
-    collectRuleMentionNames('@rule:tracker-jira and #rule:tracker-jira and <rule-ref name="tracker-jira" attach="manual">t</rule-ref>'),
-    ["tracker-jira"],
-  );
-  // Multiple names, in first-seen order.
-  assert.deepEqual(
-    collectRuleMentionNames("#rule:general-code-quality and #rule:tracker-jira"),
-    ["general-code-quality", "tracker-jira"],
-  );
-  // The token grammar stops at non-name characters, so trailing punctuation
-  // is lenient (the legacy @rule: behavior).
-  assert.deepEqual(collectRuleMentionNames("#rule:tracker-jira."), ["tracker-jira"]);
-  // Empty names match nothing.
-  assert.deepEqual(collectRuleMentionNames("@rule: and #rule:"), []);
-  // No mentions at all.
-  assert.deepEqual(collectRuleMentionNames("plain prompt with # headings and @files"), []);
-}
-
-console.log("collectRuleMentionNames: ok");
-
-// ---------------------------------------------------------------------------
-// resolveRuleMentions (before_agent_start resolver: dual matching)
-// ---------------------------------------------------------------------------
-
-{
-  const rules: Rule[] = [
-    {
-      name: "tracker-jira", path: "/x", relPath: "tracker-jira",
-      attach: "manual", globs: [], body: "Use Jira for tracking.", full: "",
-    },
-    {
-      name: "general-code-quality", path: "/x", relPath: "general-code-quality",
-      attach: "always", globs: [], body: "Be excellent.", full: "",
-    },
-  ];
-
-  // Legacy @rule: mention (unchanged behavior)
-  const legacy = resolveRuleMentions("Please @rule:tracker-jira help me", rules);
-  assert.ok(legacy.includes("Engineering Rules (@mentioned this turn)"), "mention section header");
-  assert.ok(legacy.includes("Use Jira for tracking."), "mentioned rule body injected");
-
-  // New #rule: token: the same injection.
-  const hash = resolveRuleMentions("Please #rule:tracker-jira help me", rules);
-  assert.ok(hash.includes("Engineering Rules (@mentioned this turn)"));
-  assert.ok(hash.includes("Use Jira for tracking."));
-
-  // Expanded <rule-ref> element: what before_agent_start actually sees once
-  // the reference engine's input transform has rewritten the mention.
-  const element = resolveRuleMentions(
-    'Please <rule-ref name="tracker-jira" attach="manual">Tracker Jira</rule-ref> now',
-    rules,
-  );
-  assert.ok(element.includes("Use Jira for tracking."));
-
-  // No mentions -> empty string (no section added)
-  assert.equal(resolveRuleMentions("just a normal prompt", rules), "");
-
-  // Unknown rule mention -> empty (no block for an unknown name, through any
-  // of the three forms; a rule deleted between loading and submit injects
-  // nothing)
-  assert.equal(resolveRuleMentions("@rule:nonexistent", rules), "");
-  assert.equal(resolveRuleMentions("#rule:nonexistent", rules), "");
-  assert.equal(resolveRuleMentions('<rule-ref name="nonexistent" attach="manual">n</rule-ref>', rules), "");
-
-  // Multiple mentions deduped + each body injected once each
-  const multi = resolveRuleMentions("#rule:tracker-jira and #rule:general-code-quality", rules);
-  assert.ok(multi.includes("Use Jira for tracking."));
-  assert.ok(multi.includes("Be excellent."));
-  assert.equal((multi.match(/Use Jira for tracking\./g) || []).length, 1, "each body injected once");
-  // The same rule through two syntaxes: one body block.
-  const both = resolveRuleMentions("@rule:tracker-jira and #rule:tracker-jira", rules);
-  assert.equal((both.match(/Use Jira for tracking\./g) || []).length, 1);
-}
-
-console.log("resolveRuleMentions: ok");
-
-// ---------------------------------------------------------------------------
 // loadRules: the display title (frontmatter name falling back to the rule
 // name), carried for the reference engine's rule-ref element text
 // ---------------------------------------------------------------------------
 
 {
-  const dir = mkdtempSync(join(tmpdir(), "eng-rules-display-"));
-  const home = mkdtempSync(join(tmpdir(), "eng-rules-home5-"));
+  const dir = mkdtempSync(join(tmpdir(), "cursor-rules-display-"));
+  const home = mkdtempSync(join(tmpdir(), "cursor-rules-home5-"));
   try {
     const rulesDir = join(dir, ".cursor", "rules");
     mkdirSync(rulesDir, { recursive: true });
@@ -511,10 +325,32 @@ console.log("resolveRuleMentions: ok");
 console.log("loadRules display title (frontmatter name): ok");
 
 // ---------------------------------------------------------------------------
-// Factory is a function (smoke)
+// Module surface after the move-out (loading only, no dispatch regrowth)
 // ---------------------------------------------------------------------------
 
-assert.equal(typeof engineeringRules, "function", "default export is a factory function");
-console.log("factory: ok");
+// The module's runtime export surface: rule loading, frontmatter parsing,
+// glob + settings helpers. The former engineering-rules dispatch (system-
+// prompt section builders, the body-injection resolver, the extension
+// factory) moved to the plugin repo and must not regrow here. If this pin
+// fails, something was added to (or removed from) the module.
+{
+  const exports = Object.keys(await import("./cursor-rules.ts")).sort();
+  assert.deepEqual(
+    exports,
+    [
+      "globToRegExp",
+      "loadIgnoreGlobs",
+      "loadRules",
+      "matchesAnyGlob",
+      "parseFrontmatter",
+      "parseYamlListBlock",
+      "parseYamlScalar",
+      "parseYamlScalarList",
+    ],
+    "the module exports only rule loading, frontmatter parsing, and glob + settings helpers",
+  );
+}
 
-console.log("\nall engineering-rules tests passed");
+console.log("module surface (loading only): ok");
+
+console.log("\nall cursor-rules tests passed");

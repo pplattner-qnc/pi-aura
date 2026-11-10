@@ -10,8 +10,6 @@ Skills live under `skills/core/` (a single bucket, not the workflow
 package's engineering/productivity split):
 
 - `skills/core/aura/`: reference skill for working with Aura
-- `skills/core/engineering-foundation/`: router for the anwalt.de
-  engineering canon in the Aura wiki
 
 Every skill is listed in the top-level `README.md` skill table. When you
 add, rename, or change a skill's behaviour, re-sync its `README.md` entry
