@@ -988,6 +988,30 @@ describe("no-remnants guard: aura skill rewrite", () => {
       "the stale review-flow wording should be gone",
     );
   });
+  it("teaches the codemode file workflow, not the CLI", () => {
+    const skill = readSkillFile();
+    assert.match(
+      skill,
+      /codemode/i,
+      "the file workflow should be taught as the codemode pattern",
+    );
+    assert.match(
+      skill,
+      /`write` tool/,
+      "the write tool should be named as the disk half of the pattern",
+    );
+    assert.match(
+      skill,
+      /no CLI/i,
+      "the pattern should state that no CLI is involved",
+    );
+    // Downloading an artifact is reading it through MCP, then writing it to disk.
+    assert.match(
+      skill,
+      /`getArtifact`/,
+      "the MCP read half of the download pattern should name getArtifact",
+    );
+  });
 });
 
 // root-docs-refresh: the README describes the package as it now is. The

@@ -187,6 +187,11 @@ UI; do not fall back to hand-crafted API calls.
 - **Section-mode updates** for artifacts: use `mcpUpdateArtifact` with
   `mode: "section"` and `target_heading` for large documents to avoid
   output budget issues.
+- **File workflow for large content** (the codemode pattern): download an
+  artifact by reading it through MCP (`getArtifact`) and writing the body to
+  disk with the `write` tool, edit the file locally, then send it back with
+  `mcpUpdateArtifact`. No CLI involved; the full walkthrough lives in
+  [resources/usecases/artifact-management.md](resources/usecases/artifact-management.md).
 - **Comments** support `is_ai_generated: true`: always set this flag when
   posting as an AI agent.
 - **Progress tracking**: use `recordTaskProgress` to log agent activity on
