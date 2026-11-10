@@ -770,6 +770,276 @@ describe("no-remnants guard: consolidation seam", () => {
   });
 });
 
+// aura-skill-rewrite: the skill file teaches the live 120-tool server
+// (build 2026-10-12, commit 4aa37833) per the mcp-inventory report's
+// outline (that report's section 9). The audit's load-bearing facts are
+// pinned here in the existing guard style; the per-claim mapping of the
+// drift table is recorded in the ticket's workflow records. A retired
+// claim reappearing in the skill file fails the suite.
+const SKILL_FILE = "skills/core/aura/SKILL.md";
+
+function readSkillFile(): string {
+  return fs.readFileSync(path.join(repoRoot, SKILL_FILE), "utf-8");
+}
+
+describe("no-remnants guard: aura skill rewrite", () => {
+  it("teaches the live 120-tool server with the build identity cited once", () => {
+    const skill = readSkillFile();
+    assert.match(
+      skill,
+      /\b120 tools\b/,
+      "the skill should state the live 120-tool count",
+    );
+    assert.match(skill, /2026-10-12/, "the skill should cite the build date");
+    assert.equal(
+      (skill.match(/4aa37833/g) ?? []).length,
+      1,
+      "the build commit should be cited exactly once (the drift-detection anchor)",
+    );
+    assert.doesNotMatch(
+      skill,
+      /\b90 tools\b|\b90-tool\b/,
+      "the stale 90-tool count should be gone",
+    );
+  });
+  it("keeps the ten mcp* tools with the corrected one-liners and the live kind list", () => {
+    const skill = readSkillFile();
+    for (const tool of [
+      "mcpAnswerQuestion",
+      "mcpCreateArtifact",
+      "mcpCreateUploadDocument",
+      "mcpGetKnowledgeDocument",
+      "mcpGetQuestion",
+      "mcpGetRepoDocument",
+      "mcpGetUploadDocument",
+      "mcpLinkUploadToTask",
+      "mcpListCodeRepositories",
+      "mcpUpdateArtifact",
+    ]) {
+      assert.ok(
+        skill.includes(tool),
+        `the mcp* list should keep ${tool}`,
+      );
+    }
+    // mcpCreateArtifact: the OPINION kind replaced review; TEMPORARY stays chat-only.
+    assert.match(
+      skill,
+      /PLAN, OPINION, or GENERIC/,
+      "mcpCreateArtifact's one-liner should name the live kind list",
+    );
+    assert.doesNotMatch(
+      skill,
+      /plan, review, generic doc/,
+      "the retired review kind should not be listed",
+    );
+    assert.match(
+      skill,
+      /chat-only TEMPORARY/i,
+      "the chat-only TEMPORARY kind should stay qualified",
+    );
+    // mcpCreateUploadDocument: base64 ingest with the size limit.
+    assert.match(
+      skill,
+      /ingest a file from base64 content/i,
+      "the upload one-liner should describe base64 ingest",
+    );
+    assert.match(skill, /\b10 MB\b/, "the upload limit should be stated");
+    // mcpUpdateArtifact: whole mode with the limits and the expected-version contract.
+    assert.match(
+      skill,
+      /`section` or `whole` mode/,
+      "the update one-liner should name whole mode (full is gone)",
+    );
+    assert.doesNotMatch(
+      skill,
+      /full or section mode/,
+      "the retired full mode wording should be gone",
+    );
+    assert.match(skill, /200,000/, "the whole-body limit should be stated");
+    assert.match(skill, /50,000/, "the section limit should be stated");
+    assert.match(
+      skill,
+      /expected_version/,
+      "the expected-version merge-base contract should be stated",
+    );
+  });
+  it("replaces the left-MCP paragraph with the per-capability scorecard", () => {
+    const skill = readSkillFile();
+    assert.doesNotMatch(
+      skill,
+      /left MCP entirely/,
+      "the retired left-MCP paragraph should be gone",
+    );
+    assert.match(skill, /Back on MCP/, "the scorecard's back tier should exist");
+    assert.match(skill, /Half back/, "the scorecard's half-back tier should exist");
+    assert.match(skill, /Still absent/, "the scorecard's absent tier should exist");
+    // Back: the three capacity tools, board summary, owner and crew search.
+    for (const tool of [
+      "readCapacity",
+      "updateTaskMemberCapacity",
+      "updateTaskMemberParticipation",
+      "getBoardSummary",
+      "searchUsers",
+      "listUsers",
+    ]) {
+      assert.ok(skill.includes(tool), `the back tier should name ${tool}`);
+    }
+    // Half back: Jira and Asana reads, wiki file reads, memory browse plus ingest.
+    for (const tool of [
+      "getTaskByJiraKey",
+      "getAsanaTask",
+      "listKnowledgeFiles",
+      "listMemoryEntities",
+      "acceptArtifactMemory",
+    ]) {
+      assert.ok(skill.includes(tool), `the half-back tier should name ${tool}`);
+    }
+    // Still absent: the opinion flow's only trace is its listing filter; no
+    // notification tool exists; skills import and wiki upload stay UI-side.
+    assert.match(
+      skill,
+      /opinion_requested/,
+      "the opinion flow's listing filter should be named",
+    );
+    assert.match(
+      skill,
+      /no notification tool/i,
+      "the notification absence should be stated",
+    );
+    assert.match(
+      skill,
+      /Aura UI/,
+      "REST-only capabilities should carry a UI pointer",
+    );
+  });
+  it("documents the response-format contract", () => {
+    const skill = readSkillFile();
+    assert.match(
+      skill,
+      /response_format/,
+      "the response_format parameter should be named",
+    );
+    assert.match(
+      skill,
+      /default[^\n]*compact|compact[^\n]*default/i,
+      "compact should be documented as the default tier",
+    );
+    assert.match(skill, /"detail"/, "the detail tier should be documented");
+    assert.match(skill, /"full"/, "the full tier should be documented");
+    assert.match(
+      skill,
+      /getTask[^\n]*getTaskByHumanKey|getTaskByHumanKey[^\n]*getTask/,
+      "the full tier should be scoped to the two task reads",
+    );
+    assert.match(
+      skill,
+      /MCP-only/i,
+      "the tiering should be marked MCP-only",
+    );
+    assert.match(
+      skill,
+      /not part of the HTTP API/,
+      "the tiering should be marked outside the HTTP API",
+    );
+    assert.match(
+      skill,
+      /permission\s+apparatus/i,
+      "the permission-apparatus exclusion should be documented",
+    );
+    assert.match(
+      skill,
+      /same PAT[^.]*through REST/,
+      "the same-PAT-through-REST note should be present",
+    );
+  });
+  it("carries no unaddressed drift row: flat comments, current bullets, fixed naming", () => {
+    const skill = readSkillFile();
+    // Comments: flat per the live listComments description.
+    assert.match(skill, /flat comments/i, "comments should be taught as flat");
+    assert.doesNotMatch(skill, /threaded/i, "the threaded wording should be gone");
+    // The stale feedback tool-name token is fixed to the current pi naming.
+    assert.match(
+      skill,
+      /mcp__aura_mcp_dev__createFeedback/,
+      "the feedback tool to avoid should carry its current pi name",
+    );
+    assert.doesNotMatch(
+      skill,
+      /aura-mcp-dev_createFeedback/,
+      "the stale feedback tool-name token should be gone",
+    );
+    // The tool-name prefix is the current pi rendering, not the old one.
+    assert.match(skill, /mcp__aura_mcp_dev__/);
+    assert.doesNotMatch(skill, /aura_2d_mcp_2d_dev_/);
+    // The What-Aura-can-do bullets carry the live truth.
+    assert.doesNotMatch(
+      skill,
+      /assets, plugins, and import\/export/,
+      "the stale skills bullet (assets, import/export) should be gone",
+    );
+    assert.doesNotMatch(
+      skill,
+      /plans, reviews, generic docs/,
+      "the stale artifact kind wording should be gone",
+    );
+    assert.doesNotMatch(
+      skill,
+      /review workflows, approval gates/,
+      "the stale review-flow wording should be gone",
+    );
+  });
+  it("teaches the codemode file workflow, not the CLI", () => {
+    const skill = readSkillFile();
+    assert.match(
+      skill,
+      /codemode/i,
+      "the file workflow should be taught as the codemode pattern",
+    );
+    assert.match(
+      skill,
+      /`write` tool/,
+      "the write tool should be named as the disk half of the pattern",
+    );
+    assert.match(
+      skill,
+      /no CLI/i,
+      "the pattern should state that no CLI is involved",
+    );
+    // Downloading an artifact is reading it through MCP, then writing it to disk.
+    assert.match(
+      skill,
+      /`getArtifact`/,
+      "the MCP read half of the download pattern should name getArtifact",
+    );
+  });
+  it("mentions neither expected-dead tool", () => {
+    const skill = readSkillFile();
+    assert.doesNotMatch(
+      skill,
+      /\baiSetup\b/,
+      "aiSetup is expected to be dropped by Aura and must not be documented",
+    );
+    assert.doesNotMatch(
+      skill,
+      /\bgetBlueprintFiles\b/,
+      "getBlueprintFiles is expected to be dropped by Aura and must not be documented",
+    );
+  });
+  it("carries no em-dash in its own prose", () => {
+    const skill = readSkillFile();
+    const offenders = skill
+      .split("\n")
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => line.includes("\u2014"))
+      .map(({ index, line }) => `${SKILL_FILE}:${index + 1}: ${line.trim()}`);
+    assert.deepEqual(
+      offenders,
+      [],
+      "SKILL.md should carry no em-dash (the repo's prose rule)",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package

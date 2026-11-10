@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Rewrite the aura skill file
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by:
 - mention-machinery-mcp
 - feedback-mcp-submission
@@ -43,3 +43,9 @@ The two-layer citation policy applies: tool contracts cite the introspection evi
 - remove-cli-rest-surface
 - rest-library-consumer-rule
 - engineering-surfaces-move-out
+
+## Implementation notes
+
+Landed as merge f94bb72 on task/aura-skill-rewrite (404 insertions / 55 deletions over exactly the skill file and the guard). The skill file now teaches the live 120-tool server with the build identity cited exactly once as the drift anchor; the ten mcp* one-liners with the three corrections (OPINION replacing REVIEW, the base64 upload with its 10 MB limit, the whole mode with its character limits, the expected-version contract, and the confirm_full_replace destructive-replace gate); the leave-and-return scorecard (the back, half-back, and still-absent sets with their Aura UI pointers); the response-format contract with the permission exclusion as a non-teaching same-PAT note; the new families at bullet level; flat comments; the corrected feedback tool naming; and no mention of aiSetup or getBlueprintFiles. Eight content guards in the consolidated guard pin the rewrite's load-bearing facts (count, build identity's single occurrence, mcp* list, kind list, scorecard tiers, response-format contract, codemode pattern, absence pins for the expected-dead tools and em-dashes); the absence pins were born-green and their power was verified by injection probes.
+
+Three handoffs for the remaining documentation tickets: the codemode bullet points at artifact-management.md for the full walkthrough, so ticket 8 must deliver it there (and the usecase table row label still reads "review", an index label to fix); the development-process paragraph defers the concrete split status series to ticket 9's workflow-phases.md; and one pi-side render sentence (the tool-name prefix) is inferred client-side behavior, guard-pinned so a pi upgrade that changes the rendering fails the suite rather than silently staling the sentence. Two deliberate evidence-driven readings recorded by the deviation report: the response-format REST note omits the server's example endpoint (the non-teaching reading), and the upload one-liner asserts nothing about artifact creation because introspection could not confirm it (the drift report's open item stands until a live probe or the REST doc resolves it).
