@@ -1,39 +1,25 @@
 /**
- * Engineering Rules Extension
+ * Cursor-rules loading for the reference engine's local `#rule:` kind.
+ *
+ * This is the loading half of the former `engineering-rules` extension,
+ * which moved out of this package to the plugin repo (the sole delivery
+ * vehicle for the engineering canon): the extension's system-prompt
+ * dispatch and mentioned-body injection went with it, while the reference
+ * engine (`aura-references.ts`) kept its local-only `#rule:`/`@rule:`
+ * mention kind and still needs the repo's rules loaded. This module owns
+ * that loading; nothing else in the package consumes it.
  *
  * Reads the repo's `.mdc` Cursor rule files from `<cwd>/.cursor/rules/`
- * (recursively) and dispatches each by its frontmatter attach mode, and
- * lists the non-auto-loaded rules in the system prompt every turn.
+ * (recursively) and classifies each by its frontmatter attach mode. The
+ * plugin repo's rules dispatch consumes the same directory for system-prompt
+ * injection; this package ships no rules of its own. Until a repo populates
+ * `.cursor/rules/`, loading returns an empty set (no rules to mention).
  *
- * Syncing the `.mdc` files into a repo's `.cursor/rules/` is a per-repo
- * concern: this package ships no rules of its own. The extension reads
- * whatever the repo (its cwd) has deposited there. Until a repo populates
- * `.cursor/rules/`, the extension no-ops (no rules are injected).
- *
- * Frontmatter-driven dispatch (read from each `.mdc`):
- *   - `alwaysApply: true`  → append the rule body to the system prompt every turn.
- *   - `globs:` + `alwaysApply: false` → list (path + globs) in the system
- *     prompt every turn; the agent `read`s the rule on demand.
- *   - neither (manual) → list in the system prompt + mention-able.
- *
- * Autocomplete and inline expansion for rule mentions live in the shared
- * reference engine (`extensions/aura-references.ts`): typing `#rule:` or
- * the legacy `@rule:` opens the engine's provider over the same loaded
- * rules, and on submit the mention expands to a `<rule-ref>` element.
- * This file's own `@rule:` autocomplete provider was deleted when the
- * engine registered the `@rule:` alias (atomic landing: the alias and the
- * old provider would double-answer the same tokens). What stays here:
- * rule loading, frontmatter dispatch, and the always-on/glob system-prompt
- * sections below.
- *
- * `before_agent_start` rule resolver: scans the user's prompt for rule
- * mentions and appends the corresponding rule bodies to the system prompt
- * for that turn. Three mention forms are matched: legacy `@rule:<name>`
- * tokens, new `#rule:<name>` tokens (the shared reference engine's
- * syntax), and expanded `<rule-ref name="...">` elements (the reference
- * engine's input transform rewrites `#rule:` mentions before
- * `before_agent_start` runs, so the resolver must match both the raw tokens
- * and the expanded elements).
+ * Frontmatter-driven classification (read from each `.mdc`):
+ *   - `alwaysApply: true`  → `attach: "always"`.
+ *   - `globs:` + `alwaysApply: false` → `attach: "glob"` (the globs ride the
+ *     `Rule` for the `<rule-ref attach>` attribute).
+ *   - neither (manual) → `attach: "manual"`.
  *
  * Configurable skip (`aura.cursorRules.ignore`):
  *   - An array of glob patterns matched against the rule path **relative to
@@ -43,18 +29,15 @@
  *     CWDs) and `<cwd>/.pi/settings.json` (project-local); the two lists are
  *     unioned, so a rule matching either is skipped.
  *   - Lives under the `aura` settings block (this package's namespace); the
- *     setting is repo-controlled, not package-controlled: there is no
- *     package-wide ignore list and no drift manifest.
+ *     setting is repo-controlled, not package-controlled.
  *
- * Rules are resources, NOT pi skills (no `/skill:<rule>`). One concern per
- * extension: this file owns rule loading + dispatch + body injection; it
- * does not touch the aura-skill reminder (that's `aura-skill-instruction.ts`).
+ * Rules are resources, NOT pi skills (no `/skill:<rule>`). This file owns
+ * rule loading + classification only; it does not touch the system prompt.
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import { homedir } from "node:os";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -62,7 +45,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** Directory holding the repo's `.mdc` Cursor rule files (relative to the
  *  project root / cwd). The repo is responsible for syncing rules here; this
- *  package ships none. Until the dir is populated the extension no-ops. */
+ *  package ships none. Until the dir is populated the loader returns []. */
 const RULES_DIR = ".cursor/rules";
 
 /** Global settings file (pi agent settings). Computed lazily from homedir()
@@ -96,8 +79,8 @@ interface Rule {
   displayName?: string;
   /** Absolute path to the `.mdc` file. */
   path: string;
-  /** Path relative to RULES_DIR (no leading sep), for the system-prompt listing
-   *  and for glob-matching against the ignore list. */
+  /** Path relative to RULES_DIR (no leading sep), for glob-matching against
+   *  the ignore list. */
   relPath: string;
   /** Frontmatter attach mode. */
   attach: AttachMode;
@@ -117,8 +100,8 @@ interface Rule {
  * Parse the YAML frontmatter from a `.mdc` file. Returns `{ fm, body }` where
  * `fm` is a loose record of the parsed keys and `body` is the content after
  * the closing `---`. We only need `alwaysApply` (bool), `globs` (string or
- * list), `name` (string), and `description` (string), so a minimal parser
- * suffices and avoids a runtime dep on js-yaml for end users of the package.
+ * list), and `name` (string), so a minimal parser suffices and avoids a
+ * runtime dep on js-yaml for end users of the package.
  */
 export function parseFrontmatter(content: string): { fm: Record<string, unknown>; body: string } {
   const fm: Record<string, unknown> = {};
@@ -216,8 +199,8 @@ function parseYamlListBlock(yamlBlock: string, key: string): string[] {
  * path **relative to `.cursor/rules/`** (forward-slash-joined on all platforms
  * for cross-platform settings portability).
  *
- * We implement this here instead of pulling in a glob dep so the extension
- * stays dependency-free for end users of the package (the peer dep is pi only).
+ * We implement this here instead of pulling in a glob dep so the package
+ * stays dependency-free for end users (the peer dep is pi only).
  */
 export function globToRegExp(pattern: string): RegExp {
   // Normalize: match on forward-slash-separated relpaths.
@@ -322,9 +305,9 @@ function collectMdcFiles(dir: string, acc: string[] = []): string[] {
 }
 
 /** Load all non-ignored `.mdc` rules from `<cwd>/.cursor/rules/` recursively.
- *  Returns [] if the dir is absent or empty (the extension no-ops until the
- *  repo populates it). Rules matching any `aura.cursorRules.ignore` glob are
- *  skipped. */
+ *  Returns [] if the dir is absent or empty (no rules until the repo
+ *  populates the directory). Rules matching any `aura.cursorRules.ignore`
+ *  glob are skipped. */
 export function loadRules(cwd: string): Rule[] {
   const dir = join(cwd, RULES_DIR);
   if (!existsSync(dir)) return [];
@@ -369,113 +352,3 @@ export function loadRules(cwd: string): Rule[] {
 
 export type { AttachMode, Rule };
 export { parseYamlScalar, parseYamlScalarList, parseYamlListBlock };
-
-// ---------------------------------------------------------------------------
-// System-prompt builders
-// ---------------------------------------------------------------------------
-
-export function buildAlwaysOnSection(rules: Rule[]): string {
-  const alwaysOn = rules.filter((r) => r.attach === "always");
-  if (alwaysOn.length === 0) return "";
-  const blocks = alwaysOn
-    .map((r) => `### Rule: ${r.name}\n\n${r.body.trim()}`)
-    .join("\n\n");
-  return `\n\n## Engineering Rules (always-on)\n\nThe following house rules are always active. Honor them on every turn.\n\n${blocks}\n`;
-}
-
-export function buildListedRulesSection(rules: Rule[]): string {
-  // List the non-always-on rules (glob + manual = 7) so the agent knows they
-  // exist and can `read` or `@mention` them. (Always-on rules are already
-  // injected as bodies; listing them too would be redundant.)
-  const listed = rules.filter((r) => r.attach !== "always");
-  if (listed.length === 0) return "";
-  const lines = listed.map((r) => {
-    const globsStr = r.globs.length > 0 ? ` (globs: ${r.globs.join(", ")})` : "";
-    return `- ${RULES_DIR}/${r.relPath}${globsStr}`;
-  }).join("\n");
-  return `\n\n## Engineering Rules (on-demand)\n\nThe following house rules are available but not auto-loaded. Use the \`read\` tool to load a rule when its topic is relevant, or mention it with \`#rule:<name>\` (legacy \`@rule:<name>\`) to inject its body for this turn.\n\n${lines}\n`;
-}
-
-// ---------------------------------------------------------------------------
-// `@rule:`/`#rule:`/`<rule-ref>` resolver (before_agent_start)
-// ---------------------------------------------------------------------------
-
-/** Collect the mentioned rule names from a prompt, lowercased, in
- *  first-seen order. Three mention forms are matched:
- *
- *  - legacy `@rule:<name>` tokens (the original grammar, unchanged),
- *  - new `#rule:<name>` tokens (the shared reference engine's syntax),
- *    and
- *  - expanded `<rule-ref name="...">` elements: the reference engine's
- *    input transform rewrites `#rule:` mentions to `<rule-ref>` elements
- *    BEFORE `before_agent_start` runs, so a submitted mention usually
- *    arrives here already expanded. The raw token form still matters for
- *    mentions the transform left as typed (unresolvable names).
- *
- *  The token grammar stops at non-name characters (letters, digits,
- *  hyphens), so trailing punctuation is lenient, matching the legacy
- *  `@rule:` behavior. The same rule through any mix of forms is one
- *  name. */
-export function collectRuleMentionNames(prompt: string): string[] {
-  const names = new Set<string>();
-  const tokenRe = /[@#]rule:([a-z0-9-]+)/gi;
-  for (const m of prompt.matchAll(tokenRe)) {
-    names.add((m[1] ?? "").toLowerCase());
-  }
-  const elementRe = /<rule-ref\b[^>]*\bname="([^"]*)"/gi;
-  for (const m of prompt.matchAll(elementRe)) {
-    names.add((m[1] ?? "").toLowerCase());
-  }
-  return Array.from(names);
-}
-
-/** Scan the prompt for rule mentions (tokens and expanded elements; see
- *  collectRuleMentionNames) and append the corresponding rule bodies to
- *  the system prompt for that turn. Returns the text to append (or empty
- *  string when no mentioned rule resolves). */
-export function resolveRuleMentions(prompt: string, rules: Rule[]): string {
-  const mentioned = collectRuleMentionNames(prompt);
-  if (mentioned.length === 0) return "";
-  const byName = new Map(rules.map((r) => [r.name.toLowerCase(), r]));
-  const blocks: string[] = [];
-  for (const name of mentioned) {
-    const rule = byName.get(name);
-    if (rule) {
-      blocks.push(`### Rule: ${rule.name}\n\n${rule.body.trim()}`);
-    }
-  }
-  if (blocks.length === 0) return "";
-  return `\n\n## Engineering Rules (@mentioned this turn)\n\n${blocks.join("\n\n")}\n`;
-}
-
-// ---------------------------------------------------------------------------
-// Extension factory
-// ---------------------------------------------------------------------------
-
-export default function (pi: ExtensionAPI): void {
-  // Rules are loaded once at session start (the files don't change during a
-  // session) and reloaded on /reload (which re-emits session_start).
-  let rules: Rule[] = [];
-
-  pi.on("session_start", async (_event, ctx) => {
-    // Rules are loaded once at session start (the files don't change during a
-    // session) and reloaded on /reload (which re-emits session_start). A repo
-    // without `.cursor/rules/` loads an empty set: no sections, no body
-    // injection, and nothing offered through the engine's rule kind either
-    // (it loads the same directory). Do not notify: the empty state is
-    // expected until the repo syncs its rules.
-    rules = loadRules(ctx.cwd);
-  });
-
-  pi.on("before_agent_start", async (event, _ctx) => {
-    if (rules.length === 0) return;
-    const alwaysOn = buildAlwaysOnSection(rules);
-    const listed = buildListedRulesSection(rules);
-    const mentions = resolveRuleMentions(event.prompt ?? "", rules);
-    const addition = alwaysOn + listed + mentions;
-    if (addition.length === 0) return;
-    return {
-      systemPrompt: event.systemPrompt + addition,
-    };
-  });
-}
