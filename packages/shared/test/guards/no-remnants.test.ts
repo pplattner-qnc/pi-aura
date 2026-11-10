@@ -912,6 +912,46 @@ describe("no-remnants guard: aura skill rewrite", () => {
       "REST-only capabilities should carry a UI pointer",
     );
   });
+  it("documents the response-format contract", () => {
+    const skill = readSkillFile();
+    assert.match(
+      skill,
+      /response_format/,
+      "the response_format parameter should be named",
+    );
+    assert.match(
+      skill,
+      /default[^\n]*compact|compact[^\n]*default/i,
+      "compact should be documented as the default tier",
+    );
+    assert.match(skill, /"detail"/, "the detail tier should be documented");
+    assert.match(skill, /"full"/, "the full tier should be documented");
+    assert.match(
+      skill,
+      /getTask[^\n]*getTaskByHumanKey|getTaskByHumanKey[^\n]*getTask/,
+      "the full tier should be scoped to the two task reads",
+    );
+    assert.match(
+      skill,
+      /MCP-only/i,
+      "the tiering should be marked MCP-only",
+    );
+    assert.match(
+      skill,
+      /not part of the HTTP API/,
+      "the tiering should be marked outside the HTTP API",
+    );
+    assert.match(
+      skill,
+      /permission apparatus/i,
+      "the permission-apparatus exclusion should be documented",
+    );
+    assert.match(
+      skill,
+      /same PAT[^.]*through REST/,
+      "the same-PAT-through-REST note should be present",
+    );
+  });
 });
 
 // root-docs-refresh: the README describes the package as it now is. The

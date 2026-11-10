@@ -101,6 +101,19 @@ All tools are prefixed with `aura_2d_mcp_2d_dev_`. There are two families:
    including admin operations, board views, capacity, and user management.
    These are equally available and useful for broader workflows.
 
+### Response format
+
+Read tools default to a **compact** payload (identity and status). Pass
+`response_format: "detail"` for the working view on the tools that declare it
+(description, members, ancestors, allowed next statuses). Pass
+`response_format: "full"` on `getTask` and `getTaskByHumanKey` for every field
+except the classified exclusions.
+
+The tiering is MCP-only; it is not part of the HTTP API. The permission
+apparatus (`access_overview`, `inherited_members`, `broad_access`,
+`access_grants`, `viewer_access`, `viewer_can_*`, `viewer_has_*`, and kin) is
+excluded from every tier; the same PAT reaches those fields through REST.
+
 ### Capability scorecard
 
 MCP is the primary access path, and the capabilities the docs once called lost
