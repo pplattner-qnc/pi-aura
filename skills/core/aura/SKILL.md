@@ -97,14 +97,51 @@ All tools are prefixed with `aura_2d_mcp_2d_dev_`. There are two families:
      the merge base your content derives from, and a destructive whole-body
      replace needs `confirm_full_replace`).
 
-2. **All other tools** — the full Aura API surface, including admin operations,
-   board views, notifications, capacity, and user management. These are equally
-   available and useful for broader workflows.
+2. **All other tools**: the full Aura surface beyond the `mcp*` entry points,
+   including admin operations, board views, capacity, and user management.
+   These are equally available and useful for broader workflows.
 
-   Capabilities that left MCP entirely (capacity, board, notifications write,
-   artifact review flow, owner/crew search, Jira/Asana linking, memory-graph
-   expansion, skills admin import pipeline, wiki file/image upload) are **not
-   available via MCP** — use the Aura UI.
+### Capability scorecard
+
+MCP is the primary access path, and the capabilities the docs once called lost
+are back on it, fully or partly. Where something is not on MCP, use the Aura
+UI; do not fall back to hand-crafted API calls.
+
+**Back on MCP:**
+
+- **Capacity**: `readCapacity` (scopes me, person, group, company),
+  `updateTaskMemberCapacity` (set, change, or remove a core-team member's
+  commitment), `updateTaskMemberParticipation` (participation note and status)
+- **Board**: `getBoardSummary` (personal attention projections: waiting on me,
+  waiting on others, overdue)
+- **Owner and crew search**: `searchUsers` (picker search by display name or
+  email), `listUsers` (admin-only full listing)
+
+**Half back (the read side lives, the write side does not):**
+
+- **Jira and Asana reads**: `getTaskByJiraKey` resolves a task by its linked
+  Jira issue key; `getAsanaTask` and `listAsanaTasks` read the locally
+  mirrored Asana rows (no Asana account required). No MCP tool creates or
+  updates a link; manage links in the Aura UI.
+- **Wiki file reads**: `listKnowledgeFiles` and `listKnowledgeFileVersions`
+  (asset metadata and per-version history). Uploading files into a knowledge
+  space stays out of MCP (see below).
+- **Memory browse plus ingest**: `listMemoryEntities` (faceted, paginated
+  browsing), `getMemoryEntitySource` (a navigable source route), and
+  `acceptArtifactMemory` (aura-native ingest from an artifact). No MCP tool
+  writes entities or edges directly.
+
+**Still absent (use the Aura UI):**
+
+- **Notification writes**: no notification tool exists on MCP at all;
+  `getBoardSummary` explicitly excludes notifications.
+- **The opinion flow beyond its listing filter**: reviews became opinions; on
+  MCP the flow is visible only as the `opinion_requested` filter on
+  `listArtifacts`. Manage opinions in the Aura UI.
+- **Skills import**: the skills tools cover create, read, update, body saves,
+  and visibility, with no import or export pipeline.
+- **Wiki upload**: knowledge-space files cannot be created via MCP; upload
+  them in the Aura UI.
 
 ### Key patterns
 

@@ -863,6 +863,55 @@ describe("no-remnants guard: aura skill rewrite", () => {
       "the expected-version merge-base contract should be stated",
     );
   });
+  it("replaces the left-MCP paragraph with the per-capability scorecard", () => {
+    const skill = readSkillFile();
+    assert.doesNotMatch(
+      skill,
+      /left MCP entirely/,
+      "the retired left-MCP paragraph should be gone",
+    );
+    assert.match(skill, /Back on MCP/, "the scorecard's back tier should exist");
+    assert.match(skill, /Half back/, "the scorecard's half-back tier should exist");
+    assert.match(skill, /Still absent/, "the scorecard's absent tier should exist");
+    // Back: the three capacity tools, board summary, owner and crew search.
+    for (const tool of [
+      "readCapacity",
+      "updateTaskMemberCapacity",
+      "updateTaskMemberParticipation",
+      "getBoardSummary",
+      "searchUsers",
+      "listUsers",
+    ]) {
+      assert.ok(skill.includes(tool), `the back tier should name ${tool}`);
+    }
+    // Half back: Jira and Asana reads, wiki file reads, memory browse plus ingest.
+    for (const tool of [
+      "getTaskByJiraKey",
+      "getAsanaTask",
+      "listKnowledgeFiles",
+      "listMemoryEntities",
+      "acceptArtifactMemory",
+    ]) {
+      assert.ok(skill.includes(tool), `the half-back tier should name ${tool}`);
+    }
+    // Still absent: the opinion flow's only trace is its listing filter; no
+    // notification tool exists; skills import and wiki upload stay UI-side.
+    assert.match(
+      skill,
+      /opinion_requested/,
+      "the opinion flow's listing filter should be named",
+    );
+    assert.match(
+      skill,
+      /no notification tool/i,
+      "the notification absence should be stated",
+    );
+    assert.match(
+      skill,
+      /Aura UI/,
+      "REST-only capabilities should carry a UI pointer",
+    );
+  });
 });
 
 // root-docs-refresh: the README describes the package as it now is. The
