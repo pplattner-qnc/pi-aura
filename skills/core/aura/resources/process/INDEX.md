@@ -6,16 +6,25 @@ an agent to act correctly within it.
 
 ## Source of truth
 
-The canonical process description lives in the Aura wiki:
+The canonical process description lives in the Aura wiki, in the
+way-of-working section that replaced the archived single article:
 
-> **`getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "prozesse/how-we-work-in-aura-a-practical-guide" })`**
->
-> Node ID: `2a6d4f32-5d33-47fb-b073-4ec6b04db637`
-> Space: `knowledge-hub` | Path: `prozesse/how-we-work-in-aura-a-practical-guide`
+> **`getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "way-of-working-and-structures/1-how-we-work-together-purpose-principles" })`**
 
-When in doubt about process rules, fetch the wiki article. The files here
-encode the operational knowledge an agent needs — the wiki article is the
-human-readable reference.
+The section covers one page per topic here:
+
+| Wiki page | Local file |
+|---|---|
+| `1-how-we-work-together-purpose-principles` | this overview |
+| `1-1-roles` | [roles.md](roles.md) |
+| `1-2-workflow-phases` | [workflow-phases.md](workflow-phases.md) |
+| `1-3-capacity-resourcing` | [capacity.md](capacity.md) |
+| `1-4-alignment-review-escalation` | [review-modes.md](review-modes.md), [escalation.md](escalation.md) |
+| `1-5-tooling-aura-jira-asana` | [integrations.md](integrations.md) |
+
+When in doubt about process rules, fetch the matching wiki page. The files
+here encode the operational knowledge an agent needs; the wiki pages are
+the human-readable reference.
 
 ## The workflow at a glance
 

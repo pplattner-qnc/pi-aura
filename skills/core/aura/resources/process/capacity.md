@@ -1,6 +1,6 @@
 # Capacity
 
-> Canonical reference: `getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "prozesse/how-we-work-in-aura-a-practical-guide" })`
+> Canonical reference: `getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "way-of-working-and-structures/1-3-capacity-resourcing" })`
 
 Capacity in Aura is a **real-time day-level snapshot**, not a rigid weekly plan.
 

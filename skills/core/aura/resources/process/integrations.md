@@ -1,6 +1,6 @@
 # Integrations — Aura, JIRA, Asana
 
-> Canonical reference: `getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "prozesse/how-we-work-in-aura-a-practical-guide" })`
+> Canonical reference: `getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "way-of-working-and-structures/1-5-tooling-aura-jira-asana" })`
 
 ## Hierarchy
 

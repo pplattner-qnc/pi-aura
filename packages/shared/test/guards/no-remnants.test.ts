@@ -1833,6 +1833,72 @@ describe("no-remnants guard: usecase resources current (prose)", () => {
   });
 });
 
+// process-resources-current: the seven process resource files repoint to
+// the way-of-working 1.x pages that replaced the archived single article
+// (process-resources-source report, part a) and teach the live process
+// canon. The audit's load-bearing corrections are pinned here in the
+// existing guard style; a retired claim reappearing in a process file
+// fails the suite.
+const PROCESS_DIR = "skills/core/aura/resources/process";
+
+function readProcess(file: string): string {
+  return fs.readFileSync(path.join(repoRoot, PROCESS_DIR, file), "utf-8");
+}
+
+// The dead citation and the archived article node (the pre-2026-09-23
+// canon); no process file may cite either, and the June repository mirror
+// is never citable as current.
+const DEAD_PROCESS_PATH = "prozesse/how-we-work-in-aura-a-practical-guide";
+const ARCHIVED_GUIDE_NODE = "2a6d4f32";
+const JUNE_REPO_MIRROR = "bitbucket-anwaltde-aura";
+
+// process file -> its replacement page under way-of-working-and-structures
+// (the report's 1:1 mapping, live-probed 2026-10-29).
+const PROCESS_CANONICAL: Record<string, string> = {
+  "INDEX.md": "way-of-working-and-structures/1-how-we-work-together-purpose-principles",
+  "roles.md": "way-of-working-and-structures/1-1-roles",
+  "workflow-phases.md": "way-of-working-and-structures/1-2-workflow-phases",
+  "capacity.md": "way-of-working-and-structures/1-3-capacity-resourcing",
+  "review-modes.md": "way-of-working-and-structures/1-4-alignment-review-escalation",
+  "escalation.md": "way-of-working-and-structures/1-4-alignment-review-escalation",
+  "integrations.md": "way-of-working-and-structures/1-5-tooling-aura-jira-asana",
+};
+
+describe("no-remnants guard: process resources current (canonical references)", () => {
+  it("cites the replacement 1.x page in every process file, never the dead path", () => {
+    for (const [file, page] of Object.entries(PROCESS_CANONICAL)) {
+      const content = readProcess(file);
+      assert.ok(
+        content.includes(page),
+        `${file} should cite its replacement page ${page}`,
+      );
+      assert.ok(
+        content.includes("getKnowledgeNodeByPath"),
+        `${file}'s canonical reference should be the fetch call for its page`,
+      );
+      assert.doesNotMatch(
+        content,
+        /prozesse\/how-we-work-in-aura/,
+        `${file} still cites the dead pre-archival path`,
+      );
+      assert.ok(
+        !content.includes(ARCHIVED_GUIDE_NODE),
+        `${file} still cites the archived guide node ${ARCHIVED_GUIDE_NODE}`,
+      );
+    }
+  });
+
+  it("never cites the June repository mirror as current", () => {
+    for (const file of Object.keys(PROCESS_CANONICAL)) {
+      const content = readProcess(file);
+      assert.ok(
+        !content.includes(JUNE_REPO_MIRROR),
+        `${file} cites the June repo mirror, which is a staleness trap (pre-v14)`,
+      );
+    }
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package

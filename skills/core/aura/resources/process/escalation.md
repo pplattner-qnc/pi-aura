@@ -7,7 +7,7 @@
 > it. Present the situation to the user, recommend escalation, and wait for
 > their explicit approval before taking any escalation action.
 
-> Canonical reference: `getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "prozesse/how-we-work-in-aura-a-practical-guide" })`
+> Canonical reference: `getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "way-of-working-and-structures/1-4-alignment-review-escalation" })`
 
 **Escalation is not failure.** The process is designed so that escalations
 surface quickly. Escalate early, not late.
