@@ -2,8 +2,8 @@
 
 The repo has one TypeScript package with its own gates: the `@pi-aura/shared`
 workspace package (`.ts` sources consumed by the pi extension). Verification
-is typecheck + the shared package's unit tests. (The former `scripts/`
-esbuild project that bundled the agent-facing CLI was removed with the CLI.)
+is typecheck + the shared package's unit tests. The pi extensions carry
+per-file strip-types suites beside their sources; there is no build step.
 
 ## Framework
 
@@ -20,20 +20,17 @@ esbuild project that bundled the agent-facing CLI was removed with the CLI.)
 # Root (workspaces root): one install populates packages/shared/
 npm install
 
-# packages/shared — the AuraClient interface, HeyApiAuraClient impl, keyring, settings
+# packages/shared: the keyring, settings, and embed modules the extensions
+# resolve at runtime; the guards live in test/guards/
 cd packages/shared
-npm run codegen        # regenerate src/generated/ from openapi/openapi.yaml
 npm run typecheck      # tsc --noEmit
-npm test               # tsx --test test/*.test.ts
+npm test               # tsx --test 'test/**/*.test.ts'
 
-# Taskfile wrappers (run from the repo root; requires `task` on PATH —
-# https://taskfile.dev; not available on NixOS by default — use npm directly
+# Taskfile wrappers (run from the repo root; requires `task` on PATH,
+# https://taskfile.dev, not available on NixOS by default; use npm directly
 # as shown above):
 task install          # root npm install
-task codegen          # cd packages/shared && npm run codegen
-task gen              # codegen + typecheck (after touching the spec)
 task typecheck        # cd packages/shared && npm run typecheck
-task openapi-sync     # refresh packages/shared/openapi/openapi.yaml from the Aura repo
 ```
 
 ## Test protocol
@@ -62,10 +59,6 @@ Run if asked (by number):
    codes, landed rows, and `PRAGMA integrity_check` (the extension loop
    above runs this suite; this item isolates it when the
    concurrency gate is what was asked for)
-2. `task codegen && git diff --exit-code -- packages/shared/src/generated/` -- the codegen byte-stability check: regenerate the
-   generated client and require the committed generated tree back
-   byte-identical (the `tsConfigPath` lesson: regeneration must survive
-   without hand-patching)
 
 A single suite, for manual use only (not part of the gated protocol): run
 any one file with its documented per-file runner; the family sections
@@ -75,17 +68,17 @@ below list the exact commands.
 
 - Inject a fake `Keyring` (returns a test PAT) over hitting the real OS
   keyring. A `FakeKeyring` implementing the `Keyring` interface is the
-  standard seam; the `hey-api-aura-client` suite uses it (see
-  `packages/shared/test/hey-api-aura-client.test.ts`). Assert constructed
-  auth headers, not live network calls.
-- Inject a fake generated SDK / `createClient` over hitting real Aura for
-  `HeyApiAuraClient` mapping tests; assert the domain<->generated mapping
-  without network calls.
-- The `AuraClient` interface is implementation-agnostic; the extensions
-  consume it through their dynamic-import seam and should be unit-tested by
-  injecting a fake `AuraClient` rather than the real `HeyApiAuraClient`.
+  standard seam; the credential loader's suite uses it (see
+  `extensions/aura-mcp-client.test.ts`). Assert the Authorization header
+  the caller sent, not live network calls.
+- Inject a fake caller into `createAuraMcpInterface` over talking to a
+  real Aura server for the typed MCP wrapper's tests: assert the envelopes
+  it sends and the degraded-path errors it returns, never the network.
+  The extension factories carry the seams one level up: `loadCredentials`
+  (both MCP consumers) and `createInterface` plus `createCache` (the
+  reference engine) take fakes; production wiring passes nothing.
 - **Mock-fidelity for external-library integration (the `_embedRaw`
-  lesson).** The local-embeddings provider mocks `@huggingface/transformers`'
+  lesson).** The local-embeddings provider mocks `@huggingface/transformers'`
   `pipeline`. A mock whose output shape doesn't match the real library's
   (a single `Tensor` with `dims=[N, hiddenDim]` and flat `data`, not an
   array of per-text tensors) passes unit tests while crashing real
@@ -95,25 +88,6 @@ below list the exact commands.
   end-to-end gate that once embedded every REST operation retired with the
   CLI, so the shape assertions in the embed suites are the remaining
   guard.
-- **Generated SDK imports need `.js` extensions under NodeNext** (the
-  `tsConfigPath` lesson). The generated client in `packages/shared/src/generated/`
-  is consumed by the shared NodeNext codegen tsconfig (`tsconfig.codegen.json`),
-  which openapi-ts reads via `output.tsConfigPath`; the extension suites are not
-  consumers (their dynamic-import seam keeps the client out of the strip-types
-  path). Under NodeNext, relative import specifiers MUST carry a `.js`
-  extension or `tsc` fails with TS2307/TS2834. `@hey-api/openapi-ts` (v0.67+) auto-appends `.js` to
-  generated relative imports when the resolved `output.tsConfigPath` tsconfig
-  has `moduleResolution: "nodenext"`. `packages/shared/openapi-ts.config.ts`
-  points `tsConfigPath` at `packages/shared/tsconfig.codegen.json` (a tiny
-  NodeNext tsconfig), so `npm run codegen` emits the `.js` extensions natively
-  and the generated tree is correct out-of-the-box and survives regeneration.
-  **Do NOT hand-patch `.js` extensions onto generated files** (a prior attempt
-  did; the next codegen run wiped them). `tsConfigPath` is resolved relative
-  to the
-  openapi-ts package dir, not the config file, so it must be an absolute path
-  (the config derives it from `import.meta.url`). `.js`-extended specifiers
-  also resolve under `bundler`, so the shared package's own `tsc --noEmit` is
-  unaffected.
 
 ## Pi extension logic tests (`extensions/*.test.ts`)
 
@@ -121,8 +95,8 @@ Extension modules are unit-tested as pure exported functions run with
 `node --experimental-strip-types` + `node:assert/strict`: each
 `extensions/<name>.ts` gets a sibling `<name>.test.ts` of top-level assert
 blocks that import the module directly, keeping the dynamic-import seams
-(AuraClient, settings, `node:sqlite`) out of the test path. Run a suite
-with:
+(the typed MCP interface, settings, `node:sqlite`) out of the test path.
+Run a suite with:
 
 ```bash
 node --experimental-strip-types extensions/aura-references.test.ts

@@ -2586,6 +2586,10 @@ const ROOT_DOCS = [
   "docs/dev-env.md",
 ];
 
+function readRootDoc(relative: string): string {
+  return fs.readFileSync(path.join(repoRoot, relative), "utf-8");
+}
+
 describe("no-remnants guard: root docs content", () => {
   it("carries no digest or Atlassian-provisioning mentions in the five root docs", () => {
     const offenders: string[] = [];
@@ -2718,6 +2722,343 @@ describe("no-remnants guard: no CLI or REST access teaching", () => {
       offenders,
       [],
       "no shipped file should teach reaching Aura through the CLI or REST (MCP-first access, UI pointers for REST-only capabilities)",
+    );
+  });
+});
+
+// root-docs-current: the five root documents describe the final package per
+// the root-docs-drift report's claim list against the settled post-teardown
+// tree: the six surviving extensions, the package's own aura-mcp-dev server
+// registration with a user's entry as the optional override, the released
+// install pin, the current credential story, and no removed surface named
+// as current. The report's stale rows are pinned gone here in the existing
+// guard style; a retired claim reappearing in a root doc fails the suite.
+describe("no-remnants guard: root docs current (README)", () => {
+  it("corrects the false no-commands claim to the shipped command and tool surface", () => {
+    const readme = readRootDoc("README.md");
+    assert.doesNotMatch(
+      readme,
+      /No user-facing commands/,
+      "the false no-commands claim should be gone",
+    );
+    assert.ok(
+      readme.includes("/aura secrets discover"),
+      "the secrets command should be named",
+    );
+    assert.ok(
+      readme.includes("/aura secrets edit"),
+      "the secrets edit subcommand should be named",
+    );
+    assert.ok(
+      readme.includes("aura_feedback"),
+      "the feedback tool should be named",
+    );
+  });
+
+  it("drops the unused pi-subagents and pi-mcp-adapter prerequisites", () => {
+    const readme = readRootDoc("README.md");
+    assert.doesNotMatch(
+      readme,
+      /pi-subagents|pi-mcp-adapter/i,
+      "the unused add-on prerequisites should be gone (pi's MCP support is built in)",
+    );
+  });
+
+  it("teaches the package's own registration as the default and a user entry as the optional override", () => {
+    const readme = readRootDoc("README.md");
+    assert.match(
+      readme,
+      /MCP configuration \(optional/i,
+      "the MCP section should be framed as an optional override",
+    );
+    assert.match(
+      readme,
+      /registers the `aura-mcp-dev` MCP server/i,
+      "the package's own registration should be stated",
+    );
+    assert.match(
+      readme,
+      /No manual MCP setup is required/i,
+      "manual setup should be explicitly not required",
+    );
+    assert.match(
+      readme,
+      /your own `aura-mcp-dev` entry/i,
+      "the user's own entry should be the override mechanism",
+    );
+    assert.match(
+      readme,
+      /wins over the package's registration/i,
+      "the user entry's precedence should be stated",
+    );
+    assert.doesNotMatch(
+      readme,
+      /bearerToken|"auth":\s*"bearer"/,
+      "the retired mcp.json config shape should be gone",
+    );
+    assert.match(
+      readme,
+      /"headers"/,
+      "the pi-native config shape (url plus headers) should be shown",
+    );
+  });
+
+  it("pins the install example to the current released version", () => {
+    const readme = readRootDoc("README.md");
+    assert.match(
+      readme,
+      /pi install git:github\.com\/pplattner-qnc\/pi-aura@v0\.8\.0/,
+      "the install pin should name the current released version",
+    );
+    assert.doesNotMatch(readme, /@v0\.1\.0/, "the stale v0.1.0 pin should be gone");
+  });
+
+  it("lists exactly the manifest's six extensions in the extensions table", () => {
+    const readme = readRootDoc("README.md");
+    const extensionsPart = readme.split("## Extensions")[1] ?? "";
+    assert.notEqual(extensionsPart, "", "the README should carry an ## Extensions section");
+    const tableExtensions = extensionsPart
+      .split("\n")
+      .filter((line) => line.startsWith("| `"))
+      .map((line) => line.match(/^\| `([^`]+)`/)?.[1])
+      .filter((name) => name !== undefined)
+      .sort();
+    const pkg = readRootPackageJson();
+    const manifestExtensions = (pkg.pi?.extensions ?? [])
+      .map((entry) => entry.replace("./extensions/", "").replace(".ts", ""))
+      .sort();
+    assert.deepEqual(
+      tableExtensions,
+      manifestExtensions,
+      "the README extensions table should list exactly the manifest's six extensions",
+    );
+  });
+
+  it("describes the cursor-rules library module and the companion-plugin assumption", () => {
+    const readme = readRootDoc("README.md");
+    assert.ok(
+      readme.includes("extensions/cursor-rules.ts"),
+      "the non-manifest rules-loading library module should be named",
+    );
+    assert.match(
+      readme,
+      /plugin repo/i,
+      "the companion plugin's ownership of rules dispatch should be stated",
+    );
+    assert.match(
+      readme,
+      /nothing injects the rule body/i,
+      "the with-pi-aura-alone behavior (mentions expand, no body injection) should be stated",
+    );
+  });
+
+  it("references no removed file, workspace, or target", () => {
+    const readme = readRootDoc("README.md");
+    assert.doesNotMatch(
+      readme,
+      /scripts\/|aura\.mjs|skills\/core\/aura\/dist|HeyApiAuraClient|AuraClient|@pi-aura\/shared\/aura-client|codegen|openapi/i,
+      "the README should name no removed surface",
+    );
+  });
+});
+
+describe("no-remnants guard: root docs current (glossary)", () => {
+  it("describes the PAT as keyring-stored with the mcp config file as the import source only", () => {
+    const context = readRootDoc("CONTEXT.md");
+    assert.match(
+      context,
+      /OS keyring/,
+      "the PAT entry should state the keyring as where the PAT lives",
+    );
+    assert.match(
+      context,
+      /import source/,
+      "the mcp.json file should be described as the import source only",
+    );
+    assert.doesNotMatch(
+      context,
+      /read from `~\/\.config\/mcp\/mcp\.json`/,
+      "the stale read-from-mcp.json PAT story should be gone",
+    );
+  });
+
+  it("carries the live tool count in the mcp* entry", () => {
+    const context = readRootDoc("CONTEXT.md");
+    assert.doesNotMatch(context, /\b90\b/, "the stale 90-tool count should be gone");
+    assert.match(context, /\b120\b/, "the live 120-tool count should be stated");
+  });
+
+  it("replaces the removed REST access-client entries with the shipped typed interface", () => {
+    const context = readRootDoc("CONTEXT.md");
+    assert.doesNotMatch(
+      context,
+      /AuraClient|HeyApiAuraClient|@pi-aura\/shared\/aura-client|@hey-api|openapi-ts/i,
+      "the removed REST library entries should be gone (taught by absence, not negation)",
+    );
+    assert.match(
+      context,
+      /aura-mcp-client\.ts/,
+      "the shipped typed interface module should be named",
+    );
+    assert.match(
+      context,
+      /createAuraMcpInterface/,
+      "the typed interface's constructor should be named",
+    );
+  });
+
+  it("describes the keyring as it ships", () => {
+    const context = readRootDoc("CONTEXT.md");
+    assert.doesNotMatch(
+      context,
+      /@napi-rs\/keyring/,
+      "the dead @napi-rs/keyring attribution should be gone",
+    );
+    assert.match(
+      context,
+      /Secret Service/,
+      "the Linux D-Bus Secret Service backend should be named",
+    );
+    assert.match(context, /FakeKeyring/, "the FakeKeyring test seam should be named");
+    assert.match(
+      context,
+      /FileKeyring/,
+      "the file backend backing the automated keyring suite should be named",
+    );
+  });
+});
+
+describe("no-remnants guard: root docs current (project instructions)", () => {
+  it("states the state.yaml pointer keys the file actually holds", () => {
+    const agents = readRootDoc("AGENTS.md");
+    assert.match(
+      agents,
+      /`map`\/`task` pointers/,
+      "the pointer claim should name the map/task keys state.yaml holds",
+    );
+    assert.doesNotMatch(
+      agents,
+      /`task`\/`slice` pointers/,
+      "the stale task/slice pointer claim should be gone",
+    );
+  });
+});
+
+describe("no-remnants guard: root docs current (testing doc)", () => {
+  it("carries no removed build, codegen, or REST-library surface", () => {
+    const testing = readRootDoc("docs/testing.md");
+    assert.doesNotMatch(
+      testing,
+      /codegen|openapi|hey-api|HeyApiAuraClient|tsConfigPath|src\/generated|task gen\b|task build\b/i,
+      "the testing doc should name no removed codegen, spec-sync, or REST-library surface",
+    );
+  });
+
+  it("names the shipped seams and the always set", () => {
+    const testing = readRootDoc("docs/testing.md");
+    for (const needle of [
+      "cd packages/shared && npm test",
+      "task typecheck",
+      "extensions/*.test.ts",
+      "createAuraMcpInterface",
+      "loadCredentials",
+      "createInterface",
+      "FakeKeyring",
+      "extensions/aura-mcp-client.test.ts",
+    ]) {
+      assert.ok(
+        testing.includes(needle),
+        `docs/testing.md should carry the shipped seam or gate: ${needle}`,
+      );
+    }
+  });
+
+  it("keeps the run-if-asked list to what still exists", () => {
+    const testing = readRootDoc("docs/testing.md");
+    assert.ok(
+      testing.includes("extensions/aura-reference-cache.test.ts"),
+      "the cross-process concurrency driver should stay the run-if-asked item",
+    );
+    assert.doesNotMatch(
+      testing,
+      /git diff --exit-code|byte-stability/,
+      "the codegen byte-stability check should be gone with the codegen target",
+    );
+  });
+});
+
+describe("no-remnants guard: root docs current (dev-env doc)", () => {
+  it("describes the root-install flow with no removed build targets", () => {
+    const devenv = readRootDoc("docs/dev-env.md");
+    assert.match(
+      devenv,
+      /npm install/,
+      "the root-workspace install should be the setup step",
+    );
+    assert.doesNotMatch(
+      devenv,
+      /codegen|openapi|scripts\/|dist\/|KeyringBackend|GNOME|aura-access-rewrite/i,
+      "the dev-env doc should name no removed build target or retired surface",
+    );
+  });
+
+  it("carries the current credential story", () => {
+    const devenv = readRootDoc("docs/dev-env.md");
+    assert.match(
+      devenv,
+      /aura\.baseUrl/,
+      "the settings-derived base URL should be the configuration step",
+    );
+    assert.match(
+      devenv,
+      /\/aura secrets discover/,
+      "the PAT import path should be named",
+    );
+    assert.match(
+      devenv,
+      /\/aura secrets edit/,
+      "the PAT edit path should be named",
+    );
+    assert.doesNotMatch(
+      devenv,
+      /read from\s+`~\/\.config\/mcp\/mcp\.json`/,
+      "the stale mcp.json credential story should be gone",
+    );
+  });
+
+  it("names the shipped keyring test seams", () => {
+    const devenv = readRootDoc("docs/dev-env.md");
+    assert.match(devenv, /FakeKeyring/, "the fake keyring seam should be named");
+    assert.match(
+      devenv,
+      /FileKeyring/,
+      "the file backend backing the automated keyring suite should be named",
+    );
+    assert.doesNotMatch(
+      devenv,
+      /live OS keyring/i,
+      "the nonexistent live-keyring smoke test should not be described",
+    );
+  });
+});
+
+describe("no-remnants guard: root docs current (prose)", () => {
+  it("carries no em-dash in any of the five root docs", () => {
+    const offenders: string[] = [];
+    for (const doc of ROOT_DOCS) {
+      const content = readRootDoc(doc);
+      content
+        .split("\n")
+        .forEach((line, index) => {
+          if (line.includes("\u2014")) {
+            offenders.push(`${doc}:${index + 1}: ${line.trim()}`);
+          }
+        });
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "the five root docs should carry no em-dash (the repo's prose rule; every doc is touched by this ticket)",
     );
   });
 });
