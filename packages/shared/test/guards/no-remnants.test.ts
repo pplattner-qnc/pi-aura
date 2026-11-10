@@ -802,6 +802,71 @@ describe("no-remnants guard: aura skill rewrite", () => {
       "the stale 90-tool count should be gone",
     );
   });
+  it("keeps the ten mcp* tools with the corrected one-liners and the live kind list", () => {
+    const skill = readSkillFile();
+    for (const tool of [
+      "mcpAnswerQuestion",
+      "mcpCreateArtifact",
+      "mcpCreateUploadDocument",
+      "mcpGetKnowledgeDocument",
+      "mcpGetQuestion",
+      "mcpGetRepoDocument",
+      "mcpGetUploadDocument",
+      "mcpLinkUploadToTask",
+      "mcpListCodeRepositories",
+      "mcpUpdateArtifact",
+    ]) {
+      assert.ok(
+        skill.includes(tool),
+        `the mcp* list should keep ${tool}`,
+      );
+    }
+    // mcpCreateArtifact: the OPINION kind replaced review; TEMPORARY stays chat-only.
+    assert.match(
+      skill,
+      /mcpCreateArtifact[^\n]*OPINION/,
+      "mcpCreateArtifact's one-liner should name the OPINION kind",
+    );
+    assert.doesNotMatch(
+      skill,
+      /plan, review, generic doc/,
+      "the retired review kind should not be listed",
+    );
+    assert.match(
+      skill,
+      /TEMPORARY[^\n]*chat/i,
+      "the chat-only TEMPORARY kind should stay qualified",
+    );
+    // mcpCreateUploadDocument: base64 ingest with the size limit.
+    assert.match(
+      skill,
+      /mcpCreateUploadDocument[^\n]*base64/i,
+      "the upload one-liner should describe base64 ingest",
+    );
+    assert.match(
+      skill,
+      /mcpCreateUploadDocument[^\n]*10 MB/,
+      "the upload one-liner should carry the 10 MB limit",
+    );
+    // mcpUpdateArtifact: whole mode with the limits and the expected-version contract.
+    assert.match(
+      skill,
+      /mcpUpdateArtifact[^\n]*"whole"/,
+      "the update one-liner should name whole mode (full is gone)",
+    );
+    assert.doesNotMatch(
+      skill,
+      /full or section mode/,
+      "the retired full mode wording should be gone",
+    );
+    assert.match(skill, /200,000/, "the whole-body limit should be stated");
+    assert.match(skill, /50,000/, "the section limit should be stated");
+    assert.match(
+      skill,
+      /expected_version/,
+      "the expected-version merge-base contract should be stated",
+    );
+  });
 });
 
 // root-docs-refresh: the README describes the package as it now is. The

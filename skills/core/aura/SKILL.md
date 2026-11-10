@@ -81,16 +81,21 @@ All tools are prefixed with `aura_2d_mcp_2d_dev_`. There are two families:
    the caller's PAT for authentication and are the primary interface for
    agent workflows. All **10 `mcp*` tools** on the live 120-tool
    server:
-   - `mcpAnswerQuestion` — answer a question directed at you.
-   - `mcpCreateArtifact` — create a new artifact (plan, review, generic doc).
-   - `mcpCreateUploadDocument` — upload a document and create an artifact for it.
-   - `mcpGetKnowledgeDocument` — fetch a knowledge-base document.
-   - `mcpGetQuestion` — fetch a question directed at you.
-   - `mcpGetRepoDocument` — fetch a repository document.
-   - `mcpGetUploadDocument` — fetch an uploaded document.
-   - `mcpLinkUploadToTask` — link an uploaded document to a task.
-   - `mcpListCodeRepositories` — list the allowlisted Bitbucket repositories.
-   - `mcpUpdateArtifact` — update an artifact (full or section mode).
+   - `mcpAnswerQuestion`: answer a question directed at you.
+   - `mcpCreateArtifact`: create a new artifact (PLAN, OPINION, or GENERIC;
+     chat-only TEMPORARY is created by the chat, not by tools).
+   - `mcpCreateUploadDocument`: ingest a file from base64 content (maximum
+     10 MB per request).
+   - `mcpGetKnowledgeDocument`: fetch a knowledge-base document.
+   - `mcpGetQuestion`: fetch a question directed at you.
+   - `mcpGetRepoDocument`: fetch a repository document.
+   - `mcpGetUploadDocument`: fetch an uploaded document.
+   - `mcpLinkUploadToTask`: link an uploaded document to a task.
+   - `mcpListCodeRepositories`: list the repositories with code search enabled.
+   - `mcpUpdateArtifact`: update an artifact body in `section` or `whole` mode
+     (limits: 50,000 characters section, 200,000 whole; `expected_version` is
+     the merge base your content derives from, and a destructive whole-body
+     replace needs `confirm_full_replace`).
 
 2. **All other tools** — the full Aura API surface, including admin operations,
    board views, notifications, capacity, and user management. These are equally
