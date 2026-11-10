@@ -32,7 +32,8 @@
  * 5. Every reference query (`getSuggestions`) returns the cached view
  *    instantly, never awaiting an Aura fetch, and fires a background refresh
  *    (`refreshReferenceKind`) that runs the adapter's server-side search
- *    (`listTasks` with `search` for the typed partial) guarded by the
+ *    (the listTasks tool with the full-text `q` parameter for the typed
+ *    partial) guarded by the
  *    request's abort signal and writes the fresh results through to the
  *    cache, so they surface on the next keystroke (pi-tui re-queries per
  *    keystroke and drops late results itself). A task outside the local
@@ -132,17 +133,20 @@
  * and inserts it) or hand-typed as `#wiki:<uuid>` (programmatic or copied
  * references; the adapter discriminates the shapes with
  * `isWikiUuidForm`, and a uuid partial still finds its page by id prefix).
- * Wiki items carry the space, path, and version as metadata extras (the
- * artifact kind's pattern). Search hits carry no node path (their url is
+ * Wiki items carry the space and path as metadata extras (the artifact
+ * kind's pattern); the version does not ride the tree (the slim tree
+ * carries no latest_version) and loads lazily from the node read when a
+ * reference is resolved. Search hits carry no node path (their url is
  * `<base>/knowledge/<space_slug>/<uuid>`), so the hit-to-path derivation
  * walks the hit space's knowledge tree (`getKnowledgeTree`, the pure
  * `wikiItemsFromTree`), joined by node id and memoized per space for the
  * session, with one refetch when a memo misses a hit's id (a page created
- * after the memo); only DOCUMENT nodes are referenceable. The client has
- * no space-listing verb, so the warmup is search-seeded: one generic
- * `mcpWikiSearch` (bounded at the API max) surfaces the spaces worth
- * covering, then one memoized tree per distinct hit space writes complete
- * items, capped per space at 500 in tree order. Its slice 2 shipped
+ * after the memo). The slim tree says nothing about node kinds, so every
+ * node is a candidate (resolution discriminates: the by-path read
+ * resolves documents). The space listing exists on the interface
+ * (`listKnowledgeSpaces`), so the warmup enumerates the readable spaces
+ * directly and writes one memoized tree per space, capped per space at
+ * 500 in tree order. Its slice 2 shipped
  * expansion: on submit, both identity forms resolve to the same canonical
  * `<wiki-ref space path version>title</wiki-ref>` (cache-first through
  * complete cached metadata, then `getKnowledgeNodeByPath` for the path
@@ -813,7 +817,7 @@ Task references carry only the key, status, and title, never the task body. \`ke
 
 Rule references carry the rule's \`name\`, how it attaches (\`attach\`: \`manual\`, \`always\`, or \`glob\` with its patterns), and the rule's display title as the element text. The referenced rule's body is injected into the system prompt for this turn; honor it without further action.
 
-Artifact references carry the artifact's \`id\` (its uuid), its \`kind\` (\`PLAN\`, \`REVIEW\`, or \`GENERIC\`), the \`version\` the reference resolved to (the latest version at resolution time), and the artifact title as the element text; never the body. To read the full artifact, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further artifact details from the reference alone.
+Artifact references carry the artifact's \`id\` (its uuid), its \`kind\` (\`PLAN\`, \`OPINION\`, or \`GENERIC\`, plus the chat-only \`TEMPORARY\`), the \`version\` the reference resolved to (the latest version at resolution time), and the artifact title as the element text; never the body. To read the full artifact, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further artifact details from the reference alone.
 
 Wiki references carry the page's \`space\` (its knowledge-space slug), its \`path\` (the slug path within that space), the \`version\` the reference resolved to, and the page title as the element text; never the body. To read the page, update it, or take any action on it, use the \`aura\` skill (load its SKILL.md with the \`read\` tool) and the aura-mcp-dev MCP tools; do not infer further wiki details from the reference alone.
 `;
@@ -1176,10 +1180,11 @@ export interface ArtifactSummary {
 /**
  * An artifact reference item: a ReferenceItem whose extras carry the
  * metadata-driven expansion attributes. `artifactKind` is the Aura
- * artifact kind (PLAN, REVIEW, GENERIC; named so it never collides with
- * the engine's registry `kind`) and `version` is the latest version at
- * fetch time; both land in the sqlite cache's kind-agnostic metadata JSON
- * column and are read back from there on cache-first resolution. This is
+ * artifact kind (the live set: PLAN, OPINION, GENERIC, plus the chat-only
+ * TEMPORARY; named so it never collides with the engine's registry
+ * `kind`) and `version` is the latest version at fetch time; both land in
+ * the sqlite cache's kind-agnostic metadata JSON column and are read back
+ * from there on cache-first resolution. This is
  * the metadata-driven item pattern for the wiki kind (the wiki ticket's
  * interface contract: the same extras mechanism carries space, path, and
  * version there).
@@ -1932,8 +1937,9 @@ export function createReferenceAutocompleteProvider(
   refreshOptions: { canRefresh?: () => boolean } = {},
 ): AutocompleteProvider {
   // The background-refresh gate. Production wiring latches the no-credentials
-  // state (createDefaultAuraClient() throws) and passes a gate that is off for
-  // the whole session, so a credential-less session fires no refresh at all.
+  // state (the interface construction rejects) and passes a gate that is off
+  // for the whole session, so a credential-less session fires no refresh at
+  // all.
   const canRefresh = refreshOptions.canRefresh ?? (() => true);
   return {
     // `#` for the engine's own `#kind:` tokens; `@` for the registered legacy
@@ -2114,10 +2120,10 @@ export default function (pi: ExtensionAPI): void {
   const artifactAdapter = createArtifactAdapter({ createInterface });
   // The wiki kind (the dual-identity kind): same ride (persistent cache,
   // SWR refresh, TTL-gated warmup) with its own sources: the server search
-  // is mcpWikiSearch and the warmup is search-seeded (one generic seed
-  // search, then one tree per distinct hit space; the two open-detail
-  // decisions recorded in the ticket doc's implementation notes). Its
-  // items carry the space, path, and version as metadata extras.
+  // is searchKnowledge and the warmup enumerates the readable spaces via
+  // listKnowledgeSpaces, then fetches one tree per space. Its items carry
+  // the space and path as metadata extras; the version loads lazily from
+  // the node read when a reference is resolved.
   const wikiAdapter = createWikiAdapter({ createInterface });
   const registry = createReferenceRegistry([taskAdapter, ruleAdapter, artifactAdapter, wikiAdapter]);
   // The first production alias: `@AURA-<digits>` keeps working through the

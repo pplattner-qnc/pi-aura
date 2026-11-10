@@ -1911,7 +1911,9 @@ console.log("resolveFullToken cache-first + targeted fallback: ok");
   assert.ok(/element text is the task title/.test(REFERENCE_INSTRUCTION), "names the task title part");
   assert.ok(/display title as the element text/.test(REFERENCE_INSTRUCTION), "names the rule display title part");
   assert.ok(/artifact title as the element text/.test(REFERENCE_INSTRUCTION), "names the artifact title part");
-  assert.ok(/`PLAN`/.test(REFERENCE_INSTRUCTION), "names the artifact kind values");
+  assert.ok(/`PLAN`, `OPINION`, or `GENERIC`/.test(REFERENCE_INSTRUCTION), "names the live artifact kind set");
+  assert.ok(/chat-only `TEMPORARY`/.test(REFERENCE_INSTRUCTION), "names the chat-only kind");
+  assert.ok(!/`PLAN`, `REVIEW`/.test(REFERENCE_INSTRUCTION), "the retired REVIEW kind is gone from the live set");
   assert.ok(/`version` the reference resolved to/.test(REFERENCE_INSTRUCTION), "names the artifact version semantics");
   assert.ok(REFERENCE_INSTRUCTION.includes("aura"), "points at the aura skill for task references");
   assert.ok(
