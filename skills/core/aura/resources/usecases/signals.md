@@ -16,7 +16,7 @@ listSignals({ status: "CANDIDATE", limit: 20, page: 1 })
 ## Getting signal detail
 
 ```
-getSignal({ uuid: "<signal-uuid>" })
+getSignal({ id: "<signal-uuid>" })
 ```
 
 Returns the signal with evidence and review history.
@@ -25,17 +25,21 @@ Returns the signal with evidence and review history.
 
 ```
 reviewSignal({
-  uuid: "<signal-uuid>",
+  id: "<signal-uuid>",
   action: "ACKNOWLEDGE",       // DISMISS | ACKNOWLEDGE | SNOOZE | CREATE_TASK
-  reason_code: "OUT_OF_SCOPE", // OPS_NOISE | DUPLICATE | OUT_OF_SCOPE | ALREADY_TRACKED | OTHER
   reason_text: "Not relevant to our current roadmap"
 })
 ```
 
+`reason_code` (`OPS_NOISE` | `DUPLICATE` | `OUT_OF_SCOPE` |
+`ALREADY_TRACKED` | `OTHER`) is required when action is `DISMISS`;
+otherwise omit it. `reason_text` is optional free text (max 2000
+characters) and can accompany any action.
+
 ## Converting a signal to a task
 
 ```
-createTaskFromSignal({ uuid: "<signal-uuid>" })
+createTaskFromSignal({ id: "<signal-uuid>" })
 ```
 
 Creates an Aura task prefilled from the signal (summary + evidence).

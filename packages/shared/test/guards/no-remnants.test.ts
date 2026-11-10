@@ -1040,6 +1040,799 @@ describe("no-remnants guard: aura skill rewrite", () => {
   });
 });
 
+// usecase-resources-current: the twelve usecase resource files teach the
+// live 120-tool server per the usecase-resources-drift report's per-file
+// worklist and the confirmed placement map. The audit's load-bearing
+// corrections are pinned here in the existing guard style; a retired claim
+// reappearing in a usecase file fails the suite.
+const USECASES_DIR = "skills/core/aura/resources/usecases";
+
+function readUsecase(file: string): string {
+  return fs.readFileSync(path.join(repoRoot, USECASES_DIR, file), "utf-8");
+}
+
+describe("no-remnants guard: usecase resources current (capacity)", () => {
+  it("documents readCapacity's four scopes with their access semantics", () => {
+    const file = readUsecase("capacity-planning.md");
+    for (const scope of ["me", "person", "group", "company"]) {
+      assert.ok(
+        file.includes(`"${scope}"`),
+        `the capacity file should document the ${scope} scope`,
+      );
+    }
+    assert.match(
+      file,
+      /VIEW_CAPACITY_OVERVIEW/,
+      "the foreign-person capability gate should be named",
+    );
+    assert.match(
+      file,
+      /LEAD of a common group/,
+      "the foreign-person lead gate should be named",
+    );
+    assert.match(
+      file,
+      /my team|every group where/i,
+      "the group scope's omit-group_id behavior should be documented",
+    );
+    assert.match(
+      file,
+      /paginated/i,
+      "the company scope's pagination should be documented",
+    );
+  });
+
+  it("teaches the leadership overview as live on MCP, not UI-only", () => {
+    const file = readUsecase("capacity-planning.md");
+    const section = file.split("### Leadership overview")[1]?.split("\n### ")[0] ?? "";
+    assert.notEqual(section, "", "the leadership overview section should exist");
+    assert.match(
+      section,
+      /readCapacity[^\n]*"company"|"company"[^\n]*readCapacity/,
+      "the leadership overview section should point at readCapacity scope company",
+    );
+    assert.match(
+      section,
+      /Leadership\/Admin/,
+      "the leadership overview should carry its capability gate",
+    );
+    assert.doesNotMatch(
+      file,
+      /Leadership overview \(admin\/leadership only, UI-only\)/,
+      "the stale UI-only leadership claim should be gone (readCapacity scope company is live)",
+    );
+  });
+
+  it("carries the two write tools' contracts and their consent warnings", () => {
+    const file = readUsecase("capacity-planning.md");
+    assert.match(
+      file,
+      /10% steps/,
+      "updateTaskMemberCapacity's step semantics should be stated",
+    );
+    assert.match(
+      file,
+      /null to clear|`capacity_percent: null`/,
+      "clearing a commitment should be documented",
+    );
+    for (const status of ["ACTIVE", "WAITING", "OBSERVING"]) {
+      assert.ok(file.includes(status), `participation statuses should include ${status}`);
+    }
+    assert.match(
+      file,
+      /at least one of note or status is required/i,
+      "the participation tool's either-or requirement should be stated",
+    );
+    assert.match(
+      file,
+      /explicitly asks/i,
+      "the participation consent warning should be carried over",
+    );
+    assert.match(
+      file,
+      /Waiting on me/,
+      "the ACTIVE-plus-note board-directive warning should be carried over",
+    );
+  });
+
+  it("keeps the REST-only capabilities as UI pointers with no blanket claims", () => {
+    const file = readUsecase("capacity-planning.md");
+    assert.match(
+      file,
+      /capacity settings/,
+      "company capacity settings should keep their UI pointer",
+    );
+    assert.match(
+      file,
+      /Aura UI/,
+      "REST-only capabilities should carry a UI pointer",
+    );
+    assert.doesNotMatch(
+      file,
+      /All capacity\s+capabilities are REST-ONLY|every capacity tool is gone|195 → 90/,
+      "the false blanket REST-only claims and the stale tool count should be gone",
+    );
+    assert.doesNotMatch(
+      file,
+      /\bGET \//,
+      "no REST call should be taught in the capacity file",
+    );
+  });
+});
+
+describe("no-remnants guard: usecase resources current (signals)", () => {
+  it("addresses all three signal tools by id, not uuid", () => {
+    const file = readUsecase("signals.md");
+    assert.match(file, /getSignal\(\{ id:/, "getSignal should be called with id");
+    assert.match(
+      file,
+      /reviewSignal\(\{[\s\S]*?id:/,
+      "reviewSignal should be called with id",
+    );
+    assert.match(
+      file,
+      /createTaskFromSignal\(\{ id:/,
+      "createTaskFromSignal should be called with id",
+    );
+    assert.doesNotMatch(
+      file,
+      /uuid:/,
+      "no signal tool takes a uuid parameter anymore",
+    );
+  });
+
+  it("states when reason_code is required on a review", () => {
+    const file = readUsecase("signals.md");
+    assert.match(
+      file,
+      /reason_code[\s\S]{0,200}(required when|only when|Required when)[\s\S]{0,80}DISMISS/i,
+      "reason_code should be documented as required when action is DISMISS",
+    );
+    assert.match(
+      file,
+      /reason_text/,
+      "the optional free-text reason should be named",
+    );
+  });
+});
+
+describe("no-remnants guard: usecase resources current (wiki)", () => {
+  it("addresses every knowledge write tool by id, not uuid", () => {
+    const file = readUsecase("wiki-knowledge.md");
+    for (const tool of [
+      "saveKnowledgeNodeBody",
+      "saveKnowledgeNodeFrontmatter",
+      "updateKnowledgeNode",
+      "restoreKnowledgeNodeVersion",
+    ]) {
+      assert.ok(file.includes(tool), `the wiki file should document ${tool}`);
+    }
+    assert.doesNotMatch(
+      file,
+      /uuid:/,
+      "no knowledge tool takes a uuid parameter anymore",
+    );
+  });
+
+  it("documents the frontmatter save contract (identifier plus raw YAML or null)", () => {
+    const file = readUsecase("wiki-knowledge.md");
+    const section = file.split("### Update frontmatter")[1]?.split("\n### ")[0] ?? "";
+    assert.notEqual(section, "", "the frontmatter section should exist");
+    assert.match(
+      section,
+      /saveKnowledgeNodeFrontmatter\(\{[\s\S]*?id:/,
+      "the frontmatter save should be keyed by id",
+    );
+    assert.match(
+      section,
+      /raw:/,
+      "the frontmatter save should take the raw parameter",
+    );
+    assert.match(
+      section,
+      /YAML/,
+      "the raw parameter should be described as a raw YAML string",
+    );
+    assert.match(
+      section,
+      /null`?\s*to clear/i,
+      "clearing the frontmatter with null should be documented",
+    );
+    assert.doesNotMatch(
+      section,
+      /frontmatter:\s*\{/, 
+      "the nonexistent frontmatter-object parameter should be gone",
+    );
+  });
+
+  it("documents the version numbering shape and the file-asset version history", () => {
+    const file = readUsecase("wiki-knowledge.md");
+    assert.match(
+      file,
+      /version: "2"/,
+      "restore should pass the version as a decimal string",
+    );
+    assert.match(
+      file,
+      /decimal string/i,
+      "the version shape should be called out as a decimal string",
+    );
+    assert.match(
+      file,
+      /listKnowledgeFileVersions/,
+      "the file-asset version history should be documented",
+    );
+    assert.match(
+      file,
+      /checksum/,
+      "the per-version checksum and provenance should be mentioned",
+    );
+  });
+
+  it("documents the tree bounds and the node-update extras", () => {
+    const file = readUsecase("wiki-knowledge.md");
+    assert.match(
+      file,
+      /max_nodes/,
+      "the tree answer's node bound should be documented",
+    );
+    assert.match(
+      file,
+      /depth/,
+      "the tree answer's depth bound should be documented",
+    );
+    const update = file.split("### Rename, move, or reorder")[1]?.split("\n### ")[0] ?? "";
+    assert.notEqual(update, "", "the rename/move section should exist");
+    assert.match(
+      update,
+      /updateKnowledgeNode\(\{[\s\S]*?id:/,
+      "node updates should be keyed by id",
+    );
+    assert.match(
+      update,
+      /slug/,
+      "the slug parameter should be documented (rejected for FILE nodes)",
+    );
+    assert.match(
+      update,
+      /tags/,
+      "the tag replacement parameter should be documented",
+    );
+  });
+});
+
+describe("no-remnants guard: usecase resources current (skills)", () => {
+  it("keys the skill write tools by id and shows the visibility value", () => {
+    const file = readUsecase("skills-management.md");
+    assert.doesNotMatch(file, /uuid:/, "no skill tool takes a uuid parameter anymore");
+    assert.match(
+      file,
+      /saveSkillBody\(\{[\s\S]*?id:/,
+      "saveSkillBody should be called with id",
+    );
+    assert.match(
+      file,
+      /updateSkill\(\{[\s\S]*?id:/,
+      "updateSkill should be called with id",
+    );
+    assert.match(
+      file,
+      /setSkillVisibility\(\{[\s\S]*?visibility: "(PERSONAL|PUBLIC)"/,
+      "setSkillVisibility should show its one required value",
+    );
+    assert.match(
+      file,
+      /PERSONAL.*\|.*PUBLIC|PERSONAL.*PUBLIC/s,
+      "the visibility value set should be named",
+    );
+  });
+
+  it("documents createSkill's required slug", () => {
+    const file = readUsecase("skills-management.md");
+    assert.match(
+      file,
+      /createSkill\(\{[\s\S]*?slug:/,
+      "createSkill should show the required slug",
+    );
+    assert.match(
+      file,
+      /lowercase\s+alphanumeric/i,
+      "the slug format should be stated",
+    );
+  });
+
+  it("mentions the read-side filters and the response tiers", () => {
+    const file = readUsecase("skills-management.md");
+    assert.match(
+      file,
+      /plugin_id/,
+      "listSkills's plugin filter should be mentioned",
+    );
+    assert.match(
+      file,
+      /response_format/,
+      "getSkill's response_format tiers should be mentioned",
+    );
+  });
+});
+
+describe("no-remnants guard: usecase resources current (unified search)", () => {
+  it("lists FEEDBACK in the source_types enum", () => {
+    const file = readUsecase("unified-search.md");
+    const enumLine = file.split("source_types` (array, required)")[1]?.split("\n- ")[0] ?? "";
+    assert.match(enumLine, /FEEDBACK/, "the enum should include FEEDBACK");
+    for (const kind of ["TASK", "ARTIFACT", "GLOSSARY", "TOOL"]) {
+      assert.ok(enumLine.includes(kind), `the enum should keep ${kind}`);
+    }
+  });
+
+  it("documents the per-source-type limit semantics", () => {
+    const file = readUsecase("unified-search.md");
+    assert.match(
+      file,
+      /per source type/i,
+      "the limit should be documented as per source type",
+    );
+    assert.match(
+      file,
+      /1.{0,3}20|1 to 20/,
+      "the limit bounds (1 to 20) should be stated",
+    );
+    assert.match(file, /default 5/, "the limit default (5) should be stated");
+  });
+
+  it("resolves search hits with id-keyed get tools", () => {
+    const file = readUsecase("unified-search.md");
+    assert.match(
+      file,
+      /getTask\(\{ id:/,
+      "getTask should be called with id in the example workflow",
+    );
+    assert.doesNotMatch(file, /getTask\(\{ uuid:/, "getTask takes no uuid");
+  });
+
+  it("documents the mention-candidate tool with its required keys", () => {
+    const file = readUsecase("unified-search.md");
+    assert.match(
+      file,
+      /listMentionCandidates/,
+      "the mention-candidate tool should be documented",
+    );
+    assert.match(
+      file,
+      /entity_type[\s\S]{0,120}ARTIFACT[\s\S]{0,10}TASK|ARTIFACT[\s\S]{0,10}\|[\s\S]{0,10}TASK/,
+      "the candidate tool's entity types should be named",
+    );
+    assert.match(
+      file,
+      /has_access/,
+      "the candidate flag should be named",
+    );
+  });
+
+  it("carries a find-feedback scenario", () => {
+    const file = readUsecase("unified-search.md");
+    assert.match(
+      file,
+      /FEEDBACK.*\|/,
+      "the scenario table should include a FEEDBACK row",
+    );
+  });
+});
+
+describe("no-remnants guard: usecase resources current (code search)", () => {
+  it("teaches no ref parameter", () => {
+    const file = readUsecase("code-search.md");
+    assert.doesNotMatch(
+      file,
+      /`ref`/,
+      "the nonexistent ref parameter should be gone",
+    );
+    assert.doesNotMatch(
+      file,
+      /search a specific branch/,
+      "ref-scoped search should not be taught",
+    );
+  });
+
+  it("documents the repository-slug format for repo documents", () => {
+    const file = readUsecase("code-search.md");
+    assert.match(
+      file,
+      /source\/workspace\/slug/,
+      "the mcpGetRepoDocument slug format should be documented",
+    );
+    assert.match(
+      file,
+      /bitbucket\/anwaltde\/aura/,
+      "a concrete live-format example should be shown",
+    );
+  });
+
+  it("states the top_k default", () => {
+    const file = readUsecase("code-search.md");
+    assert.match(
+      file,
+      /top_k[^\n]*default 5|default 5[^\n]*top_k/i,
+      "the top_k default should be stated",
+    );
+  });
+});
+
+describe("no-remnants guard: usecase resources current (artifacts)", () => {
+  it("lists the live listArtifacts filters", () => {
+    const file = readUsecase("artifact-management.md");
+    assert.doesNotMatch(
+      file,
+      /pending_review/,
+      "the nonexistent pending_review filter should be gone",
+    );
+    assert.match(
+      file,
+      /opinion_requested/,
+      "the live opinion_requested filter should be documented",
+    );
+    assert.match(
+      file,
+      /broad_shared/,
+      "the ownership scopes should include broad_shared",
+    );
+  });
+
+  it("documents listArtifactTasks for task discovery from an artifact", () => {
+    const file = readUsecase("artifact-management.md");
+    assert.match(
+      file,
+      /listArtifactTasks/,
+      "the linked-tasks listing should be documented",
+    );
+    assert.match(
+      file,
+      /non-paginated|updated_at DESC/i,
+      "the linked-tasks listing's shape should be stated",
+    );
+  });
+
+  it("documents the whole-mode replace contract with expected-version", () => {
+    const file = readUsecase("artifact-management.md");
+    assert.match(
+      file,
+      /expected_version/,
+      "the expected_version merge-base parameter should be documented",
+    );
+    assert.match(
+      file,
+      /merge base/i,
+      "expected_version's merge-base meaning should be stated",
+    );
+    assert.match(
+      file,
+      /BASE_VERSION_REQUIRED/,
+      "the dirty-draft whole-mode requirement should be named",
+    );
+    assert.match(
+      file,
+      /confirm_full_replace/,
+      "the destructive-replace confirmation should be documented",
+    );
+    assert.match(
+      file,
+      /DESTRUCTIVE_WHOLE_REPLACE/,
+      "the rejection that demands confirmation should be named",
+    );
+  });
+});
+
+describe("no-remnants guard: usecase resources current (memory graph)", () => {
+  it("documents the aura-native memory ingest", () => {
+    const file = readUsecase("memory-graph.md");
+    assert.match(
+      file,
+      /acceptArtifactMemory/,
+      "the ingest facility should be documented in the memory-graph file",
+    );
+    assert.match(
+      file,
+      /idempotent/i,
+      "the ingest's idempotence should be stated",
+    );
+  });
+
+  it("describes the entity source as a navigable route, not provenance", () => {
+    const file = readUsecase("memory-graph.md");
+    const section = file.split("### `getMemoryEntitySource`")[1]?.split("\n### ")[0] ?? "";
+    assert.notEqual(section, "", "the entity-source section should exist");
+    assert.match(
+      section,
+      /route|URL/i,
+      "the entity source should be described as a navigable route or URL",
+    );
+    assert.match(
+      section,
+      /jump|open|navigate/i,
+      "the route's purpose (jumping to the source) should be stated",
+    );
+    assert.doesNotMatch(
+      section,
+      /provenance/i,
+      "the provenance phrasing should be gone",
+    );
+  });
+
+  it("corrects the question-report contract (no reason parameter)", () => {
+    const file = readUsecase("memory-graph.md");
+    const section = file.split("## Reporting issues")[1] ?? "";
+    assert.notEqual(section, "", "the reporting-issues section should exist");
+    assert.doesNotMatch(
+      section,
+      /reason:/,
+      "the nonexistent reason parameter should be gone",
+    );
+    assert.match(
+      section,
+      /open question/i,
+      "the tool's open-question mechanism should be described",
+    );
+    assert.match(
+      section,
+      /does not modify/i,
+      "the no-edge-modification behavior should be stated",
+    );
+  });
+
+  it("covers the fuller facet vocabulary of the entity list", () => {
+    const file = readUsecase("memory-graph.md");
+    for (const facet of [
+      "confidence_min",
+      "fact_layer",
+      "sensitivity",
+      "predicate",
+    ]) {
+      assert.ok(
+        file.includes(facet),
+        `the entity list should document the ${facet} facet`,
+      );
+    }
+  });
+});
+
+describe("no-remnants guard: usecase resources current (feedback)", () => {
+  it("names the createFeedback tool with its current pi prefix", () => {
+    const file = readUsecase("feedback-submission.md");
+    assert.match(
+      file,
+      /mcp__aura_mcp_dev__createFeedback/,
+      "the MCP tool to avoid should carry its current pi name",
+    );
+    assert.doesNotMatch(
+      file,
+      /aura-mcp-dev_createFeedback/,
+      "the stale tool-name token should be gone",
+    );
+  });
+
+  it("states the live createFeedback source values and the aura_feedback pin", () => {
+    const file = readUsecase("feedback-submission.md");
+    assert.match(
+      file,
+      /UI.*AGENT.*MCP|AGENT.*MCP/s,
+      "the server tool's source values should be named",
+    );
+    assert.match(
+      file,
+      /source: "MCP"|`source`.*MCP/s,
+      "aura_feedback's MCP pin should be stated",
+    );
+  });
+
+  it("documents the read and triage family", () => {
+    const file = readUsecase("feedback-submission.md");
+    for (const tool of [
+      "getFeedback",
+      "listFeedback",
+      "changeFeedbackStatus",
+      "linkFeedbackTask",
+      "linkRelatedFeedback",
+    ]) {
+      assert.ok(file.includes(tool), `the triage family should include ${tool}`);
+    }
+    assert.match(
+      file,
+      /discard_reason/i,
+      "the DISCARDED discard-reason requirement should be stated",
+    );
+    assert.match(
+      file,
+      /VIEW_FEEDBACK/,
+      "the triage capability gate should be named",
+    );
+  });
+});
+
+describe("no-remnants guard: usecase resources current (task management)", () => {
+  it("carries the placement-map families", () => {
+    const file = readUsecase("task-management.md");
+    for (const tool of [
+      "addTaskMember",
+      "setTaskMemberRoles",
+      "updateTaskBlocked",
+      "estimateTaskStoryPoints",
+      "acceptTaskStoryPointEstimate",
+      "setTaskStoryPoints",
+      "listTaskStoryPointEstimates",
+      "getMyPriorityQueue",
+      "listMyProgress",
+      "listTaskActivity",
+      "getUserGroup",
+      "listUserGroups",
+      "createUserGroup",
+      "addUserGroupMember",
+      "updateUserGroup",
+      "updateUserGroupMemberRole",
+      "linkRepositoryToTask",
+    ]) {
+      assert.ok(file.includes(tool), `the task file should document ${tool}`);
+    }
+    assert.match(
+      file,
+      /workflow_variant/,
+      "the workflow variant should be documented as a create field",
+    );
+  });
+
+  it("drops the false no-member-management claim", () => {
+    const file = readUsecase("task-management.md");
+    assert.doesNotMatch(
+      file,
+      /not available via MCP after the overhaul\. Use the\s+Aura UI\.$/m,
+      "the blanket owner/crew absence claim should be gone",
+    );
+    const section = file.split("## Owner and crew management")[1]?.split("\n## ")[0] ?? "";
+    assert.notEqual(section, "", "the owner/crew section should exist");
+    assert.match(
+      section,
+      /addTaskMember/,
+      "the owner/crew section should teach the MCP member tools",
+    );
+  });
+
+  it("keeps the create fields aligned with the live schema", () => {
+    const file = readUsecase("task-management.md");
+    assert.doesNotMatch(
+      file,
+      /repository_uuids/,
+      "the nonexistent repository_uuids field should be gone",
+    );
+    assert.match(
+      file,
+      /Up to three tags|up to three/i,
+      "the three-tag cap should be stated",
+    );
+  });
+
+  it("calls recordTaskProgress with id", () => {
+    const file = readUsecase("task-management.md");
+    assert.match(
+      file,
+      /recordTaskProgress\(\{[\s\S]*?id:/,
+      "recordTaskProgress should be called with id",
+    );
+    assert.doesNotMatch(
+      file,
+      /uuid: "<task-uuid>"\s*,\s*\n\s*note:/,
+      "the stale uuid-keyed progress example should be gone",
+    );
+  });
+
+  it("keeps the verified planning-hub phrasing for getTask", () => {
+    const file = readUsecase("task-management.md");
+    const row = file.split("| By UUID |")[1]?.split("\n")[0] ?? "";
+    assert.match(
+      row,
+      /planning hub/i,
+      "the planning-hub phrasing should stay (verified against a live full payload)",
+    );
+    assert.match(
+      row,
+      /artifacts/i,
+      "the planning-hub row should name linked artifacts",
+    );
+  });
+
+  it("documents the relation duplicate policy", () => {
+    const file = readUsecase("task-management.md");
+    assert.match(
+      file,
+      /on_duplicate/,
+      "createTaskRelation's on_duplicate should be documented",
+    );
+  });
+});
+
+describe("no-remnants guard: usecase resources current (questions and uploads)", () => {
+  it("cross-references the question-reporting tool from the questions file", () => {
+    const file = readUsecase("questions-workflow.md");
+    assert.match(
+      file,
+      /reportMemoryEntityQuestion/,
+      "the question-reporting tool should be cross-referenced",
+    );
+    assert.match(
+      file,
+      /memory-graph\.md/,
+      "the cross-reference should point at the memory-graph use case",
+    );
+  });
+
+  it("keeps the re-verified upload baseline pinned", () => {
+    const file = readUsecase("upload-documents.md");
+    assert.match(
+      file,
+      /mcpCreateUploadDocument/,
+      "the upload tool should stay documented",
+    );
+    assert.match(
+      file,
+      /10 MB/,
+      "the upload size limit should stay stated",
+    );
+    assert.match(
+      file,
+      /base64/i,
+      "the base64 ingest shape should stay stated",
+    );
+    assert.match(
+      file,
+      /mcpGetUploadDocument/,
+      "the retrieval tool should stay documented",
+    );
+    assert.match(
+      file,
+      /mcpLinkUploadToTask/,
+      "the linking tool should stay documented",
+    );
+  });
+});
+
+// usecase-resources-current: no em-dash anywhere in the twelve usecase
+// resource files (the repo's prose rule; every file is touched by this
+// ticket's corrections).
+const USECASE_FILES = [
+  "artifact-management.md",
+  "capacity-planning.md",
+  "code-search.md",
+  "feedback-submission.md",
+  "memory-graph.md",
+  "questions-workflow.md",
+  "signals.md",
+  "skills-management.md",
+  "task-management.md",
+  "unified-search.md",
+  "upload-documents.md",
+  "wiki-knowledge.md",
+];
+
+describe("no-remnants guard: usecase resources current (prose)", () => {
+  it("carries no em-dash in any usecase file", () => {
+    const offenders: string[] = [];
+    for (const file of USECASE_FILES) {
+      const content = readUsecase(file);
+      content
+        .split("\n")
+        .forEach((line, index) => {
+          if (line.includes("\u2014")) {
+            offenders.push(`${USECASES_DIR}/${file}:${index + 1}: ${line.trim()}`);
+          }
+        });
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "the usecase files should carry no em-dash (the repo's prose rule)",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package

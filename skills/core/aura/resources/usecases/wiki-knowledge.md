@@ -36,9 +36,10 @@ For long documents, write the returned body to a local file with the
 |---|---|---|
 | List all spaces | `listKnowledgeSpaces` | Returns all knowledge spaces |
 | Get space by slug | `getKnowledgeSpace` | Space detail |
-| Full tree for a space | `getKnowledgeTree` | Folders + documents (no body) |
+| Full tree for a space | `getKnowledgeTree` | Folders + documents (no body); the answer is bounded, depth max 2 and 200 nodes by default, pass `depth`/`max_nodes` to widen (max 2/200) |
 | Get node by UUID | `getKnowledgeNode` | Full document with body |
 | List files in a space | `listKnowledgeFiles` | FILE nodes only |
+| List file versions | `listKnowledgeFileVersions` | A FILE node's asset history, newest first; each entry carries its own checksum and provenance; download a specific version in the Aura UI |
 | Get specific version | `getKnowledgeNodeVersion` | Historical version |
 | List versions | `listKnowledgeNodeVersions` | Version history |
 
@@ -56,7 +57,7 @@ knowledge spaces.
 > **⚠️ Explicit user consent required.** Before creating, editing, moving,
 > renaming, or deleting any wiki content, **always confirm with the user
 > first**. Wiki documents are shared, versioned, and often referenced by
-> others — unapproved changes can break links, confuse readers, or
+> others: unapproved changes can break links, confuse readers, or
 > overwrite someone else's work.
 >
 > **Fresh-copy hygiene:** always re-fetch a node before editing it, so you
@@ -78,7 +79,7 @@ createKnowledgeNode({
 })
 
 saveKnowledgeNodeBody({
-  uuid: "<node-uuid>",
+  id: "<node-uuid>",
   body: "# Authentication Overview\n\n...",
   summary: "Initial version"
 })
@@ -105,11 +106,11 @@ For large edits, download first, edit on disk, then send the edited body
 back:
 
 ```
-getKnowledgeNode({ uuid: "<node-uuid>" })   // read the body from the result
+getKnowledgeNode({ id: "<node-uuid>" })   // read the body from the result
 write({ path: "/tmp/wiki-body.md", content: "<the body you read>" })
 // edit the file locally with `read` and `edit` (only diffs flow through context)
 saveKnowledgeNodeBody({
-  uuid: "<node-uuid>",
+  id: "<node-uuid>",
   body: "<the edited body read from /tmp/wiki-body.md>",
   summary: "Description of changes"
 })
@@ -119,7 +120,7 @@ For small edits, call `saveKnowledgeNodeBody` directly:
 
 ```
 saveKnowledgeNodeBody({
-  uuid: "<node-uuid>",
+  id: "<node-uuid>",
   body: "# Updated content...",
   summary: "Added section on OAuth flows"
 })
@@ -129,29 +130,42 @@ Each save creates a new version.
 
 ### Update frontmatter
 
+The front matter is saved as one raw YAML string keyed by the node `id`,
+not as a structured object; pass `null` to clear the front matter. Every
+save creates a new version:
+
 ```
 saveKnowledgeNodeFrontmatter({
-  uuid: "<node-uuid>",
-  frontmatter: { tags: ["auth", "security"], status: "published" }
+  id: "<node-uuid>",
+  raw: "tags:\n  - auth\n  - security\nstatus: published"
 })
+
+saveKnowledgeNodeFrontmatter({ id: "<node-uuid>", raw: null })   // clear
 ```
 
 ### Rename, move, or reorder
 
 ```
 updateKnowledgeNode({
-  uuid: "<node-uuid>",
+  id: "<node-uuid>",
   title: "New Title",
   parent_id: "<new-parent-uuid>",
   order: 2
 })
 ```
 
+The same tool also takes `slug` (lowercase alphanumeric with hyphens,
+rejected for FILE nodes whose slug derives from the filename), `summary`,
+and `tags` (a replacement list of tag strings; `[]` clears them).
+
 ### Restore a previous version
 
 ```
-restoreKnowledgeNodeVersion({ uuid: "<node-uuid>", version: 2 })
+restoreKnowledgeNodeVersion({ id: "<node-uuid>", version: "2" })
 ```
+
+The version is a decimal string (e.g. `"2"`), not a number. The restore
+creates a new version with that content.
 
 ### Space administration
 
@@ -180,20 +194,20 @@ above) cover read access; `createKnowledgeSpace`/`updateKnowledgeSpace`
 are for creating and modifying spaces. `createKnowledgeSpace` requires
 `slug` + `title`; `description`, `visibility`, `embedding_enabled`, and
 `editor_user_ids` are optional. `updateKnowledgeSpace` accepts the same
-fields (all optional) — `editor_user_ids` is a full replacement list
+fields (all optional); `editor_user_ids` is a full replacement list
 (owner-only).
 
 ### Upload files and images
 
-> **Not available via MCP.** File and image uploads are REST-only — use
+> **Not available via MCP.** File and image uploads are REST-only; use
 > the Aura UI. The MCP surface covers reading and editing document
 > bodies/frontmatter via `saveKnowledgeNodeBody`/`saveKnowledgeNodeFrontmatter`.
 
 ## Best practices
 
-1. **Search before creating** — check if a document on the topic already exists.
-2. **Use meaningful slugs** — they form the URL path and are used for navigation.
-3. **Organize with folders** — keep the tree shallow (2-3 levels max).
-4. **Write summaries** — the `summary` field in `saveKnowledgeNodeBody` helps
+1. **Search before creating**: check if a document on the topic already exists.
+2. **Use meaningful slugs**: they form the URL path and are used for navigation.
+3. **Organize with folders**: keep the tree shallow (2-3 levels max).
+4. **Write summaries**: the `summary` field in `saveKnowledgeNodeBody` helps
    with version history and search relevance.
-5. **Use frontmatter** — add tags and metadata for discoverability.
+5. **Use frontmatter**: add tags and metadata for discoverability.
