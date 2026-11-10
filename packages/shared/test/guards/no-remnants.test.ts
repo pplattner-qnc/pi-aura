@@ -1040,6 +1040,126 @@ describe("no-remnants guard: aura skill rewrite", () => {
   });
 });
 
+// usecase-resources-current: the twelve usecase resource files teach the
+// live 120-tool server per the usecase-resources-drift report's per-file
+// worklist and the confirmed placement map. The audit's load-bearing
+// corrections are pinned here in the existing guard style; a retired claim
+// reappearing in a usecase file fails the suite.
+const USECASES_DIR = "skills/core/aura/resources/usecases";
+
+function readUsecase(file: string): string {
+  return fs.readFileSync(path.join(repoRoot, USECASES_DIR, file), "utf-8");
+}
+
+describe("no-remnants guard: usecase resources current (capacity)", () => {
+  it("documents readCapacity's four scopes with their access semantics", () => {
+    const file = readUsecase("capacity-planning.md");
+    for (const scope of ["me", "person", "group", "company"]) {
+      assert.ok(
+        file.includes(`"${scope}"`),
+        `the capacity file should document the ${scope} scope`,
+      );
+    }
+    assert.match(
+      file,
+      /VIEW_CAPACITY_OVERVIEW/,
+      "the foreign-person capability gate should be named",
+    );
+    assert.match(
+      file,
+      /LEAD of a common group/,
+      "the foreign-person lead gate should be named",
+    );
+    assert.match(
+      file,
+      /my team|every group where/i,
+      "the group scope's omit-group_id behavior should be documented",
+    );
+    assert.match(
+      file,
+      /paginated/i,
+      "the company scope's pagination should be documented",
+    );
+  });
+
+  it("teaches the leadership overview as live on MCP, not UI-only", () => {
+    const file = readUsecase("capacity-planning.md");
+    const section = file.split("### Leadership overview")[1]?.split("\n### ")[0] ?? "";
+    assert.notEqual(section, "", "the leadership overview section should exist");
+    assert.match(
+      section,
+      /readCapacity[^\n]*"company"|"company"[^\n]*readCapacity/,
+      "the leadership overview section should point at readCapacity scope company",
+    );
+    assert.match(
+      section,
+      /Leadership\/Admin/,
+      "the leadership overview should carry its capability gate",
+    );
+    assert.doesNotMatch(
+      file,
+      /Leadership overview \(admin\/leadership only, UI-only\)/,
+      "the stale UI-only leadership claim should be gone (readCapacity scope company is live)",
+    );
+  });
+
+  it("carries the two write tools' contracts and their consent warnings", () => {
+    const file = readUsecase("capacity-planning.md");
+    assert.match(
+      file,
+      /10% steps/,
+      "updateTaskMemberCapacity's step semantics should be stated",
+    );
+    assert.match(
+      file,
+      /null to clear|`capacity_percent: null`/,
+      "clearing a commitment should be documented",
+    );
+    for (const status of ["ACTIVE", "WAITING", "OBSERVING"]) {
+      assert.ok(file.includes(status), `participation statuses should include ${status}`);
+    }
+    assert.match(
+      file,
+      /at least one of note or status is required/i,
+      "the participation tool's either-or requirement should be stated",
+    );
+    assert.match(
+      file,
+      /explicitly asks/i,
+      "the participation consent warning should be carried over",
+    );
+    assert.match(
+      file,
+      /Waiting on me/,
+      "the ACTIVE-plus-note board-directive warning should be carried over",
+    );
+  });
+
+  it("keeps the REST-only capabilities as UI pointers with no blanket claims", () => {
+    const file = readUsecase("capacity-planning.md");
+    assert.match(
+      file,
+      /capacity settings/,
+      "company capacity settings should keep their UI pointer",
+    );
+    assert.match(
+      file,
+      /Aura UI/,
+      "REST-only capabilities should carry a UI pointer",
+    );
+    assert.doesNotMatch(
+      file,
+      /All capacity\s+capabilities are REST-ONLY|every capacity tool is gone|195 → 90/,
+      "the false blanket REST-only claims and the stale tool count should be gone",
+    );
+    assert.doesNotMatch(
+      file,
+      /\bGET \//,
+      "no REST call should be taught in the capacity file",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
