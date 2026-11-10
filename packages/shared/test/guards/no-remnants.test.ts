@@ -943,7 +943,7 @@ describe("no-remnants guard: aura skill rewrite", () => {
     );
     assert.match(
       skill,
-      /permission apparatus/i,
+      /permission\s+apparatus/i,
       "the permission-apparatus exclusion should be documented",
     );
     assert.match(
