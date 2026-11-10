@@ -1523,6 +1523,79 @@ describe("no-remnants guard: usecase resources current (artifacts)", () => {
   });
 });
 
+describe("no-remnants guard: usecase resources current (memory graph)", () => {
+  it("documents the aura-native memory ingest", () => {
+    const file = readUsecase("memory-graph.md");
+    assert.match(
+      file,
+      /acceptArtifactMemory/,
+      "the ingest facility should be documented in the memory-graph file",
+    );
+    assert.match(
+      file,
+      /idempotent/i,
+      "the ingest's idempotence should be stated",
+    );
+  });
+
+  it("describes the entity source as a navigable route, not provenance", () => {
+    const file = readUsecase("memory-graph.md");
+    const section = file.split("### `getMemoryEntitySource`")[1]?.split("\n### ")[0] ?? "";
+    assert.notEqual(section, "", "the entity-source section should exist");
+    assert.match(
+      section,
+      /route|URL/i,
+      "the entity source should be described as a navigable route or URL",
+    );
+    assert.match(
+      section,
+      /jump|open|navigate/i,
+      "the route's purpose (jumping to the source) should be stated",
+    );
+    assert.doesNotMatch(
+      section,
+      /provenance/i,
+      "the provenance phrasing should be gone",
+    );
+  });
+
+  it("corrects the question-report contract (no reason parameter)", () => {
+    const file = readUsecase("memory-graph.md");
+    const section = file.split("## Reporting issues")[1] ?? "";
+    assert.notEqual(section, "", "the reporting-issues section should exist");
+    assert.doesNotMatch(
+      section,
+      /reason:/,
+      "the nonexistent reason parameter should be gone",
+    );
+    assert.match(
+      section,
+      /open question/i,
+      "the tool's open-question mechanism should be described",
+    );
+    assert.match(
+      section,
+      /does not modify/i,
+      "the no-edge-modification behavior should be stated",
+    );
+  });
+
+  it("covers the fuller facet vocabulary of the entity list", () => {
+    const file = readUsecase("memory-graph.md");
+    for (const facet of [
+      "confidence_min",
+      "fact_layer",
+      "sensitivity",
+      "predicate",
+    ]) {
+      assert.ok(
+        file.includes(facet),
+        `the entity list should document the ${facet} facet`,
+      );
+    }
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
