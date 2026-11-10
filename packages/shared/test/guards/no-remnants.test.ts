@@ -56,6 +56,7 @@ interface RootPackageJson {
     skills?: string[];
     subagents?: { agents?: string[] };
   };
+  workspaces?: string[];
   devDependencies?: Record<string, string>;
 }
 
