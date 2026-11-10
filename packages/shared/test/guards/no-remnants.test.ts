@@ -2467,6 +2467,27 @@ describe("no-remnants guard: process resources current (escalation)", () => {
   });
 });
 
+describe("no-remnants guard: process resources current (prose)", () => {
+  it("carries no em-dash in any process file", () => {
+    const offenders: string[] = [];
+    for (const file of Object.keys(PROCESS_CANONICAL)) {
+      const content = readProcess(file);
+      content
+        .split("\n")
+        .forEach((line, index) => {
+          if (line.includes("\u2014")) {
+            offenders.push(`${PROCESS_DIR}/${file}:${index + 1}: ${line.trim()}`);
+          }
+        });
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "the process files should carry no em-dash (the repo's prose rule)",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package

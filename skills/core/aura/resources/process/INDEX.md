@@ -1,4 +1,4 @@
-# Aura Development Process — Overview
+# Aura Development Process: Overview
 
 This directory describes how work flows through Aura from a developer
 perspective. Each file covers one aspect of the process in enough detail for
@@ -47,7 +47,7 @@ Open → Refinement → Alignment → Development → Review → Deployment → 
 | File | What it covers |
 |---|---|
 | [workflow-phases.md](workflow-phases.md) | Detailed phase descriptions, gates, and transitions |
-| [roles.md](roles.md) | Owner, Contributor, Stakeholder — responsibilities and how to get assigned |
+| [roles.md](roles.md) | Owner, Contributor, Stakeholder: responsibilities and how to get assigned |
 | [capacity.md](capacity.md) | How capacity tracking works, rules for commitments |
 | [review-modes.md](review-modes.md) | Three review modes (async solo, sync multi-perspective, sync 1:1) |
 | [escalation.md](escalation.md) | When and how to escalate, escalation paths |
