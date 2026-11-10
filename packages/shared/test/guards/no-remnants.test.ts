@@ -2162,6 +2162,144 @@ describe("no-remnants guard: process resources current (review modes)", () => {
   });
 });
 
+describe("no-remnants guard: process resources current (capacity)", () => {
+  it("teaches the placeholder epic for non-task work", () => {
+    const file = readProcess("capacity.md");
+    assert.match(
+      file,
+      /AURA-1686/,
+      "the placeholder epic should be named",
+    );
+    assert.match(
+      file,
+      /Non Core-Team activities|placeholder epic/i,
+      "the epic's role should be described",
+    );
+    assert.match(
+      file,
+      /meetings[\s\S]{0,200}AURA-1686|AURA-1686[\s\S]{0,200}(meetings|reviews|absence|education)/i,
+      "the non-task categories should be listed against the epic",
+    );
+  });
+
+  it("teaches rough steps, the 5% soft floor, and the honest 100% landing", () => {
+    const file = readProcess("capacity.md");
+    assert.match(
+      file,
+      /10\/20\/30|rough(ly)? (10%|10 percent) steps|10% steps/,
+      "the rough-step guidance should be stated",
+    );
+    assert.match(
+      file,
+      /not 17%|no 17%/i,
+      "the not-17% example should anchor the rough-step rule",
+    );
+    assert.match(
+      file,
+      /5% soft floor|soft floor/,
+      "the soft floor should be stated",
+    );
+    assert.match(
+      file,
+      /100%/,
+      "the honest full landing should be stated",
+    );
+  });
+
+  it("carries the daily rhythm and the 04:00 reset", () => {
+    const file = readProcess("capacity.md");
+    assert.match(
+      file,
+      /04:00/,
+      "the daily reset time should be stated",
+    );
+    assert.match(
+      file,
+      /0% every morning|reset to 0%|resets? to 0%/i,
+      "the reset semantics should be stated",
+    );
+    assert.match(
+      file,
+      /09:00/,
+      "the morning set-by time should be stated",
+    );
+    assert.match(
+      file,
+      /09:30/,
+      "the clean-picture time should be stated",
+    );
+  });
+
+  it("keeps finished work counted and drops the structural reserve", () => {
+    const file = readProcess("capacity.md");
+    assert.match(
+      file,
+      /finished[\s\S]{0,120}(still|no longer lowers)|no longer lowers[\s\S]{0,80}utilization/i,
+      "finished work should still count toward the day (v19)",
+    );
+    assert.doesNotMatch(
+      file,
+      /80% task capacity|structural reserve/i,
+      "the retired 80/20 structural-reserve model should be gone",
+    );
+    assert.doesNotMatch(
+      file,
+      /accounts for vacation and public holidays automatically/,
+      "the unverifiable holiday-automation claim should be gone",
+    );
+  });
+
+  it("teaches the MCP tools as the access path with the corrected scopes", () => {
+    const file = readProcess("capacity.md");
+    for (const tool of [
+      "readCapacity",
+      "updateTaskMemberCapacity",
+      "updateTaskMemberParticipation",
+    ]) {
+      assert.ok(file.includes(tool), `the capacity file should name ${tool}`);
+    }
+    assert.match(
+      file,
+      /readCapacity[\s\S]{0,160}company|company[\s\S]{0,160}readCapacity/,
+      "the leadership overview should be reachable via readCapacity scope company",
+    );
+    assert.match(
+      file,
+      /capacity settings/,
+      "company capacity settings should keep their UI pointer",
+    );
+    assert.doesNotMatch(
+      file,
+      /leadership overview[\s\S]{0,120}not on MCP|all capacity tools are gone/i,
+      "the false blanket absence claims should be gone",
+    );
+    assert.match(
+      file,
+      /usecases\/capacity-planning\.md/,
+      "the usecase pointer should stay",
+    );
+  });
+
+  it("keeps the consent warning and the escalation routing", () => {
+    const file = readProcess("capacity.md");
+    assert.match(
+      file,
+      /Only adjust your own capacity/,
+      "the own-capacity-only warning should stay",
+    );
+    assert.match(
+      file,
+      /Owner agreement|Owner's agreement/i,
+      "shifting capacity should require owner agreement",
+    );
+    assert.match(
+      file,
+      /direct manager[\s\S]{0,40}MAK|MAK/,
+      "the disagreement escalation path should stay",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
