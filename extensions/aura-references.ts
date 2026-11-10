@@ -603,8 +603,8 @@ export function filterReferenceItems(
  * lands afterwards, so fresh results surface on the next keystroke.
  *
  * Pure in the arch-spec sense: the Aura access is the injected fetch (the
- * adapter's `searchServer`, whose `createClient` the caller controls) and the
- * cache is the injected cache; nothing else is touched. The refresh resolves
+ * adapter's `searchServer`, whose `createInterface` the caller controls) and
+ * the cache is the injected cache; nothing else is touched. The refresh resolves
  * rather than rejects: a failed or empty server search (and an aborted
  * request) leaves the cache, items and stamps, exactly as it was, and nothing
  * ever throws into the session.
