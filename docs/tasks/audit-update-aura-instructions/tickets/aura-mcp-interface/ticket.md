@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Aura MCP registration and typed interface
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by: []
 size: m
 ---
@@ -41,3 +41,5 @@ Module layout (from the deviation report, landed as 49b15bc): the contract data,
 Convention debt recorded for the end-of-effort coherence pass: the six new source and test files carry em-dash lines (16 in sources plus test-file lines) against the repo rule; pre-existing extension files share the flaw (aura-feedback.ts carries 27). A sweep belongs on the coherence list, not this ticket.
 
 Declared human verification (not agent-performed): a fresh pi session with a stored PAT and no manual MCP configuration shows the aura-mcp-dev tools; a session without a stored PAT loads clean and silent; a user's own mcp.json entry overrides the package's registration.
+
+Landed as merge 49b15bc on task/aura-mcp-interface (first parent 8ab1e9b, the architecture and ticket-graph commit; second parent 842d88c, the working branch with six checkpoints) plus the land docs commit 1cb38d5 staging the deviation report. The working branch ticket/aura-mcp-interface was deleted after the merge. The full always-gate re-ran green on the landed state (169 shared tests, ten extension suites, ten script suites, typecheck, build), and the close-out CI gate re-verified the same five commands on the landing branch after merging develop. The ticket stays in the live effort; no per-ticket move.
