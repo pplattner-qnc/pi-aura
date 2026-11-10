@@ -14,8 +14,8 @@ surface quickly. Escalate early, not late.
 
 **The starting point is always the state of the task, not a judgment of a person.**
 When work stalls, work the state: talk first, then coaching and
-support, then reassign the owner if needed. Each step is a transparent
-transition, visible in Aura.
+support, then reassign the owner if needed. Each step is a
+transparent transition, visible in Aura.
 
 ## Escalation path
 
