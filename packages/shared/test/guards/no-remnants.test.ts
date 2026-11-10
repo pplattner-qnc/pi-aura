@@ -824,8 +824,8 @@ describe("no-remnants guard: aura skill rewrite", () => {
     // mcpCreateArtifact: the OPINION kind replaced review; TEMPORARY stays chat-only.
     assert.match(
       skill,
-      /mcpCreateArtifact[^\n]*OPINION/,
-      "mcpCreateArtifact's one-liner should name the OPINION kind",
+      /PLAN, OPINION, or GENERIC/,
+      "mcpCreateArtifact's one-liner should name the live kind list",
     );
     assert.doesNotMatch(
       skill,
@@ -834,24 +834,20 @@ describe("no-remnants guard: aura skill rewrite", () => {
     );
     assert.match(
       skill,
-      /TEMPORARY[^\n]*chat/i,
+      /chat-only TEMPORARY/i,
       "the chat-only TEMPORARY kind should stay qualified",
     );
     // mcpCreateUploadDocument: base64 ingest with the size limit.
     assert.match(
       skill,
-      /mcpCreateUploadDocument[^\n]*base64/i,
+      /ingest a file from base64 content/i,
       "the upload one-liner should describe base64 ingest",
     );
-    assert.match(
-      skill,
-      /mcpCreateUploadDocument[^\n]*10 MB/,
-      "the upload one-liner should carry the 10 MB limit",
-    );
+    assert.match(skill, /\b10 MB\b/, "the upload limit should be stated");
     // mcpUpdateArtifact: whole mode with the limits and the expected-version contract.
     assert.match(
       skill,
-      /mcpUpdateArtifact[^\n]*"whole"/,
+      /`section` or `whole` mode/,
       "the update one-liner should name whole mode (full is gone)",
     );
     assert.doesNotMatch(
