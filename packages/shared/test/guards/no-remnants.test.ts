@@ -773,9 +773,9 @@ describe("no-remnants guard: consolidation seam", () => {
 // aura-skill-rewrite: the skill file teaches the live 120-tool server
 // (build 2026-10-12, commit 4aa37833) per the mcp-inventory report's
 // outline (that report's section 9). The audit's load-bearing facts are
-// pinned here in the existing guard style; the full per-claim mapping of
-// the drift table lives in the ticket's result document. A retired claim
-// reappearing in the skill file fails the suite.
+// pinned here in the existing guard style; the per-claim mapping of the
+// drift table is recorded in the ticket's workflow records. A retired
+// claim reappearing in the skill file fails the suite.
 const SKILL_FILE = "skills/core/aura/SKILL.md";
 
 function readSkillFile(): string {
