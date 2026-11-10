@@ -2300,6 +2300,173 @@ describe("no-remnants guard: process resources current (capacity)", () => {
   });
 });
 
+describe("no-remnants guard: process resources current (integrations)", () => {
+  it("teaches Asana create-from-Aura with auto-link and the manual reverse link", () => {
+    const file = readProcess("integrations.md");
+    assert.match(
+      file,
+      /create[n]? an Asana task (directly )?from (an|the) Aura task|created from the Aura task/i,
+      "the Asana create-from-Aura flow should be taught",
+    );
+    assert.match(
+      file,
+      /linked automatically at creation|auto-?linked/i,
+      "the auto-link at creation should be stated",
+    );
+    assert.match(
+      file,
+      /reverse[\s\S]{0,120}manually|manually[\s\S]{0,120}description|link added manually/i,
+      "the reverse direction's manual link should be stated",
+    );
+  });
+
+  it("teaches the Asana level split (sagas, epics, milestones; selected stories; no subtasks)", () => {
+    const file = readProcess("integrations.md");
+    assert.match(
+      file,
+      /Saga[\s\S]{0,80}Epic[\s\S]{0,80}milestone/i,
+      "the portfolio-level split should be stated",
+    );
+    assert.match(
+      file,
+      /selected Stories/i,
+      "the selected-Stories rule should be stated",
+    );
+    assert.match(
+      file,
+      /Sub-?Tasks?[^\n]{0,80}not/i,
+      "the no-Sub-Tasks rule should be stated",
+    );
+  });
+
+  it("teaches the deliberate Jira creation and drops the blanket no-create rule", () => {
+    const file = readProcess("integrations.md");
+    assert.doesNotMatch(
+      file,
+      /Do not create tasks in JIRA or Asana directly/,
+      "the blanket no-create rule should be gone (Jira creation is deliberate)",
+    );
+    assert.match(
+      file,
+      /Create JIRA tasks when you need|deliberate/i,
+      "the deliberate Jira creation should be taught",
+    );
+    assert.match(
+      file,
+      /source of truth/,
+      "Aura-stays-the-source-of-truth should stay",
+    );
+  });
+
+  it("carries the every-task-needs-a-parent rule", () => {
+    const file = readProcess("integrations.md");
+    assert.match(
+      file,
+      /Every task needs a parent/i,
+      "the parenting rule should be taught",
+    );
+    assert.match(
+      file,
+      /5 operational[\s\S]{0,60}11 goal-oriented|11 goal-oriented/,
+      "the saga split (5 operational, 11 goal-oriented) should be stated",
+    );
+  });
+
+  it("keeps the live mirror-read tools", () => {
+    const file = readProcess("integrations.md");
+    for (const tool of ["getTaskByJiraKey", "listAsanaTasks", "getAsanaTask"]) {
+      assert.ok(file.includes(tool), `the integrations file should keep ${tool}`);
+    }
+  });
+});
+
+describe("no-remnants guard: process resources current (roles)", () => {
+  it("teaches the live membership tools and drops the false MCP absence claim", () => {
+    const file = readProcess("roles.md");
+    for (const tool of [
+      "addTaskMember",
+      "setTaskMemberRoles",
+      "updateTaskMemberCapacity",
+      "updateTaskMemberParticipation",
+    ]) {
+      assert.ok(file.includes(tool), `roles.md should name ${tool}`);
+    }
+    assert.doesNotMatch(
+      file,
+      /assignment is not available via MCP|not available via MCP after the overhaul/,
+      "the false blanket MCP-absence claim should be gone",
+    );
+    assert.match(
+      file,
+      /Aura UI/,
+      "the owner/crew search flows should carry a UI pointer",
+    );
+  });
+
+  it("teaches the handover handshake and the Leadership veto", () => {
+    const file = readProcess("roles.md");
+    assert.match(
+      file,
+      /handshake|a status field changing who's assigned is not enough/i,
+      "the handover handshake should be taught",
+    );
+    assert.match(
+      file,
+      /veto/i,
+      "the Leadership veto on unsuitable owner pairings should be taught",
+    );
+    assert.match(
+      file,
+      /mutual confirmation/i,
+      "the mutual-confirmation rule should stay",
+    );
+  });
+
+  it("points assignment content at the capacity page (its wiki home is 1.3)", () => {
+    const file = readProcess("roles.md");
+    assert.match(
+      file,
+      /capacity\.md/,
+      "the assignment-and-boards content should cross-reference capacity.md",
+    );
+  });
+});
+
+describe("no-remnants guard: process resources current (escalation)", () => {
+  it("teaches the state-not-person starting point and the de-escalation sequence", () => {
+    const file = readProcess("escalation.md");
+    assert.match(
+      file,
+      /state of the task[^\n]{0,80}not a judgment of a person/i,
+      "the starting point principle should be carried",
+    );
+    assert.match(
+      file,
+      /coaching|support[\s\S]{0,120}reassign/i,
+      "the de-escalation sequence (talk, support, reassign, transparent transition) should be carried",
+    );
+    assert.match(
+      file,
+      /transparent transition/i,
+      "the transparent transition step should be carried",
+    );
+  });
+
+  it("carries the leadership review of overdue tasks and the handshake rule", () => {
+    const file = readProcess("escalation.md");
+    assert.match(
+      file,
+      /overdue[\s\S]{0,120}Leadership|Leadership[\s\S]{0,120}overdue/i,
+      "the overdue-task Leadership review should be carried",
+    );
+    assert.match(
+      file,
+      /handshake/i,
+      "the active-handshake rule for handovers should be carried",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
