@@ -1196,6 +1196,111 @@ describe("no-remnants guard: usecase resources current (signals)", () => {
   });
 });
 
+describe("no-remnants guard: usecase resources current (wiki)", () => {
+  it("addresses every knowledge write tool by id, not uuid", () => {
+    const file = readUsecase("wiki-knowledge.md");
+    for (const tool of [
+      "saveKnowledgeNodeBody",
+      "saveKnowledgeNodeFrontmatter",
+      "updateKnowledgeNode",
+      "restoreKnowledgeNodeVersion",
+    ]) {
+      assert.ok(file.includes(tool), `the wiki file should document ${tool}`);
+    }
+    assert.doesNotMatch(
+      file,
+      /uuid:/,
+      "no knowledge tool takes a uuid parameter anymore",
+    );
+  });
+
+  it("documents the frontmatter save contract (identifier plus raw YAML or null)", () => {
+    const file = readUsecase("wiki-knowledge.md");
+    const section = file.split("### Update frontmatter")[1]?.split("\n### ")[0] ?? "";
+    assert.notEqual(section, "", "the frontmatter section should exist");
+    assert.match(
+      section,
+      /saveKnowledgeNodeFrontmatter\(\{[\s\S]*?id:/,
+      "the frontmatter save should be keyed by id",
+    );
+    assert.match(
+      section,
+      /raw:/,
+      "the frontmatter save should take the raw parameter",
+    );
+    assert.match(
+      section,
+      /YAML/,
+      "the raw parameter should be described as a raw YAML string",
+    );
+    assert.match(
+      section,
+      /null`?\s*to clear/i,
+      "clearing the frontmatter with null should be documented",
+    );
+    assert.doesNotMatch(
+      section,
+      /frontmatter:\s*\{/, 
+      "the nonexistent frontmatter-object parameter should be gone",
+    );
+  });
+
+  it("documents the version numbering shape and the file-asset version history", () => {
+    const file = readUsecase("wiki-knowledge.md");
+    assert.match(
+      file,
+      /version: "2"/,
+      "restore should pass the version as a decimal string",
+    );
+    assert.match(
+      file,
+      /decimal string/i,
+      "the version shape should be called out as a decimal string",
+    );
+    assert.match(
+      file,
+      /listKnowledgeFileVersions/,
+      "the file-asset version history should be documented",
+    );
+    assert.match(
+      file,
+      /checksum/,
+      "the per-version checksum and provenance should be mentioned",
+    );
+  });
+
+  it("documents the tree bounds and the node-update extras", () => {
+    const file = readUsecase("wiki-knowledge.md");
+    assert.match(
+      file,
+      /max_nodes/,
+      "the tree answer's node bound should be documented",
+    );
+    assert.match(
+      file,
+      /depth/,
+      "the tree answer's depth bound should be documented",
+    );
+    const update = file.split("### Rename, move, or reorder")[1]?.split("\n### ")[0] ?? "";
+    assert.notEqual(update, "", "the rename/move section should exist");
+    assert.match(
+      update,
+      /updateKnowledgeNode\(\{[\s\S]*?id:/,
+      "node updates should be keyed by id",
+    );
+    assert.match(
+      update,
+      /slug/,
+      "the slug parameter should be documented (rejected for FILE nodes)",
+    );
+    assert.match(
+      update,
+      /tags/,
+      "the tag replacement parameter should be documented",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
