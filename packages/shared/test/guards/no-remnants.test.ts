@@ -3041,3 +3041,24 @@ describe("no-remnants guard: root docs current (dev-env doc)", () => {
     );
   });
 });
+
+describe("no-remnants guard: root docs current (prose)", () => {
+  it("carries no em-dash in any of the five root docs", () => {
+    const offenders: string[] = [];
+    for (const doc of ROOT_DOCS) {
+      const content = readRootDoc(doc);
+      content
+        .split("\n")
+        .forEach((line, index) => {
+          if (line.includes("\u2014")) {
+            offenders.push(`${doc}:${index + 1}: ${line.trim()}`);
+          }
+        });
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "the five root docs should carry no em-dash (the repo's prose rule; every doc is touched by this ticket)",
+    );
+  });
+});
