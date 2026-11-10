@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Rewrite the aura skill file
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by:
 - mention-machinery-mcp
 - feedback-mcp-submission
