@@ -78,6 +78,8 @@ skipped phase) is a disallowed jump and only goes through with a
 - Plan goes to designated Stakeholders for sign-off.
 - Choose the Stakeholder circle deliberately: start narrow, widen gradually.
 - Set **concrete deadlines** on review requests.
+- Who is who: the wiki pages 1 and 1.1 point to the Personio "Role Overview
+  & Job Descriptions" page instead of a hard-coded stakeholder list.
 - The Refinement-Alignment loop is normal: revise, re-submit, repeat.
 - The Alignment Gate settles through the formal sign-off (see
   [Quality gates](#quality-gates) below).
