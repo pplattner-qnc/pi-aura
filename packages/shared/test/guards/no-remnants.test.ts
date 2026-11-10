@@ -1301,6 +1301,61 @@ describe("no-remnants guard: usecase resources current (wiki)", () => {
   });
 });
 
+describe("no-remnants guard: usecase resources current (skills)", () => {
+  it("keys the skill write tools by id and shows the visibility value", () => {
+    const file = readUsecase("skills-management.md");
+    assert.doesNotMatch(file, /uuid:/, "no skill tool takes a uuid parameter anymore");
+    assert.match(
+      file,
+      /saveSkillBody\(\{[\s\S]*?id:/,
+      "saveSkillBody should be called with id",
+    );
+    assert.match(
+      file,
+      /updateSkill\(\{[\s\S]*?id:/,
+      "updateSkill should be called with id",
+    );
+    assert.match(
+      file,
+      /setSkillVisibility\(\{[\s\S]*?visibility: "(PERSONAL|PUBLIC)"/,
+      "setSkillVisibility should show its one required value",
+    );
+    assert.match(
+      file,
+      /PERSONAL.*\|.*PUBLIC|PERSONAL.*PUBLIC/s,
+      "the visibility value set should be named",
+    );
+  });
+
+  it("documents createSkill's required slug", () => {
+    const file = readUsecase("skills-management.md");
+    assert.match(
+      file,
+      /createSkill\(\{[\s\S]*?slug:/,
+      "createSkill should show the required slug",
+    );
+    assert.match(
+      file,
+      /lowercase\s+alphanumeric/i,
+      "the slug format should be stated",
+    );
+  });
+
+  it("mentions the read-side filters and the response tiers", () => {
+    const file = readUsecase("skills-management.md");
+    assert.match(
+      file,
+      /plugin_id/,
+      "listSkills's plugin filter should be mentioned",
+    );
+    assert.match(
+      file,
+      /response_format/,
+      "getSkill's response_format tiers should be mentioned",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package

@@ -8,7 +8,7 @@
 > integrated. Use Aura skills only if you specifically need Aura's own
 > skill-sharing workflow.
 
-Aura has its own skill system — reusable skill documents with assets, plugins,
+Aura has its own skill system: reusable skill documents with assets, plugins,
 and an import/export pipeline. These are distinct from local agent skills.
 
 ## Finding skills
@@ -16,30 +16,36 @@ and an import/export pipeline. These are distinct from local agent skills.
 | Goal | Tool |
 |---|---|
 | Search skills | `unifiedSearch` with `source_types: ["SKILL"]` |
-| List skills | `listSkills` (paginated) |
-| Get skill detail | `getSkill` |
+| List skills | `listSkills` (paginated; own PERSONAL + all PUBLIC; `q`, `visibility`, and `plugin_id` filters) |
+| Get skill detail | `getSkill` (compact default; `response_format: "detail"` for the working view) |
 
 ## Creating and editing skills
 
 ```
-createSkill({ title: "My Skill", ... })
-saveSkillBody({ uuid: "<skill-uuid>", body: "..." })
-updateSkill({ uuid: "<skill-uuid>", title: "...", frontmatter: {...} })
+createSkill({ title: "My Skill", slug: "my-skill" })
+saveSkillBody({ id: "<skill-uuid>", body: "..." })
+updateSkill({ id: "<skill-uuid>", title: "...", frontmatter: {...} })
 ```
+
+`createSkill` requires `slug` alongside `title` (URL-safe, lowercase
+alphanumeric with hyphens) and places the skill in the canonical Skills
+space with visibility defaulting to PERSONAL; `frontmatter` and
+`parent_id` (nest under an existing FOLDER node) are optional.
 
 ## Publishing
 
 ```
-setSkillVisibility({ uuid: "<skill-uuid>", ... })
+setSkillVisibility({ id: "<skill-uuid>", visibility: "PUBLIC" })
 ```
 
-Publish or retract a skill (owner only).
+Publish or retract a skill (owner only); `visibility` is required and is
+`PERSONAL` | `PUBLIC`.
 
 ## Assets, plugins, and import pipeline
 
-The following skill-administration capabilities are not available via MCP —
+The following skill-administration capabilities are not available via MCP;
 use the Aura UI:
 
-- **Skill assets** — list and upload a skill's asset files
-- **Skill plugins** — manage a skill's plugins
-- **Import pipeline** — validate, confirm, and track skill imports
+- **Skill assets**: list and upload a skill's asset files
+- **Skill plugins**: manage a skill's plugins
+- **Import pipeline**: validate, confirm, and track skill imports
