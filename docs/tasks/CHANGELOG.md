@@ -149,6 +149,11 @@ Added a `rest` command group to the `aura` CLI that exposes every Aura REST oper
 
 
 
+
+## 2026-11-12, Finalize review cleanup sweep (finalize-cleanup)
+
+The finalize review's cleanup findings are fixed: the retired pre-AURA-2211 flat status series left the task-management usecase file (replaced with the resolution rule and a pointer to the process file) and the guard now bans it across both the usecase and process directories so this class of stale claim cannot survive the enforcement record again; the dead js-yaml dependency pair and the two ML dependencies that only served the embed fixtures are removed and pinned absent; the shared index placeholder names the shipped surface; 27 em-dash lines are reworded across the extension sources and tests and the Taskfile (the contract module's verbatim server strings keep theirs, pinned by the provenance guard with a documented carve-out); the testing doc's seam sentences name the right factories and hooks; the wiki tree-bounds word reads narrow; and the zero-consumer embed fixtures are gone with their guard pin flipped. The shared suite settles at 171 (the embed suites leaving), all ten extension suites pass, typecheck clean.
+
 ## 2026-11-10, Root documents current (root-docs-current)
 
 The root documents describe the shipped package again: the README carries an extensions table matching the six-entry manifest, the optional-override MCP configuration note (the package registers the server itself from the keyring, no manual setup required), the released-version install pin, and the companion-plugin assumption for rule-mention body injection; the glossary describes the shipped surfaces with no deleted-module names; the project instructions file matches the settled layout; and the testing and dev-env docs describe the final tree (the 197-test shared suite, the per-file extension convention, the typecheck gate, the runtime-resolved module imports). Nineteen new guard tests pin the corrections so a retired claim reappearing fails the suite. The full gate (197 shared tests, ten extension suites, typecheck) is green on the landed state, and every file, target, and command the docs name exists on disk.

@@ -33,3 +33,9 @@ The finalize review's confirmed cleanup findings, in one mechanical sweep:
 ## Blocked by
 
 None (can start immediately).
+
+## Implementation notes
+
+Landed as merge 61bbc41 on task/finalize-cleanup (21 files, +310/-1,219): the retired status-series block replaced with the resolution rule pointing at workflow-phases.md and the guard ban widened to both directories; the dead js-yaml pair removed and pinned absent; the shared index placeholder rewritten to the shipped surface; 27 em-dash lines reworded across the five extension sources and two test files plus the Taskfile; the two testing-doc imprecision lines corrected with the Taskfile echo; the tree-bounds word fixed; and the embed fixtures removed with their keep-survivors pin flipped and the testing-doc mock-fidelity bullet rewritten to the generic lesson. The shared suite is 171/171 (the drop from 197 is the embed suites leaving), ten extension suites, typecheck clean.
+
+Two items recorded for operator eyes, neither blocking: the contract module's SHIPPED_AURA_MCP_TOOLS strings keep their em-dashes because they are verbatim live-server text pinned by the provenance guard and compared at every self-check, with the carve-out documented in the guard (the re-transcription belongs to contract-refresh-d3886f06, where the dump is re-recorded anyway); and the two ML dependencies (@huggingface/transformers, onnxruntime-node) went with the embed fixtures as their sole consumer's own dependencies, mechanically identical to the js-yaml finding, guard-pinned absent. Two further residuals for the close-out reconcile to record: the provenance guard hard-fails on a clone without the gitignored introspection dump (pre-existing design condition), and this landing stales the architecture's ticket-5 survivor records and the root-docs residual naming the embed modules as a runtime seam.
