@@ -1,6 +1,6 @@
 version: "3"
 
-# Taskfile — install and typecheck targets for the pi-aura repo.
+# Taskfile: install and typecheck targets for the pi-aura repo.
 #
 # The agent-facing CLI and REST reference build surface is removed (the
 # remove-cli-rest-surface retirement), and the internal REST library followed
@@ -8,8 +8,8 @@ version: "3"
 # bundle step, no typed-client codegen, and no OpenAPI spec sync anymore.
 # What remains is the shared package's install and typecheck flow.
 #
-# The @pi-aura/shared workspace package (packages/shared/) holds the keyring,
-# settings, and embed modules the extensions resolve at runtime.
+# The @pi-aura/shared workspace package (packages/shared/) holds the keyring
+# and settings modules the extensions resolve at runtime.
 #
 # Common flows:
 #   task                       # install build deps, typecheck

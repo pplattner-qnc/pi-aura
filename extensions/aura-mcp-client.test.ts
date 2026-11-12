@@ -36,7 +36,7 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Convert a shipped contract into the live-shaped tool the server would
- *  report for it (no drift) — the fake `listTools` baseline. */
+ *  report for it (no drift): the fake `listTools` baseline. */
 function toLiveTool(shipped: ShippedToolContract): AuraMcpLiveTool {
   const lines = shipped.description.split("\n");
   const hasTitleLine = lines.length > 1;
@@ -480,7 +480,7 @@ function makeInterface(caller: AuraMcpCaller, notify?: (message: string, type?: 
 }
 
 {
-  // The dynamic import resolves in this environment — this repo IS the
+  // The dynamic import resolves in this environment; this repo IS the
   // installed package, so a green resolution here is the packaged-extension
   // verification the arch spec asks for.
   const piMcp = (await import("@earendil-works/pi-mcp")) as Record<string, unknown>;

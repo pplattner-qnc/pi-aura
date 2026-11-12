@@ -36,7 +36,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // A quick, non-blocking probe fired on `session_start`. It GETs the Aura
 // REST base URL with a short timeout: any HTTP response (even 401/404) means
 // the server is reachable; only a network / DNS / TLS / timeout error means
-// Aura is unreachable — typically because the VPN that exposes the private
+// Aura is unreachable, typically because the VPN that exposes the private
 // Aura instance is down. The probe never throws into the session; a failure
 // only surfaces as a `warning` notify so the user knows to activate the VPN.
 
@@ -54,7 +54,7 @@ export interface AuraReachabilityResult {
 }
 
 /** Probe the Aura REST base URL once. Returns `{ reachable: true }` for any
- *  HTTP response (the server answered, so the network path is up — auth and
+ *  HTTP response (the server answered, so the network path is up; auth and
  *  routing are separate concerns), or `{ reachable: false, reason }` for a
  *  network / DNS / TLS / timeout / abort error.
  *
@@ -78,7 +78,7 @@ export async function checkAuraReachable(
       signal: controller.signal,
       redirect: "error",
     });
-    // Any HTTP status — even 401/404/5xx — means the server answered, so the
+    // Any HTTP status (even 401/404/5xx) means the server answered, so the
     // network path to Aura is up. Auth/routing problems are out of scope here.
     void res.status;
     return { reachable: true };
@@ -96,11 +96,11 @@ export async function checkAuraReachable(
  *  the most likely cause (the VPN that exposes the private Aura instance) so
  *  the user has an actionable next step. */
 const AURA_UNREACHABLE_MESSAGE =
-  "Aura is not reachable — please activate your VPN and retry.";
+  "Aura is not reachable: please activate your VPN and retry.";
 
 /** Format the warning message for `ctx.ui.notify`. When Aura is reachable
  *  (or there is no base URL to probe), returns `null` so the caller can skip
- *  the notify entirely — the happy path stays silent. Exported for unit tests
+ *  the notify entirely; the happy path stays silent. Exported for unit tests
  *  so the exact wording is pinned. */
 export function formatUnreachableWarning(result: AuraReachabilityResult): string | null {
   if (result.reachable) return null;
@@ -126,10 +126,10 @@ export default function (pi: ExtensionAPI): void {
         const { loadAuraClientSettings } = await import("@pi-aura/shared/settings");
         baseUrl = loadAuraClientSettings().baseUrl;
       } catch {
-        // Settings file missing/unparseable — nothing to probe; stay silent.
+        // Settings file missing/unparseable: nothing to probe; stay silent.
         return;
       }
-      if (!baseUrl) return; // no configured base URL — stay silent
+      if (!baseUrl) return; // no configured base URL: stay silent
 
       const result = await checkAuraReachable(baseUrl);
       const message = formatUnreachableWarning(result);

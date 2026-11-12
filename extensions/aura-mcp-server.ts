@@ -5,7 +5,7 @@
  * pi when the package loads, so a session that never configured any MCP
  * server still gets the Aura tools. The endpoint derives from the shared
  * settings (`aura.baseUrl`, the REST base, at `/mcp` on the same instance)
- * and the PAT comes from the OS keyring (service "aura", name "pat") — the
+ * and the PAT comes from the OS keyring (service "aura", name "pat"), the
  * same credential path every other Aura call in the package uses. With no
  * PAT stored the extension registers nothing and stays silent: the package
  * loads cleanly, exactly as before this extension existed.
@@ -25,7 +25,7 @@
  * `session_start`, so registering after the awaited keyring read still
  * lands inside the load window and the server connects at startup. Every
  * credential failure (missing settings, missing PAT, broken keyring) is a
- * silent skip — never a load error. An error thrown by
+ * silent skip, never a load error. An error thrown by
  * `pi.registerMcpServer` itself (invalid config, or the name already
  * registered by another extension) propagates: that is a genuine conflict
  * pi reports as an extension load error, not a credentials absence.
@@ -55,7 +55,7 @@ export interface AuraMcpServerConfig {
 
 /**
  * The registration decision: register (with the concrete server config)
- * when both credentials exist, otherwise skip — silently, naming the
+ * when both credentials exist, otherwise skip, silently naming the
  * missing piece for tests and debugging.
  */
 export function decideAuraMcpRegistration(credentials: {
