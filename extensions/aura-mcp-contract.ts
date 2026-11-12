@@ -1,17 +1,31 @@
 /**
  * The aura-mcp-dev contract the package ships, and its drift comparison.
  *
- * `SHIPPED_AURA_MCP_TOOLS` describes the slice of the live aura-mcp-dev
- * server's surface that the typed wrapper (extensions/aura-mcp-client.ts)
- * sends or reads: the ten tools the mention machinery and the feedback tool
- * use. Every entry is transcribed verbatim from the effort's introspection
- * dump (build 2026-10-12, commit 4aa37833, 120 tools) at
- * docs/tasks/audit-update-aura-instructions/tasks/mcp-inventory-drift/.work/introspection-dump.md.
- * The provenance guard in aura-mcp-contract.test.ts cross-checks this data
- * against that dump, so a refresh of the shipped definitions is validated
- * against the recorded live evidence the same way the first transcription
- * was: refresh the dump by re-auditing the server, re-transcribe, let the
- * guard confirm.
+ * `SHIPPED_AURA_MCP_TOOLS` describes the complete live schema of the ten
+ * aura-mcp-dev tools the typed wrapper (extensions/aura-mcp-client.ts)
+ * sends or reads: every parameter the server reports for each of them,
+ * not just the slice the wrapper sends. That full scope is the operator's
+ * ruling behind the drift-detection loop: a cosmetic warning must mean the
+ * server actually changed since the audit, which only holds when the
+ * shipped contract carries every server-side parameter (the subset
+ * semantics fired permanent cosmetic warnings against any server, audited
+ * or not). The wrapper keeps sending exactly what it sends; only the
+ * contract data grew to the full schema. Every entry is transcribed
+ * verbatim from the effort's fresh introspection record (build d3886f06,
+ * 2026-11-09 14:59:59, 120 tools) at
+ * docs/tasks/audit-update-aura-instructions/tickets/contract-refresh-d3886f06/.work/introspection-dump-d3886f06.md
+ * (the raw listTools payload and its round-trip verification sit beside it
+ * in the same directory). The provenance guard in aura-mcp-contract.test.ts
+ * cross-checks this data against that record in both directions, so a
+ * refresh of the shipped definitions is validated against the recorded
+ * live evidence the same way the first transcription was: capture a fresh
+ * record by re-auditing the server, re-transcribe, let the guard confirm.
+ *
+ * The data strings below are verbatim live-server text: where the server's
+ * own wording carries an em-dash, the transcription keeps it (the em-dash
+ * guard exempts this data block for exactly that reason; rewording would
+ * falsify the recorded evidence and fire permanent cosmetic-drift
+ * warnings).
  *
  * `compareShippedTool` compares one shipped contract against the live tool
  * schema the server reports through `listTools()`. It implements the
@@ -25,7 +39,7 @@
  *   the wrapper fails calls fast and the warning names what broke.
  *
  * Deliberately not compared: JSON-Schema bounds (@minimum/@maximum/
- * @minLength/@maxLength and friends). The dump records them, but a bound
+ * @minLength/@maxLength and friends). The record holds them, but a bound
  * tweak neither renames nor retypes a parameter, and chasing every bound
  * would drown the drift signal the effort exists to close. Type, required,
  * enum membership, default, and description are the compared surface.
@@ -39,27 +53,29 @@
 // Types
 // ---------------------------------------------------------------------------
 
-/** The JSON-Schema-compatible primitive type of a parameter the wrapper
- *  sends. `number` covers both `number` and `integer` on the wire. */
+/** The JSON-Schema-compatible primitive type of a parameter in the shipped
+ *  schema. `number` covers both `number` and `integer` on the wire. */
 export type ShippedParamType = "string" | "number" | "boolean";
 
-/** One parameter the wrapper sends or reads, transcribed from the dump. */
+/** One parameter of a covered tool's complete schema, transcribed from the
+ *  fresh introspection record. */
 export interface ShippedToolParam {
   type: ShippedParamType;
-  /** Whether the wrapper must always send it (matches the live schema's
-   *  `required` array at transcription time). */
+  /** Whether the server requires it (the record's `required` membership at
+   *  capture time). The wrapper sends only its own slice of these. */
   required: boolean;
-  /** Verbatim parameter description from the dump's declaration comments. */
+  /** Verbatim parameter description from the record's declaration comments. */
   description: string;
   /** Closed value set when the parameter is an enum on the wire. */
   enum?: readonly string[];
-  /** Schema default when the dump records one. */
+  /** Schema default when the record records one. */
   default?: unknown;
 }
 
 /** One shipped tool contract: the tool's live name (without pi's
- *  `mcp__aura_mcp_dev__` prefix), its verbatim description block, and the
- *  parameters the wrapper sends or reads. */
+ *  `mcp__aura_mcp_dev__` prefix), its verbatim description block, and its
+ *  complete parameter schema (every parameter the server reports, not just
+ *  the slice the wrapper sends). */
 export interface ShippedToolContract {
   name: string;
   description: string;
@@ -186,17 +202,25 @@ export const SHIPPED_AURA_MCP_TOOLS: readonly ShippedToolContract[] = [
       "Returns paginated tasks the caller can see (membership, inherited access, and access grants). There is no default status filter; archived tasks are hidden unless archived=all or archived=true. related_task_id is member-scoped only and then applies status_slug, status_type, type, archived, and deadline.",
     ].join("\n"),
     params: {
-      q: {
-        type: "string",
-        required: false,
-        description: "Search query (full-text filter across relevant fields)",
-      },
       archived: {
         type: "string",
         required: false,
         description:
           "Archived visibility (orthogonal to status): false (default) hides archived, true only archived, all both",
         enum: ["false", "true", "all"],
+      },
+      deadline: {
+        type: "string",
+        required: false,
+        description:
+          'Keep tasks by their stored urgent deadline: "overdue" (before today), "soon" (today through two workdays), or an integer N in calendar days (deadline on or before today+N; negative N means at least that many days overdue). Always excludes archived and terminal tasks. Omit to keep every deadline.',
+      },
+      level: {
+        type: "string",
+        required: false,
+        description:
+          "Filter by hierarchy level (SAGA, EPIC, STORY, SUBTASK). The literal none keeps only tasks with no level assigned.",
+        enum: ["SAGA", "EPIC", "STORY", "SUBTASK", "none"],
       },
       limit: {
         type: "number",
@@ -209,6 +233,48 @@ export const SHIPPED_AURA_MCP_TOOLS: readonly ShippedToolContract[] = [
         required: false,
         description: "Page number (1-based)",
         default: 1,
+      },
+      parent_eligible: {
+        type: "string",
+        required: false,
+        description:
+          "When true, return only tasks that can act as a parent (have a level assigned and are not SUBTASK). Useful for parent-picker search in the create form.",
+        enum: ["true", "false"],
+      },
+      parent_eligible_for_level: {
+        type: "string",
+        required: false,
+        description:
+          "Level-dependent successor of parent_eligible (AURA-1226): keep only tasks whose level may act as parent for a task at this target level — SUBTASK yields STORY only, STORY yields EPIC/SAGA, EPIC yields SAGA only, SAGA yields no candidates at all. Takes precedence over parent_eligible when both are given. Used by the guided level-change dialog's candidate list.",
+        enum: ["SAGA", "EPIC", "STORY", "SUBTASK"],
+      },
+      parent_task_id: {
+        type: "string",
+        required: false,
+        description: "Return only direct children of the task with this UUID (member-scoped, other filters apply)",
+      },
+      q: {
+        type: "string",
+        required: false,
+        description: "Search query (full-text filter across relevant fields)",
+      },
+      related_task_id: {
+        type: "string",
+        required: false,
+        description: "Return tasks that are 1-hop neighbours of the task with this UUID (member-scoped)",
+      },
+      relation_type: {
+        type: "string",
+        required: false,
+        description: "Restrict the related_task_id query to a specific relation type",
+        enum: ["RELATES_TO", "PART_OF", "BLOCKS", "DUPLICATES"],
+      },
+      role: {
+        type: "string",
+        required: false,
+        description:
+          "A TaskRole enum value — returns only tasks where the current user is a member with this role. Takes precedence over view when both are set.",
+        enum: ["OWNER", "CONTRIBUTOR", "STAKEHOLDER"],
       },
       sort_by: {
         type: "string",
@@ -223,6 +289,42 @@ export const SHIPPED_AURA_MCP_TOOLS: readonly ShippedToolContract[] = [
         description: "Sort direction",
         enum: ["asc", "desc"],
         default: "desc",
+      },
+      status_slug: {
+        type: "string",
+        required: false,
+        description: 'Comma-separated TaskStatus values to filter by (e.g. "OPEN,IN_DEVELOPMENT")',
+      },
+      status_type: {
+        type: "string",
+        required: false,
+        description:
+          'Filter by status activity class, not by progress. Comma-separated; values: OPEN, WAITING, ACTIVE, TERMINAL. Note that OPEN is the single status OPEN (nobody has picked the task up yet) — it is not a synonym for "not finished"; for everything that is not finished, pass OPEN,WAITING,ACTIVE. A progress-based cut ("not deployed yet") cannot be expressed here, because the four classes cut across the status series — use status_slug with an explicit list of statuses for that. There is no value named "open": if a user asks for "the open tasks", ask which of the two readings they mean instead of guessing.',
+      },
+      tag_match: {
+        type: "string",
+        required: false,
+        description: "Whether all (AND) or any (OR) of the given tag slugs must match (default all)",
+        enum: ["all", "any"],
+        default: "all",
+      },
+      tags: {
+        type: "string",
+        required: false,
+        description: "Comma-separated tag slugs to filter by",
+      },
+      type: {
+        type: "string",
+        required: false,
+        description: "Comma-separated task types (FEATURE, BUG, IDEA, CHORE, DISCOVERY). Multiple values are OR.",
+      },
+      view: {
+        type: "string",
+        required: false,
+        description:
+          "Tab filter: all member tasks (default), tasks where the user has no role (no_role), or tasks created by the current user (mine)",
+        enum: ["all", "no_role", "mine"],
+        default: "all",
       },
     },
   },
@@ -257,22 +359,35 @@ export const SHIPPED_AURA_MCP_TOOLS: readonly ShippedToolContract[] = [
       "Returns paginated artifacts owned by or shared with the authenticated user.",
     ].join("\n"),
     params: {
-      q: {
-        type: "string",
-        required: false,
-        description: "Free-text search over the artifact title.",
-      },
       limit: {
         type: "number",
         required: false,
         description: "Page size.",
         default: 20,
       },
+      opinion_requested: {
+        type: "boolean",
+        required: false,
+        description: "Only artifacts where the caller has an open opinion request (neither withdrawn nor answered).",
+      },
       page: {
         type: "number",
         required: false,
         description: "1-based page number.",
         default: 1,
+      },
+      q: {
+        type: "string",
+        required: false,
+        description: "Free-text search over the artifact title.",
+      },
+      scope: {
+        type: "string",
+        required: false,
+        description:
+          "Ownership scope: default (everything visible), owned (only mine), shared (directly shared with me), broad_shared (via a company-wide grant).",
+        enum: ["default", "owned", "shared", "broad_shared"],
+        default: "default",
       },
       sort_by: {
         type: "string",
@@ -321,17 +436,17 @@ export const SHIPPED_AURA_MCP_TOOLS: readonly ShippedToolContract[] = [
       "Hybrid search over knowledge pages — literal (German full-text plus a trigram fallback for compound words) and semantic, merged into one ranked list via reciprocal rank fusion. Restricted to the caller's readable spaces.",
     ].join("\n"),
     params: {
-      query: {
-        type: "string",
-        required: true,
-        description:
-          "Search text. Matched literally against page titles and bodies (German full-text search, weighted higher on the title) plus a trigram fallback that also finds the term as part of a German compound word (e.g. \"Konvention\" inside \"Namenskonventionen\"), and — from 3 characters — matched semantically as well, so a paraphrase with no shared words can still find the thematically relevant page. Results from both ways are merged into one ranked list; each item reports whether it was found literally, semantically, or both.",
-      },
       limit: {
         type: "number",
         required: false,
         description: "Maximum number of matching pages to return, ordered by relevance.",
         default: 20,
+      },
+      query: {
+        type: "string",
+        required: true,
+        description:
+          "Search text. Matched literally against page titles and bodies (German full-text search, weighted higher on the title) plus a trigram fallback that also finds the term as part of a German compound word (e.g. \"Konvention\" inside \"Namenskonventionen\"), and — from 3 characters — matched semantically as well, so a paraphrase with no shared words can still find the thematically relevant page. Results from both ways are merged into one ranked list; each item reports whether it was found literally, semantically, or both.",
       },
       space_slug: {
         type: "string",
@@ -349,11 +464,6 @@ export const SHIPPED_AURA_MCP_TOOLS: readonly ShippedToolContract[] = [
       "Returns the complete tree of folders and documents (body omitted — load via GET /knowledge/nodes/{id}). The optional `depth` and `max_nodes` bound the answer; omitted, the whole tree comes back.",
     ].join("\n"),
     params: {
-      slug: {
-        type: "string",
-        required: true,
-        description: "Slug of the knowledge space whose node tree to load.",
-      },
       depth: {
         type: "number",
         required: false,
@@ -365,6 +475,11 @@ export const SHIPPED_AURA_MCP_TOOLS: readonly ShippedToolContract[] = [
         required: false,
         description:
           "Maximum number of nodes in the answer. Omitted returns all of them; the MCP tool asks for 200 (AURA-1390 / D8).",
+      },
+      slug: {
+        type: "string",
+        required: true,
+        description: "Slug of the knowledge space whose node tree to load.",
       },
     },
   },
@@ -416,11 +531,6 @@ export const SHIPPED_AURA_MCP_TOOLS: readonly ShippedToolContract[] = [
       "Submits a feedback entry. Requires SUBMIT_FEEDBACK. Anonymous submissions store no author.",
     ].join("\n"),
     params: {
-      title: {
-        type: "string",
-        required: true,
-        description: "Short title of the feedback, at most 120 characters.",
-      },
       body: {
         type: "string",
         required: true,
@@ -443,9 +553,15 @@ export const SHIPPED_AURA_MCP_TOOLS: readonly ShippedToolContract[] = [
         description: "How the entry arrived: UI, AGENT (chat card), or MCP.",
         enum: ["UI", "AGENT", "MCP"],
       },
+      title: {
+        type: "string",
+        required: true,
+        description: "Short title of the feedback, at most 120 characters.",
+      },
     },
   },
 ];
+
 
 // ---------------------------------------------------------------------------
 // Drift comparison

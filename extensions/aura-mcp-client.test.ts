@@ -326,6 +326,32 @@ function makeInterface(caller: AuraMcpCaller, notify?: (message: string, type?: 
 }
 
 {
+  // Full-schema baseline: the fake live tools derive from the shipped
+  // contracts, which since the full-scope refresh carry every parameter
+  // the server reports (listTasks twenty, listArtifacts seven). The
+  // construction self-check must run clean against that full schema: no
+  // cosmetic warning may fire against a server that matches the audit.
+  const notifications: Array<{ message: string; type?: string }> = [];
+  const caller = fakeCaller();
+  const itf = await makeInterface(caller, (message, type) => notifications.push({ message, type }));
+  assert.equal(notifications.length, 0, "no drift warnings against the audited full schema");
+  assert.equal(itf.selfCheck().status, "ok");
+  const listTasks = cleanLiveTools().find((tool) => tool.name === "listTasks")!;
+  const properties = Object.keys((listTasks.inputSchema as { properties: Record<string, unknown> }).properties);
+  assert.equal(properties.length, 20, "the fake baseline carries the complete listTasks schema (20 parameters)");
+  for (const shipped of ["status_type", "view", "tags", "related_task_id"]) {
+    assert.ok(properties.includes(shipped), `the fake baseline carries the server-side parameter "${shipped}"`);
+  }
+  const listArtifacts = cleanLiveTools().find((tool) => tool.name === "listArtifacts")!;
+  assert.equal(
+    Object.keys((listArtifacts.inputSchema as { properties: Record<string, unknown> }).properties).length,
+    7,
+    "the fake baseline carries the complete listArtifacts schema (7 parameters)",
+  );
+  console.log("self-check full-schema baseline: clean against the audited schema: ok");
+}
+
+{
   // Core drift variants at the interface level: a renamed parameter makes
   // the path unavailable too.
   const tools = cleanLiveTools();
@@ -337,6 +363,19 @@ function makeInterface(caller: AuraMcpCaller, notify?: (message: string, type?: 
   const itf = await makeInterface(caller, () => {});
   await assert.rejects(() => itf.getArtifact("some-uuid"), AuraMcpToolUnavailableError);
   console.log("self-check core drift (renamed parameter): fail-fast path: ok");
+}
+
+{
+  // A retyped parameter (string -> number) also makes the path unavailable
+  // at the interface level: the drift gate keeps its discriminating power
+  // over the full-schema contract.
+  const tools = cleanLiveTools();
+  const listTasks = tools.find((tool) => tool.name === "listTasks")!;
+  (listTasks.inputSchema as { properties: Record<string, unknown> }).properties.q = { type: "number" };
+  const caller = fakeCaller({ tools });
+  const itf = await makeInterface(caller, () => {});
+  await assert.rejects(() => itf.searchTasks({ q: "anything" }), AuraMcpToolUnavailableError);
+  console.log("self-check core drift (retyped parameter): fail-fast path: ok");
 }
 
 {

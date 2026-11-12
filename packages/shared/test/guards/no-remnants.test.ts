@@ -865,16 +865,63 @@ describe("no-remnants guard: consolidation seam", () => {
   });
 });
 
-// aura-skill-rewrite: the skill file teaches the live 120-tool server
-// (build 2026-10-12, commit 4aa37833) per the mcp-inventory report's
-// outline (that report's section 9). The audit's load-bearing facts are
-// pinned here in the existing guard style; the per-claim mapping of the
-// drift table is recorded in the ticket's workflow records. A retired
-// claim reappearing in the skill file fails the suite.
+// aura-skill-rewrite taught the live 120-tool server with the build
+// identity cited once; contract-refresh-d3886f06 re-audited the live
+// server (build d3886f06, 2026-11-09 14:59:59, verified 120 tools, surface
+// diff identity-only) and moved the drift anchor to the fresh build. The
+// audit's load-bearing facts are pinned here in the existing guard style;
+// the per-claim mapping of the drift table is recorded in the ticket's
+// workflow records. A retired claim reappearing in the skill file fails
+// the suite.
 const SKILL_FILE = "skills/core/aura/SKILL.md";
 
 function readSkillFile(): string {
   return fs.readFileSync(path.join(repoRoot, SKILL_FILE), "utf-8");
+}
+
+// The shipped surfaces the old build identity must not be cited as current
+// in: the skill and its resources, the root documents, the extension
+// sources, the shared sources, and the manifests. The effort's own records
+// under docs/tasks/ legitimately cite the audited 4aa37833 build as
+// history and are deliberately not scanned.
+const BUILD_IDENTITY_SURFACES = [
+  "skills",
+  "README.md",
+  "CONTEXT.md",
+  "AGENTS.md",
+  "docs/testing.md",
+  "docs/dev-env.md",
+  "package.json",
+  "extensions",
+  "packages/shared/src",
+];
+
+function buildIdentityOffenders(): string[] {
+  const offenders: string[] = [];
+  const scanFile = (rel: string) => {
+    const content = fs.readFileSync(path.join(repoRoot, rel), "utf-8");
+    content.split("\n").forEach((line, index) => {
+      if (/4aa37833|2026-10-12/.test(line)) {
+        offenders.push(`${rel}:${index + 1}: ${line.trim()}`);
+      }
+    });
+  };
+  const walk = (rel: string) => {
+    const full = path.join(repoRoot, rel);
+    if (fs.statSync(full).isDirectory()) {
+      for (const entry of fs.readdirSync(full)) {
+        if (entry === "node_modules") continue;
+        walk(path.join(rel, entry));
+      }
+      return;
+    }
+    if (rel.endsWith(".test.ts")) return; // suites are not shipped surfaces
+    scanFile(rel);
+  };
+  for (const surface of BUILD_IDENTITY_SURFACES) {
+    walk(surface);
+  }
+  return offenders;
 }
 
 describe("no-remnants guard: aura skill rewrite", () => {
@@ -885,9 +932,9 @@ describe("no-remnants guard: aura skill rewrite", () => {
       /\b120 tools\b/,
       "the skill should state the live 120-tool count",
     );
-    assert.match(skill, /2026-10-12/, "the skill should cite the build date");
+    assert.match(skill, /2026-11-09/, "the skill should cite the current build date");
     assert.equal(
-      (skill.match(/4aa37833/g) ?? []).length,
+      (skill.match(/d3886f06/g) ?? []).length,
       1,
       "the build commit should be cited exactly once (the drift-detection anchor)",
     );
@@ -895,6 +942,13 @@ describe("no-remnants guard: aura skill rewrite", () => {
       skill,
       /\b90 tools\b|\b90-tool\b/,
       "the stale 90-tool count should be gone",
+    );
+  });
+  it("cites the retired build identity as current nowhere in the shipped surfaces", () => {
+    assert.deepEqual(
+      buildIdentityOffenders(),
+      [],
+      "the retired 4aa37833 / 2026-10-12 build identity must not be cited as current in shipped surfaces (the drift anchor moved to d3886f06 with the contract refresh; the effort records under docs/tasks/ keep it as history)",
     );
   });
   it("keeps the ten mcp* tools with the corrected one-liners and the live kind list", () => {
