@@ -8,7 +8,7 @@ title: docs/tasks
 
 ## Live
 
-- audit-update-aura-instructions
+(none)
 
 ## Archived
 
@@ -16,6 +16,7 @@ title: docs/tasks
 - add-capacity-subcommands
 - atlassian-bitbucket-token
 - atlassian-keyring-auth
+- audit-update-aura-instructions
 - aura-access-rewrite
 - aura-client
 - aura-digest-interactive
