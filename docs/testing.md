@@ -20,8 +20,8 @@ per-file strip-types suites beside their sources; there is no build step.
 # Root (workspaces root): one install populates packages/shared/
 npm install
 
-# packages/shared: the keyring, settings, and embed modules the extensions
-# resolve at runtime; the guards live in test/guards/
+# packages/shared: the keyring and settings modules the extensions resolve
+# at runtime; the guards live in test/guards/
 cd packages/shared
 npm run typecheck      # tsc --noEmit
 npm test               # tsx --test 'test/**/*.test.ts'
@@ -75,8 +75,9 @@ below list the exact commands.
   real Aura server for the typed MCP wrapper's tests: assert the envelopes
   it sends and the degraded-path errors it returns, never the network.
   The extension factories carry the seams one level up: `loadCredentials`
-  (both MCP consumers) and `createInterface` plus `createCache` (the
-  reference engine) take fakes; production wiring passes nothing.
+  and `createCache` (the reference engine), `loadCredentials`,
+  `createInterface`, and `logPath` (the feedback tool) take fakes;
+  production wiring passes nothing.
 - **Mock-fidelity for external-library integration (the `_embedRaw`
   lesson).** The local-embeddings provider mocks `@huggingface/transformers'`
   `pipeline`. A mock whose output shape doesn't match the real library's

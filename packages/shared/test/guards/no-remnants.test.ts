@@ -3094,6 +3094,45 @@ describe("no-remnants guard: root docs current (testing doc)", () => {
       "the codegen byte-stability check should be gone with the codegen target",
     );
   });
+
+  // finalize-cleanup: the mock-convention sentence attributed
+  // createInterface to the reference engine, where it is the feedback
+  // factory's injection hook (the engine's hooks are loadCredentials and
+  // createCache), and left logPath unmentioned; the runtime-resolution
+  // sentence overstated the embed half, with the same phrasing echoed in
+  // the Taskfile comment.
+  it("attributes the injection hooks to the right factories", () => {
+    const testing = readRootDoc("docs/testing.md");
+    assert.ok(
+      testing.includes("logPath"),
+      "the mock conventions should name logPath (the feedback factory's log-path hook)",
+    );
+    assert.doesNotMatch(
+      testing,
+      /createInterface[\s\S]{0,60}the\s+reference\s+engine/i,
+      "createInterface is the feedback factory's hook, not the reference engine's (its hooks are loadCredentials and createCache)",
+    );
+    assert.match(
+      testing,
+      /createInterface[\s\S]{0,40}the\s+feedback\s+tool/i,
+      "createInterface should be attributed to the feedback factory",
+    );
+  });
+
+  it("states the runtime-resolved modules as settings and keyring only", () => {
+    const testing = readRootDoc("docs/testing.md");
+    assert.doesNotMatch(
+      testing,
+      /embed modules the extensions resolve/i,
+      "the extensions resolve only settings and keyring at runtime (the embed fixtures have zero production consumers)",
+    );
+    const taskfile = fs.readFileSync(path.join(repoRoot, "Taskfile.yml"), "utf-8");
+    assert.doesNotMatch(
+      taskfile,
+      /embed modules the extensions resolve/i,
+      "the Taskfile comment must match reality: the extensions resolve only settings and keyring",
+    );
+  });
 });
 
 describe("no-remnants guard: root docs current (dev-env doc)", () => {
