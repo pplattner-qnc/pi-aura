@@ -1336,6 +1336,22 @@ describe("no-remnants guard: usecase resources current (wiki)", () => {
     );
   });
 
+  it("states the tree bounds as a narrowing, not a widening", () => {
+    const file = readUsecase("wiki-knowledge.md");
+    const row = file.split("| Full tree for a space |")[1]?.split("\n")[0] ?? "";
+    assert.notEqual(row, "", "the tree-bounds row should exist");
+    assert.match(
+      row,
+      /\bto narrow\b/,
+      "passing depth/max_nodes can only narrow the answer (the MCP defaults already equal the schema maxima)",
+    );
+    assert.doesNotMatch(
+      row,
+      /\bto widen\b/,
+      "the widen wording overstates the defaults (they already equal the schema maxima)",
+    );
+  });
+
   it("documents the tree bounds and the node-update extras", () => {
     const file = readUsecase("wiki-knowledge.md");
     assert.match(
