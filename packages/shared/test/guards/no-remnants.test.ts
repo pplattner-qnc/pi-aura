@@ -609,8 +609,9 @@ describe("no-remnants guard: CLI and REST reference removal", () => {
 // (src/openapi/, src/rest/), the spec source (openapi/openapi.yaml), the
 // sync and codegen targets (the Taskfile targets, scripts/openapi-sync.sh,
 // openapi-ts.config.ts, tsconfig.codegen.json, the codegen devDependency),
-// and the library's tests. The embedding provider (src/embed/) is not the
-// REST library and survives the removal.
+// and the library's tests. (The embedding provider (src/embed/) survived
+// the REST-library removal with zero production consumers and was deleted
+// later by the finalize-cleanup ticket, its absence pinned below.)
 const REST_LIBRARY_FILES_GONE = [
   "packages/shared/src/aura-client.ts",
   "packages/shared/src/hey-api-aura-client.ts",
@@ -697,10 +698,8 @@ describe("no-remnants guard: REST library removal", () => {
 
   it("keeps the surviving shared package surface and the remaining seam suite", () => {
     for (const kept of [
-      "packages/shared/src/embed",
       "packages/shared/src/settings.ts",
       "packages/shared/src/keyring",
-      "packages/shared/test/embed/local-provider.test.ts",
       "extensions/aura-mcp-client.test.ts",
     ]) {
       assert.equal(
@@ -709,6 +708,35 @@ describe("no-remnants guard: REST library removal", () => {
         `${kept} should survive the REST library removal (guard against over-deletion)`,
       );
     }
+  });
+
+  // finalize-cleanup: the embed fixtures had zero production consumers
+  // (only this guard referenced them), so the operator approved their
+  // removal with the cleanup ticket. The fixtures, their suites, and the
+  // two ML dependencies that served only them are gone; the keep-survivors
+  // pin above no longer lists them.
+  it("has the zero-consumer embed fixtures removed with their suites and dependencies", () => {
+    const gone = [
+      "packages/shared/src/embed",
+      "packages/shared/test/embed",
+    ];
+    const offenders = gone.filter((dir) => fs.existsSync(path.join(repoRoot, dir)));
+    assert.deepEqual(
+      offenders,
+      [],
+      `the embed fixtures should be deleted (zero production consumers), still found: ${offenders.join(", ") || "none"}`,
+    );
+    const sharedPkg = JSON.parse(
+      fs.readFileSync(path.join(sharedRoot, "package.json"), "utf-8"),
+    ) as { dependencies?: Record<string, string> };
+    const deadDeps = ["@huggingface/transformers", "onnxruntime-node"].filter(
+      (dep) => dep in (sharedPkg.dependencies ?? {}),
+    );
+    assert.deepEqual(
+      deadDeps,
+      [],
+      `the shared package should carry no dependency whose only consumer was the embed provider, found: ${deadDeps.join(", ") || "none"}`,
+    );
   });
 
   // finalize-cleanup: js-yaml's sole consumer was deleted with the REST
@@ -3131,6 +3159,23 @@ describe("no-remnants guard: root docs current (testing doc)", () => {
       taskfile,
       /embed modules the extensions resolve/i,
       "the Taskfile comment must match reality: the extensions resolve only settings and keyring",
+    );
+  });
+
+  // finalize-cleanup: the mock-convention text presented the embed
+  // fixtures' shape assertions as a runtime seam; with the fixtures
+  // removed the doc must not name them at all.
+  it("presents no embed fixture as a runtime seam", () => {
+    const testing = readRootDoc("docs/testing.md");
+    const offenders = testing
+      .split("\n")
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => /embed/i.test(line))
+      .map(({ index, line }) => `docs/testing.md:${index + 1}: ${line.trim()}`);
+    assert.deepEqual(
+      offenders,
+      [],
+      "docs/testing.md should not name the removed embed fixtures or present them as a runtime seam",
     );
   });
 });
