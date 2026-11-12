@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Finalize review cleanup sweep
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by: []
 size: m
 ---
