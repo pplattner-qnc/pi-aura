@@ -375,20 +375,27 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
 }
 
 // ---------------------------------------------------------------------------
-// Provenance guard: shipped data vs the introspection dump
+// Provenance guard: shipped data vs the fresh introspection record
 // ---------------------------------------------------------------------------
 
 {
-  // The shipped contracts claim to be transcribed from the effort's
-  // introspection dump. This guard makes the claim true or fails the
-  // suite: every shipped tool must exist in the dump with the same
-  // normalized description, and every shipped parameter must exist there
-  // with the same requiredness, type, enum values, and normalized
-  // description. The dump is the independent evidence source (recorded
-  // live from the server); the shipped module is the derived artifact, so
-  // agreement here is not a tautology. When the package re-audits the
-  // server, refresh the dump first, then re-transcribe, and this guard
-  // validates the refresh.
+  // The shipped contracts claim to be transcribed verbatim, at full schema
+  // scope, from the effort's fresh introspection record (build d3886f06,
+  // 2026-11-09 14:59:59, 120 tools). This guard makes the claim true or
+  // fails the suite, in BOTH directions: every shipped parameter must
+  // exist in the record with the same requiredness, type, enum values,
+  // default, and normalized description, and every parameter the record
+  // holds for a covered tool must exist in the shipped contract. The
+  // record is the independent evidence source (captured live from the
+  // server through the package's own access path, with the raw payload and
+  // its round-trip verification beside it in the same .work directory);
+  // the shipped module is the derived artifact, so agreement here is not a
+  // tautology. When the package re-audits the server, capture a fresh
+  // record first (the ticket's .work capture script), then re-transcribe,
+  // and this guard validates the refresh. Full scope is the operator's
+  // ruling: a cosmetic warning must mean the server actually changed since
+  // the audit, which only holds when the shipped contract carries every
+  // server-side parameter, not just the slice the wrapper sends.
   const { readFileSync } = await import("node:fs");
   const { join } = await import("node:path");
   const repoRoot = join(import.meta.dirname, "..");
@@ -397,21 +404,28 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
     "docs",
     "tasks",
     "audit-update-aura-instructions",
-    "tasks",
-    "mcp-inventory-drift",
+    "tickets",
+    "contract-refresh-d3886f06",
     ".work",
-    "introspection-dump.md",
+    "introspection-dump-d3886f06.md",
   );
-  const dump = readFileSync(dumpPath, "utf8");
+  const dump = readFileSync(dumpPath, "utf-8");
 
-  // Parse the dump: per-tool sections headed by
+  // Parse the record: per-tool sections headed by
   // `### mcp__aura_mcp_dev__<tool>`, each carrying a description block and
-  // one fenced ```ts codemode declaration with the parameter list.
-  interface DumpTool {
-    descriptionBlock: string;
-    params: Map<string, { required: boolean; type: string; enum?: string[]; description: string }>;
+  // one fenced ```ts codemode declaration with the parameter list. Marker
+  // lines (@integer/@minimum/.../@default) carry the schema facets; only
+  // @default is part of the compared surface, and it may share its line
+  // with the other facets.
+  interface DumpParam {
+    required: boolean;
+    type: string;
+    enum?: string[];
+    description: string;
+    default?: unknown;
+    hasDefault: boolean;
   }
-  const dumpTools = new Map<string, DumpTool>();
+  const dumpTools = new Map<string, { descriptionBlock: string; params: Map<string, DumpParam> }>();
   const sectionRe = /^### mcp__aura_mcp_dev__(\w+)\s*$/gm;
   let match: RegExpExecArray | null;
   const sectionStarts: Array<{ name: string; start: number; end: number }> = [];
@@ -425,34 +439,48 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
   for (const section of sectionStarts) {
     const body = dump.slice(section.start, section.end);
     const fenceStart = body.indexOf("```ts");
-    // The description block sits between the heading line and the codemode
-    // declaration preamble.
     const headingEnd = body.indexOf("\n");
     const blockEnd = body.indexOf("codemode tool declaration:");
-    const descriptionBlock = normalize(
-      body.slice(headingEnd + 1, blockEnd === -1 ? fenceStart : blockEnd),
-    );
-    const params = new Map<string, { required: boolean; type: string; enum?: string[]; description: string }>();
+    const descriptionBlock = normalize(body.slice(headingEnd + 1, blockEnd === -1 ? fenceStart : blockEnd));
+    const params = new Map<string, DumpParam>();
     if (fenceStart !== -1) {
       const argsStart = body.indexOf("args: {", fenceStart);
       const argsEnd = body.indexOf("}): Promise<", argsStart);
-      const argsBody = body.slice(argsStart, argsEnd);
+      // Slice past the "args: {" opener so the empty-schema index signature
+      // ("[key: string]: unknown;") parses as no parameter.
+      const argsBody = body.slice(argsStart + "args: {".length, argsEnd);
       let pendingDescription = "";
+      let pendingDefault: unknown;
+      let hasPendingDefault = false;
       for (const rawLine of argsBody.split("\n")) {
         const line = rawLine.trim();
         if (line.startsWith("//")) {
           const text = line.replace(/^\/\/+/, "").trim();
-          // Schema metadata markers (@minLength, @default, ...) are not
-          // part of the human-readable description.
-          if (!/^@\w+/.test(text)) {
-            pendingDescription = normalize((pendingDescription + " " + text).trim());
+          if (/^@[a-zA-Z]/.test(text)) {
+            const defaultMatch = /@default\s+("[^"]*"|\[[^\]]*\]|[^\s@]+)/.exec(text);
+            if (defaultMatch) {
+              const literal = defaultMatch[1];
+              pendingDefault = literal.startsWith('"') || literal.startsWith("[")
+                ? JSON.parse(literal)
+                : literal === "true"
+                  ? true
+                  : literal === "false"
+                    ? false
+                    : literal === "null"
+                      ? null
+                      : Number(literal);
+              hasPendingDefault = true;
+            }
+            continue;
           }
+          pendingDescription = normalize((pendingDescription + " " + text).trim());
           continue;
         }
+        // The index signature line ("[key: string]: unknown;") starts with
+        // a bracket and cannot match the declaration regex.
         const paramMatch = /^([A-Za-z_]\w*)(\?)?:\s*(.+?);\s*$/.exec(line);
         if (paramMatch) {
           const [, name, optional, typeText] = paramMatch;
-          if (name === "key") continue; // index signatures carry no contract
           const enumMatch = /^"([^"]*)"(?:\s*\|\s*"([^"]*)")*$/.exec(typeText);
           const enumValues = enumMatch ? (typeText.match(/"([^"]*)"/g) ?? []).map((v) => v.slice(1, -1)) : undefined;
           const baseType = typeText.includes("number") ? "number" : typeText.includes("boolean") ? "boolean" : "string";
@@ -461,47 +489,73 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
             type: baseType,
             ...(enumValues !== undefined ? { enum: enumValues } : {}),
             description: pendingDescription,
+            ...(hasPendingDefault ? { default: pendingDefault } : {}),
+            hasDefault: hasPendingDefault,
           });
           pendingDescription = "";
+          pendingDefault = undefined;
+          hasPendingDefault = false;
         }
       }
     }
     dumpTools.set(section.name, { descriptionBlock, params });
   }
 
-  // All ten shipped tools must be present in the dump.
+  // The record must hold the full audited surface: 120 tools.
+  assert.equal(dumpTools.size, 120, "the fresh introspection record must hold the full 120-tool surface");
+
+  // Full-scope cross-check, both directions.
   for (const shipped of SHIPPED_AURA_MCP_TOOLS) {
     const dumped = dumpTools.get(shipped.name);
-    assert.ok(dumped, `tool ${shipped.name} must exist in the introspection dump`);
+    assert.ok(dumped, `tool ${shipped.name} must exist in the fresh introspection record`);
     assert.equal(
       normalize(shipped.description),
       dumped.descriptionBlock,
-      `tool ${shipped.name}: shipped description must be the dump's verbatim block (whitespace-normalized)`,
+      `tool ${shipped.name}: shipped description must be the record's verbatim block (whitespace-normalized)`,
     );
+    // Direction one: every shipped parameter must exist in the record with
+    // the same requiredness, type, enum values, default, and description.
     for (const [paramName, shippedParam] of Object.entries(shipped.params)) {
       const dumpedParam = dumped.params.get(paramName);
-      assert.ok(dumpedParam, `tool ${shipped.name}: shipped parameter "${paramName}" must exist in the dump`);
-      assert.equal(
-        shippedParam.required,
-        dumpedParam.required,
-        `tool ${shipped.name}.${paramName}: requiredness must match the dump`,
-      );
-      assert.equal(shippedParam.type, dumpedParam.type, `tool ${shipped.name}.${paramName}: type must match the dump`);
+      assert.ok(dumpedParam, `tool ${shipped.name}: shipped parameter "${paramName}" must exist in the record`);
+      assert.equal(shippedParam.required, dumpedParam.required, `tool ${shipped.name}.${paramName}: requiredness must match the record`);
+      assert.equal(shippedParam.type, dumpedParam.type, `tool ${shipped.name}.${paramName}: type must match the record`);
       if (shippedParam.enum !== undefined) {
         assert.deepEqual(
           [...shippedParam.enum].sort(),
           [...(dumpedParam.enum ?? [])].sort(),
-          `tool ${shipped.name}.${paramName}: enum values must match the dump`,
+          `tool ${shipped.name}.${paramName}: enum values must match the record`,
         );
       }
       assert.equal(
         normalize(shippedParam.description),
         dumpedParam.description,
-        `tool ${shipped.name}.${paramName}: description must match the dump`,
+        `tool ${shipped.name}.${paramName}: description must match the record`,
       );
+      assert.equal(
+        shippedParam.default !== undefined,
+        dumpedParam.hasDefault,
+        `tool ${shipped.name}.${paramName}: default presence must match the record`,
+      );
+      if (dumpedParam.hasDefault && shippedParam.default !== undefined) {
+        assert.equal(
+          JSON.stringify(shippedParam.default),
+          JSON.stringify(dumpedParam.default),
+          `tool ${shipped.name}.${paramName}: default value must match the record`,
+        );
+      }
     }
+    // Direction two (full scope): the shipped contract must record the
+    // complete server schema, so every parameter the record holds for the
+    // tool must be shipped, not just the slice the wrapper sends.
+    const missing = [...dumped.params.keys()].filter((paramName) => shipped.params[paramName] === undefined);
+    assert.deepEqual(
+      missing,
+      [],
+      `tool ${shipped.name}: shipped contract must record the complete server schema; missing from the shipped data: ${missing.join(", ")}`,
+    );
   }
-  console.log(`provenance guard: ${SHIPPED_AURA_MCP_TOOLS.length} shipped tools verified against the dump: ok`);
+  console.log(`provenance guard: ${SHIPPED_AURA_MCP_TOOLS.length} shipped tools verified full-scope against the fresh record: ok`);
 }
 
 console.log("\nall aura-mcp-contract tests passed");
