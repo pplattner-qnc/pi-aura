@@ -56,11 +56,12 @@ function liveTool(
   };
 }
 
-/** The shipped contract for `listTasks` reduced to the params the wrapper
- *  sends, used as the known-good fixture for the comparison tests. The
- *  expected values here are hand-copied from the introspection dump, NOT
+/** The shipped contract for `listTasks` at full schema scope (all twenty
+ *  parameters the server reports, not just the six the wrapper sends),
+ *  used as the known-good fixture for the comparison tests. The expected
+ *  values here are hand-copied from the fresh introspection record, NOT
  *  re-derived from the shipped module (the provenance guard at the bottom
- *  cross-checks the shipped data against the dump independently). */
+ *  cross-checks the shipped data against the record independently). */
 const SHIPPED_LIST_TASKS: ShippedToolContract = {
   name: "listTasks",
   description:
@@ -68,7 +69,6 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
     "There is no default status filter; archived tasks are hidden unless archived=all or archived=true. " +
     "related_task_id is member-scoped only and then applies status_slug, status_type, type, archived, and deadline.",
   params: {
-    q: { type: "string", required: false, description: "Search query (full-text filter across relevant fields)" },
     archived: {
       type: "string",
       required: false,
@@ -76,8 +76,59 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
         "Archived visibility (orthogonal to status): false (default) hides archived, true only archived, all both",
       enum: ["false", "true", "all"],
     },
+    deadline: {
+      type: "string",
+      required: false,
+      description:
+        'Keep tasks by their stored urgent deadline: "overdue" (before today), "soon" (today through two workdays), or an integer N in calendar days (deadline on or before today+N; negative N means at least that many days overdue). Always excludes archived and terminal tasks. Omit to keep every deadline.',
+    },
+    level: {
+      type: "string",
+      required: false,
+      description:
+        "Filter by hierarchy level (SAGA, EPIC, STORY, SUBTASK). The literal none keeps only tasks with no level assigned.",
+      enum: ["SAGA", "EPIC", "STORY", "SUBTASK", "none"],
+    },
     limit: { type: "number", required: false, description: "Number of items per page", default: 20 },
     page: { type: "number", required: false, description: "Page number (1-based)", default: 1 },
+    parent_eligible: {
+      type: "string",
+      required: false,
+      description:
+        "When true, return only tasks that can act as a parent (have a level assigned and are not SUBTASK). Useful for parent-picker search in the create form.",
+      enum: ["true", "false"],
+    },
+    parent_eligible_for_level: {
+      type: "string",
+      required: false,
+      description:
+        "Level-dependent successor of parent_eligible (AURA-1226): keep only tasks whose level may act as parent for a task at this target level — SUBTASK yields STORY only, STORY yields EPIC/SAGA, EPIC yields SAGA only, SAGA yields no candidates at all. Takes precedence over parent_eligible when both are given. Used by the guided level-change dialog's candidate list.",
+      enum: ["SAGA", "EPIC", "STORY", "SUBTASK"],
+    },
+    parent_task_id: {
+      type: "string",
+      required: false,
+      description: "Return only direct children of the task with this UUID (member-scoped, other filters apply)",
+    },
+    q: { type: "string", required: false, description: "Search query (full-text filter across relevant fields)" },
+    related_task_id: {
+      type: "string",
+      required: false,
+      description: "Return tasks that are 1-hop neighbours of the task with this UUID (member-scoped)",
+    },
+    relation_type: {
+      type: "string",
+      required: false,
+      description: "Restrict the related_task_id query to a specific relation type",
+      enum: ["RELATES_TO", "PART_OF", "BLOCKS", "DUPLICATES"],
+    },
+    role: {
+      type: "string",
+      required: false,
+      description:
+        "A TaskRole enum value — returns only tasks where the current user is a member with this role. Takes precedence over view when both are set.",
+      enum: ["OWNER", "CONTRIBUTOR", "STAKEHOLDER"],
+    },
     sort_by: {
       type: "string",
       required: false,
@@ -86,8 +137,68 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
       default: "updated_at",
     },
     sort_dir: { type: "string", required: false, description: "Sort direction", enum: ["asc", "desc"], default: "desc" },
+    status_slug: {
+      type: "string",
+      required: false,
+      description: 'Comma-separated TaskStatus values to filter by (e.g. "OPEN,IN_DEVELOPMENT")',
+    },
+    status_type: {
+      type: "string",
+      required: false,
+      description:
+        'Filter by status activity class, not by progress. Comma-separated; values: OPEN, WAITING, ACTIVE, TERMINAL. Note that OPEN is the single status OPEN (nobody has picked the task up yet) — it is not a synonym for "not finished"; for everything that is not finished, pass OPEN,WAITING,ACTIVE. A progress-based cut ("not deployed yet") cannot be expressed here, because the four classes cut across the status series — use status_slug with an explicit list of statuses for that. There is no value named "open": if a user asks for "the open tasks", ask which of the two readings they mean instead of guessing.',
+    },
+    tag_match: {
+      type: "string",
+      required: false,
+      description: "Whether all (AND) or any (OR) of the given tag slugs must match (default all)",
+      enum: ["all", "any"],
+      default: "all",
+    },
+    tags: {
+      type: "string",
+      required: false,
+      description: "Comma-separated tag slugs to filter by",
+    },
+    type: {
+      type: "string",
+      required: false,
+      description: "Comma-separated task types (FEATURE, BUG, IDEA, CHORE, DISCOVERY). Multiple values are OR.",
+    },
+    view: {
+      type: "string",
+      required: false,
+      description:
+        "Tab filter: all member tasks (default), tasks where the user has no role (no_role), or tasks created by the current user (mine)",
+      enum: ["all", "no_role", "mine"],
+      default: "all",
+    },
   },
 };
+
+/** The full live shape the server would report for the fixture (integer
+ *  types on the wire, the title/description split, every parameter).
+ *  Built by the same transformation the client tests use, so the
+ *  comparison tests exercise the full-schema contract the way the
+ *  fake-caller tests do. */
+function fullListTasksLive(): ReturnType<typeof liveTool> {
+  const lines = SHIPPED_LIST_TASKS.description.split("\n");
+  const properties: Record<string, unknown> = {};
+  for (const [name, param] of Object.entries(SHIPPED_LIST_TASKS.params)) {
+    properties[name] = {
+      type: param.type === "number" ? "integer" : param.type,
+      description: param.description,
+      ...(param.enum !== undefined ? { enum: [...param.enum] } : {}),
+      ...(param.default !== undefined ? { default: param.default } : {}),
+    };
+  }
+  return {
+    name: "listTasks",
+    title: lines[0],
+    description: lines.slice(1).join("\n").replace(/^\n+/, ""),
+    inputSchema: { type: "object", properties },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // The ten shipped tools
@@ -120,17 +231,12 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
 // ---------------------------------------------------------------------------
 
 {
-  const live = liveTool("listTasks", {
-    q: { type: "string", description: "Search query (full-text filter across relevant fields)" },
-    archived: { type: "string", enum: ["false", "true", "all"], description: SHIPPED_LIST_TASKS.params.archived.description },
-    limit: { type: "integer", description: "Number of items per page", default: 20 },
-    page: { type: "integer", description: "Page number (1-based)", default: 1 },
-    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], description: "Field to sort by", default: "updated_at" },
-    sort_dir: { type: "string", enum: ["asc", "desc"], description: "Sort direction", default: "desc" },
-  }, { description: SHIPPED_LIST_TASKS.description });
-  const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
+  // The full live shape (all twenty parameters, integer types on the wire,
+  // the title/description split) matches the full-schema contract exactly.
+  const verdict = compareShippedTool(SHIPPED_LIST_TASKS, fullListTasksLive());
   assert.equal(verdict.verdict, "ok", `expected no drift, got: ${JSON.stringify(verdict)}`);
-  console.log("compareShippedTool no-drift: ok");
+  assert.equal(verdict.issues.length, 0, "a clean comparison reports no issues");
+  console.log("compareShippedTool no-drift (full schema): ok");
 }
 
 // ---------------------------------------------------------------------------
@@ -138,20 +244,18 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
 // ---------------------------------------------------------------------------
 
 {
-  // A new optional parameter on the live server is cosmetic.
-  const live = liveTool("listTasks", {
-    q: { type: "string" },
-    archived: { type: "string", enum: ["false", "true", "all"] },
-    limit: { type: "integer", default: 20 },
-    page: { type: "integer", default: 1 },
-    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
-    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
-    status_type: { type: "string", description: "brand new optional filter" },
-  });
+  // A new optional parameter on the live server is cosmetic. The name must
+  // be one the full-schema contract does not carry (status_type and
+  // friends are shipped since the full-scope refresh).
+  const live = fullListTasksLive();
+  (live.inputSchema as { properties: Record<string, unknown> }).properties.brand_new_filter = {
+    type: "string",
+    description: "brand new optional filter",
+  };
   const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
   assert.equal(verdict.verdict, "cosmetic", `expected cosmetic, got: ${JSON.stringify(verdict)}`);
   assert.ok(
-    verdict.issues.join("; ").includes("status_type"),
+    verdict.issues.join("; ").includes("brand_new_filter"),
     "the cosmetic warning names the new parameter",
   );
   console.log("compareShippedTool new optional parameter: ok");
@@ -159,14 +263,8 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
 
 {
   // A changed tool description is cosmetic.
-  const live = liveTool("listTasks", {
-    q: { type: "string" },
-    archived: { type: "string", enum: ["false", "true", "all"] },
-    limit: { type: "integer", default: 20 },
-    page: { type: "integer", default: 1 },
-    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
-    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
-  }, { description: "Returns paginated tasks the caller can see, but the wording moved on" });
+  const live = fullListTasksLive();
+  live.description = "Returns paginated tasks the caller can see, but the wording moved on";
   const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
   assert.equal(verdict.verdict, "cosmetic");
   assert.ok(
@@ -178,14 +276,12 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
 
 {
   // A changed default on a shipped parameter is cosmetic.
-  const live = liveTool("listTasks", {
-    q: { type: "string" },
-    archived: { type: "string", enum: ["false", "true", "all"] },
-    limit: { type: "integer", default: 50 },
-    page: { type: "integer", default: 1 },
-    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
-    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
-  });
+  const live = fullListTasksLive();
+  (live.inputSchema as { properties: Record<string, unknown> }).properties.limit = {
+    type: "integer",
+    description: SHIPPED_LIST_TASKS.params.limit.description,
+    default: 50,
+  };
   const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
   assert.equal(verdict.verdict, "cosmetic");
   assert.ok(
@@ -201,14 +297,11 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
 
 {
   // A parameter the wrapper sends that the live schema no longer has is
-  // core drift (renamed or removed).
-  const live = liveTool("listTasks", {
-    archived: { type: "string", enum: ["false", "true", "all"], description: SHIPPED_LIST_TASKS.params.archived.description },
-    limit: { type: "integer", default: 20 },
-    page: { type: "integer", default: 1 },
-    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
-    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
-  });
+  // core drift (renamed or removed), even though the full-schema contract
+  // carries seventeen parameters the live shape still reports.
+  const live = fullListTasksLive();
+  const schema = live.inputSchema as { properties: Record<string, unknown> };
+  delete schema.properties.q;
   const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
   assert.equal(verdict.verdict, "core");
   assert.ok(
@@ -220,14 +313,8 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
 
 {
   // A retyped parameter (string -> number) is core drift.
-  const live = liveTool("listTasks", {
-    q: { type: "number" },
-    archived: { type: "string", enum: ["false", "true", "all"], description: SHIPPED_LIST_TASKS.params.archived.description },
-    limit: { type: "integer", default: 20 },
-    page: { type: "integer", default: 1 },
-    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
-    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
-  });
+  const live = fullListTasksLive();
+  (live.inputSchema as { properties: Record<string, unknown> }).properties.q = { type: "number" };
   const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
   assert.equal(verdict.verdict, "core");
   assert.ok(verdict.issues.join("; ").includes('"q"') && verdict.issues.join("; ").includes("retyped"));
@@ -236,14 +323,12 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
 
 {
   // An enum that drops values the wrapper sends is core drift (retyped).
-  const live = liveTool("listTasks", {
-    q: { type: "string" },
-    archived: { type: "string", enum: ["false", "true"], description: SHIPPED_LIST_TASKS.params.archived.description },
-    limit: { type: "integer", default: 20 },
-    page: { type: "integer", default: 1 },
-    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
-    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
-  });
+  const live = fullListTasksLive();
+  (live.inputSchema as { properties: Record<string, unknown> }).properties.archived = {
+    type: "string",
+    enum: ["false", "true"],
+    description: SHIPPED_LIST_TASKS.params.archived.description,
+  };
   const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
   assert.equal(verdict.verdict, "core");
   assert.ok(
@@ -255,14 +340,8 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
 
 {
   // A shipped-optional parameter that becomes required is core drift.
-  const live = liveTool("listTasks", {
-    q: { type: "string" },
-    archived: { type: "string", enum: ["false", "true", "all"], description: SHIPPED_LIST_TASKS.params.archived.description },
-    limit: { type: "integer", default: 20 },
-    page: { type: "integer", default: 1 },
-    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
-    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
-  }, { required: ["q"] });
+  const live = fullListTasksLive();
+  (live.inputSchema as { required?: string[] }).required = ["q"];
   const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
   assert.equal(verdict.verdict, "core");
   assert.ok(verdict.issues.join("; ").includes('"q"') && verdict.issues.join("; ").includes("newly required"));
@@ -272,15 +351,10 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
 {
   // A brand-new required parameter the wrapper does not send is core drift
   // (every call would fail validation).
-  const live = liveTool("listTasks", {
-    q: { type: "string" },
-    archived: { type: "string", enum: ["false", "true", "all"], description: SHIPPED_LIST_TASKS.params.archived.description },
-    limit: { type: "integer", default: 20 },
-    page: { type: "integer", default: 1 },
-    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
-    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
-    project_slug: { type: "string", description: "new mandatory scope" },
-  }, { required: ["project_slug"] });
+  const live = fullListTasksLive();
+  const schema = live.inputSchema as { properties: Record<string, unknown>; required?: string[] };
+  schema.properties.project_slug = { type: "string", description: "new mandatory scope" };
+  schema.required = ["project_slug"];
   const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
   assert.equal(verdict.verdict, "core");
   assert.ok(
@@ -294,14 +368,12 @@ const SHIPPED_LIST_TASKS: ShippedToolContract = {
   // The enum-lenient comparison: a shipped string param whose live schema
   // widened to more values is not drift at all (a pure relaxation; the
   // wrapper's sends stay valid and neither enumerated drift class fires).
-  const live = liveTool("listTasks", {
-    q: { type: "string" },
-    archived: { type: "string", enum: ["false", "true", "all", "only-mine"], description: SHIPPED_LIST_TASKS.params.archived.description },
-    limit: { type: "integer", default: 20 },
-    page: { type: "integer", default: 1 },
-    sort_by: { type: "string", enum: ["created_at", "updated_at", "title", "urgent_deadline"], default: "updated_at" },
-    sort_dir: { type: "string", enum: ["asc", "desc"], default: "desc" },
-  });
+  const live = fullListTasksLive();
+  (live.inputSchema as { properties: Record<string, unknown> }).properties.archived = {
+    type: "string",
+    enum: ["false", "true", "all", "only-mine"],
+    description: SHIPPED_LIST_TASKS.params.archived.description,
+  };
   const verdict = compareShippedTool(SHIPPED_LIST_TASKS, live);
   assert.equal(verdict.verdict, "ok", `enum widening must not read as drift, got: ${JSON.stringify(verdict)}`);
   console.log("compareShippedTool widened enum is not drift: ok");
