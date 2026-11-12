@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Refresh the shipped contracts to the full live schemas and the new build identity
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by: []
 size: m
 ---
@@ -31,3 +31,9 @@ The drift-detection loop's first real cycle: the live Aura server moved to build
 ## Blocked by
 
 None (can start immediately).
+
+## Implementation notes
+
+Landed as merge 32fd802 on task/contract-refresh-d3886f06 (6 files, 530 insertions, 195 deletions): the shipped contracts re-transcribed at full schema scope for all ten covered tools (listTasks six to twenty parameters, listArtifacts five to seven, the rest already complete), the provenance guard made both-directional with default comparison against the fresh record, the comparison fixtures and fake-caller tests extended (a simulated added optional parameter still warns; removed, retyped, narrowed-enum, and newly-required parameters still fail fast), and the build identity anchor moved to d3886f06 with the old identity pinned absent from the shipped surfaces. The gate: 172/172 shared tests across 48 suites, ten extension suites, typecheck clean; the live self-check probe re-run clean against the current server (status ok, zero warnings), so the drift signal is real again: a cosmetic warning now means the server moved since 2026-11-09.
+
+Durable facts: the surface diff between the audited 4aa37833 and d3886f06 is identity-only (120 tools both sides, no per-tool parameter, description, enum, or default movement; only the instructions string's build line), so no taught claim beyond the identity needed to move; four untyped code-tool parameter defaults are recorded as not decidable from the records alone (the old record's single-line rendering cannot carry marker lines; both records agree on the compared surface). The fresh provenance record and its capture and diff scripts live in the ticket's gitignored .work directory (one listTools call plus initialize-time data, round-trip self-verified); the provenance guard points there and hard-fails on a clone without it, the inherited design condition. The old 4aa37833 dump stays at the mcp-inventory task's .work as that build's evidence. The em-dash exemption for the verbatim contract data block is re-affirmed at full-schema scope, documented in the module comment and asserted by the em-dash guard's data-block boundaries.
