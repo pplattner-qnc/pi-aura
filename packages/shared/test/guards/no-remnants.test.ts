@@ -761,6 +761,22 @@ describe("no-remnants guard: REST library removal", () => {
       `no js-yaml dependency or reference should remain (its sole consumer was deleted with the REST library), found: ${offenders.join(", ") || "none"}`,
     );
   });
+  // finalize-cleanup: the shared package's root module kept its original
+  // placeholder comment, which names the retired AuraClient as a future
+  // resident. The root module must describe the shipped surface instead of
+  // promising removed ones.
+  it("carries no removed-surface name in the shared package's root module", () => {
+    const indexLines = readSharedSourceLines(path.join("src", "index.ts"));
+    const offenders = indexLines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => /AuraClient|placeholder/i.test(line))
+      .map(({ index, line }) => `src/index.ts:${index + 1}: ${line.trim()}`);
+    assert.deepEqual(
+      offenders,
+      [],
+      "src/index.ts should describe the shipped surface, not name the removed REST client or stay a placeholder",
+    );
+  });
 });
 
 // no-remnants-guard-and-archive: the dead digest effort is archived and
