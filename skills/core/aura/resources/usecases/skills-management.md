@@ -8,7 +8,7 @@
 > integrated. Use Aura skills only if you specifically need Aura's own
 > skill-sharing workflow.
 
-Aura has its own skill system — reusable skill documents with assets, plugins,
+Aura has its own skill system: reusable skill documents with assets, plugins,
 and an import/export pipeline. These are distinct from local agent skills.
 
 ## Finding skills
@@ -16,36 +16,36 @@ and an import/export pipeline. These are distinct from local agent skills.
 | Goal | Tool |
 |---|---|
 | Search skills | `unifiedSearch` with `source_types: ["SKILL"]` |
-| List skills | `listSkills` (paginated) |
-| Get skill detail | `getSkill` |
+| List skills | `listSkills` (paginated; own PERSONAL + all PUBLIC; `q`, `visibility`, and `plugin_id` filters) |
+| Get skill detail | `getSkill` (compact default; `response_format: "detail"` for the working view) |
 
 ## Creating and editing skills
 
 ```
-createSkill({ title: "My Skill", ... })
-saveSkillBody({ uuid: "<skill-uuid>", body: "..." })
-updateSkill({ uuid: "<skill-uuid>", title: "...", frontmatter: {...} })
+createSkill({ title: "My Skill", slug: "my-skill" })
+saveSkillBody({ id: "<skill-uuid>", body: "..." })
+updateSkill({ id: "<skill-uuid>", title: "...", frontmatter: {...} })
 ```
+
+`createSkill` requires `slug` alongside `title` (URL-safe, lowercase
+alphanumeric with hyphens) and places the skill in the canonical Skills
+space with visibility defaulting to PERSONAL; `frontmatter` and
+`parent_id` (nest under an existing FOLDER node) are optional.
 
 ## Publishing
 
 ```
-setSkillVisibility({ uuid: "<skill-uuid>", ... })
+setSkillVisibility({ id: "<skill-uuid>", visibility: "PUBLIC" })
 ```
 
-Publish or retract a skill (owner only).
+Publish or retract a skill (owner only); `visibility` is required and is
+`PERSONAL` | `PUBLIC`.
 
-## Assets, plugins, and import pipeline (REST-ONLY)
+## Assets, plugins, and import pipeline
 
-The following skill-administration capabilities are not available via MCP —
-use REST or the Aura UI:
+The following skill-administration capabilities are not available via MCP;
+use the Aura UI:
 
-- **Skill assets** — `listSkillAssets` (REST-ONLY): `GET /skills/{uuid}/assets`
-- **Skill assets** — `uploadSkillAsset` (REST-ONLY): `POST /skills/{uuid}/assets`
-- **Skill plugins** — `listSkillPlugins` (REST-ONLY): `GET /skills/plugins`
-- **Import pipeline** — `validateSkillImport` (REST-ONLY): `POST /skills/import/validate`
-- **Import pipeline** — `confirmSkillImport` (REST-ONLY): `POST /skills/import/confirm`
-- **Import pipeline** — `getSkillImportRun` (REST-ONLY): `GET /skills/import/runs/{uuid}`
-- **Import pipeline** — `getActiveSkillImportRun` (REST-ONLY): `GET /skills/import/runs/active`
-
-See `openapi-new.yaml` for the full REST endpoint details.
+- **Skill assets**: list and upload a skill's asset files
+- **Skill plugins**: manage a skill's plugins
+- **Import pipeline**: validate, confirm, and track skill imports

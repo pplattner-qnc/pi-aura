@@ -5,18 +5,12 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "codegen": "openapi-ts -f openapi-ts.config.ts",
     "test": "tsx --test 'test/**/*.test.ts'"
   },
   "dependencies": {
-    "dbus-next": "^0.10.2",
-    "js-yaml": "^4.1.0",
-    "@huggingface/transformers": "^3.0.0",
-    "onnxruntime-node": "^1.20.0"
+    "dbus-next": "^0.10.2"
   },
   "devDependencies": {
-    "@hey-api/openapi-ts": "0.99.0",
-    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.0",
     "tsx": "^4.23.0",
     "typescript": "^5.7.0"
@@ -24,16 +18,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./keyring": "./src/keyring/index.ts",
-    "./aura-client": "./src/aura-client.ts",
-    "./digest/scheduler": "./src/digest/scheduler.ts",
-    "./digest/build-actions": "./src/digest/build-actions.ts",
-    "./digest/types": "./src/digest/types.ts",
-    "./digest/settings": "./src/digest/settings.ts",
-    "./digest/aura-digest": "./src/digest/aura-digest.ts",
-    "./digest/devlinks": "./src/digest/devlinks.ts",
-    "./digest/clients": "./src/digest/clients.ts",
-    "./digest/mcp-client": "./src/digest/mcp-client.ts",
-    "./digest/bitbucket": "./src/digest/bitbucket.ts",
     "./*": "./src/*.ts"
   }
 }

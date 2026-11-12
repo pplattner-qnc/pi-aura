@@ -118,41 +118,27 @@ export async function discoverPat(sources: DiscoverySource[]): Promise<Discovere
 
 const AURA_PAT_KEY: SecretKey = { service: "aura", name: "pat" };
 
-/** Labels shown in the /aura secrets edit chooser. The standalone
- *  "Atlassian email" item is GONE — the email is prompted within the
- *  combined flow for each Atlassian token. The two Atlassian token labels
- *  are distinct so the user can tell them apart. */
+/** Labels shown in the /aura secrets edit chooser. The secrets command
+ *  manages only the Aura PAT, so the chooser lists exactly one item. */
 const SECRET_LABELS = [
   "Aura PAT",
-  "Atlassian Teamwork Graph token",
-  "Atlassian Bitbucket token",
 ] as const;
 
-/** Prefill placeholders for each editable secret. The email placeholder is
- *  keyed by the email secret's label, used by the combined flow. */
+/** Prefill placeholder for the editable secret. */
 const SECRET_PLACEHOLDERS: Record<string, string> = {
   "Aura PAT": "<paste your Aura PAT here>",
-  "Atlassian email": "<paste your Atlassian email here>",
-  "Atlassian Teamwork Graph token": "<paste your Atlassian Teamwork Graph API token here>",
-  "Atlassian Bitbucket token": "<paste your Atlassian Bitbucket API token here>",
 };
 
 /** Map a chooser label to the SecretKey it corresponds to.
  *
  *  Pure single-key lookup, unit-testable without a pi session or keyring.
- *  Maps the two Atlassian token labels to their token keys; Aura PAT is
- *  unchanged. Returns null for cancel (undefined) or an unknown label. */
+ *  The only editable secret is the Aura PAT. Returns null for cancel
+ *  (undefined) or an unknown label. */
 export function pickSecretKey(choice: string | undefined): SecretKey | null {
-  switch (choice) {
-    case "Aura PAT":
-      return { service: "aura", name: "pat" };
-    case "Atlassian Teamwork Graph token":
-      return { service: "atlassian", name: "api_token" };
-    case "Atlassian Bitbucket token":
-      return { service: "atlassian", name: "bitbucket_token" };
-    default:
-      return null;
+  if (choice === "Aura PAT") {
+    return { service: "aura", name: "pat" };
   }
+  return null;
 }
 
 /** Decision produced by `decideEditAction` for the edit handler. */
@@ -188,9 +174,8 @@ export function decideEditAction(
  *  back to the keyring. Guards for cancel/non-TUI mode.
  *
  *  Generalized in slice 3 (aura-secrets-edit-picker) to accept the SecretKey,
- *  label, and placeholder as parameters so the chooser can route any of the
- *  three editable secrets through the same edit flow. `decideEditAction` is
- *  unchanged. */
+ *  label, and placeholder as parameters so the chooser routes the editable
+ *  secret through this same edit flow. `decideEditAction` is unchanged. */
 export async function handleEdit(
   ui: Pick<ExtensionUIContext, "notify" | "editor" | "confirm">,
   keyringFactory: () => Promise<Keyring>,
@@ -232,145 +217,16 @@ export async function handleEdit(
   ui.notify("saved", "info");
 }
 
-/** Combined email+token flow for an Atlassian PAT.
- *
- *  Prompts for the email (prefilled with the current `atlassian/email` if
- *  set), then prompts for the token (prefilled with the current token if
- *  set), storing each via the existing `handleEdit` primitive.
- *
- *  Atomicity contract: a cancel at either prompt aborts the WHOLE PAT
- *  provisioning — no email-without-token or token-without-email is left
- *  behind. Because `handleEdit` writes immediately on save, this function
- *  cannot call `handleEdit` for the email and then check whether the token
- *  was cancelled (the email would already be persisted). Instead it opens
- *  both editors and runs `decideEditAction` (the unchanged pure primitive)
- *  on each, aborting if either is a cancel, and only then writes both
- *  secrets. The confirm-on-empty guard is applied per secret via the same
- *  `decideEditAction` + `ui.confirm` logic `handleEdit` uses. */
-export async function handleAtlassianPatEdit(
-  ui: Pick<ExtensionUIContext, "notify" | "editor" | "confirm">,
-  keyringFactory: () => Promise<Keyring>,
-  tokenKey: SecretKey,
-  label: string,
-  emailPlaceholder: string,
-  tokenPlaceholder: string
-): Promise<void> {
-  const EMAIL_KEY: SecretKey = { service: "atlassian", name: "email" };
-  const EMAIL_LABEL = "Atlassian email";
-
-  const keyring = await keyringFactory();
-  const currentEmail = await keyring.getSecret(EMAIL_KEY);
-  const currentToken = await keyring.getSecret(tokenKey);
-
-  // Step 1: prompt for the email (prefill current value or placeholder).
-  const emailEdited = await ui.editor(EMAIL_LABEL, currentEmail ?? emailPlaceholder);
-  const emailDecision = decideEditAction(currentEmail, emailEdited);
-  if (emailDecision.action === "cancel") {
-    ui.notify("no change", "info");
-    return;
-  }
-
-  // Step 2: prompt for the token (prefill current value or placeholder).
-  const tokenEdited = await ui.editor(label, currentToken ?? tokenPlaceholder);
-  const tokenDecision = decideEditAction(currentToken, tokenEdited);
-  if (tokenDecision.action === "cancel") {
-    ui.notify("no change", "info");
-    return;
-  }
-
-  // Both prompts are non-cancel: resolve the confirm-empty guard for each,
-  // then write both secrets atomically (no half-provisioned PAT).
-  const emailValue = await resolveEmptyGuard(ui, emailDecision, EMAIL_LABEL, "email", currentEmail);
-  if (emailValue === null) {
-    ui.notify("no change", "info");
-    return;
-  }
-
-  const tokenValue = await resolveEmptyGuard(ui, tokenDecision, label, "token", currentToken);
-  if (tokenValue === null) {
-    ui.notify("no change", "info");
-    return;
-  }
-
-  // Write both secrets atomically (no partial write: no email without a
-  // token, no token without an email).
-  await keyring.setSecret(EMAIL_KEY, emailValue);
-  await keyring.setSecret(tokenKey, tokenValue);
-  ui.notify("saved", "info");
-}
-
-/** Resolve the confirm-on-empty guard for a single secret decision.
- *
- *  Returns the value to save, or null if the user declined the empty-value
- *  confirmation (abort). For non-empty decisions the value is returned
- *  directly. This mirrors the confirm-on-empty logic in `handleEdit` so the
- *  combined flow gets the same per-secret guard. */
-async function resolveEmptyGuard(
-  ui: Pick<ExtensionUIContext, "confirm">,
-  decision: EditDecision,
-  label: string,
-  kind: string,
-  current: string | null
-): Promise<string | null> {
-  if (decision.action === "unchanged") {
-    // Unchanged: re-write the current value (idempotent) so the atomic
-    // write covers both secrets.
-    return current ?? "";
-  }
-  if (decision.action === "confirm-empty") {
-    const confirmed = await ui.confirm(
-      `Save empty ${label}?`,
-      `An empty ${kind} won't authenticate. Save anyway?`
-    );
-    return confirmed ? "" : null;
-  }
-  return decision.value;
-}
-
-/** The default walkthrough-doc path the guided mode reads at run time. */
-export const WALKTHROUGH_DOC_PATH =
-  "docs/atlassian-api-token-walkthrough.md";
-
 /** Chooser → edit orchestrator for `/aura secrets edit`.
  *
- *  Slice 3: first asks a yes/no "guided walkthrough?" prompt.
- *  - **Yes** → the guided mode (runGuidedWalkthrough), which steps through
- *    the walkthrough doc.
- *  - **No** (confirm returns false) → the chooser (slice 2, unchanged).
- *    The prompt is clearly "guided walkthrough?" so false means "just the
- *    chooser".
- *
- *  When the chooser is shown, Aura PAT routes through the existing
- *  `handleEdit` (unchanged). The two Atlassian token labels route through
- *  `handleAtlassianPatEdit` (the combined email+token flow). Cancel (select
- *  returns undefined) exits with "no change" and no keyring write. */
+ *  Shows the chooser (one item: the Aura PAT) and routes the selection
+ *  through the generalized `handleEdit` flow. Cancel (select returns
+ *  undefined or an unknown label) exits with "no change" and no keyring
+ *  write. */
 export async function handleSecretEdit(
   ui: Pick<ExtensionUIContext, "notify" | "editor" | "confirm" | "select">,
   keyringFactory: () => Promise<Keyring>
 ): Promise<void> {
-  // Slice 3: yes/no "guided walkthrough?" prompt BEFORE the chooser.
-  const guided = await ui.confirm(
-    "Guided walkthrough?",
-    "Yes to step through creating both Atlassian tokens from the walkthrough doc. No to pick a single secret to edit."
-  );
-  if (guided) {
-    const { runGuidedWalkthrough } = await import("./atlassian-provision.ts");
-    const { loadSettings } = await import("../scripts/src/settings.ts");
-    const settings = loadSettings();
-    const digest = settings.digest;
-    await runGuidedWalkthrough(
-      ui,
-      keyringFactory,
-      WALKTHROUGH_DOC_PATH,
-      {
-        jiraCloudId: digest?.jiraCloudId ?? "",
-        bitbucketWorkspace: digest?.bitbucket?.workspace ?? "",
-      }
-    );
-    return;
-  }
-
-  // No → the chooser (slice 2, unchanged).
   const choice = await ui.select("Edit which secret?", [...SECRET_LABELS]);
   const key = pickSecretKey(choice);
   if (key === null) {
@@ -379,20 +235,10 @@ export async function handleSecretEdit(
   }
 
   const label = choice!;
-
-  // Aura PAT is a single-secret edit — route through the unchanged handleEdit.
-  if (label === "Aura PAT") {
-    const keyring = await keyringFactory();
-    const current = await keyring.getSecret(key);
-    const placeholder = SECRET_PLACEHOLDERS[label];
-    await handleEdit(ui, () => Promise.resolve(keyring), current, key, label, placeholder);
-    return;
-  }
-
-  // The two Atlassian token labels route through the combined email+token flow.
-  const tokenPlaceholder = SECRET_PLACEHOLDERS[label];
-  const emailPlaceholder = SECRET_PLACEHOLDERS["Atlassian email"];
-  await handleAtlassianPatEdit(ui, keyringFactory, key, label, emailPlaceholder, tokenPlaceholder);
+  const keyring = await keyringFactory();
+  const current = await keyring.getSecret(key);
+  const placeholder = SECRET_PLACEHOLDERS[label];
+  await handleEdit(ui, () => Promise.resolve(keyring), current, key, label, placeholder);
 }
 
 /** Thin UI wrapper around `discoverPat`.
@@ -483,11 +329,12 @@ export default function auraSecretsExtension(pi: ExtensionAPI) {
       const parsed = parseAuraArgs(args);
       switch (parsed.command) {
         case "secrets-discover": {
-          // rule: dynamic-import-createKeyring — @pi-aura/shared/keyring uses
-          // .js extension specifiers internally, which Node's experimental
-          // strip-types loader cannot resolve. Pi's extension runtime handles
-          // static imports, so we dynamic-import createKeyring here to keep
-          // the unit-test entry point runnable with `node --experimental-strip-types`.
+          // rule: dynamic-import-createKeyring: the @pi-aura/shared/keyring
+          // module uses .js extension specifiers internally, which Node's
+          // experimental strip-types loader cannot resolve. Pi's extension
+          // runtime handles static imports, so we dynamic-import createKeyring
+          // here to keep the unit-test entry point runnable with
+          // `node --experimental-strip-types`.
           const { createKeyring } = await import("@pi-aura/shared/keyring");
           await handleDiscover(ctx.ui, createKeyring);
           return;

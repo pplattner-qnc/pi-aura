@@ -4,6 +4,27 @@ title: Task Changelog
 ---
 # Task Changelog
 
+## 2026-10-30: Remove the digest functionality entirely (remove-digest)
+
+All 7 tickets landed: the digest dashboard extension (package, registration,
+gitignore exceptions, its vitest suite), the digest skill and morning agents
+(plus the subagents registration), the shared digest core (nine modules, nine
+subpath exports, unit suites, morning-fetch, the followup test, the MCP SDK
+dependency, the three dev-links e2e families, the digest-era build package
+name), the Atlassian dev-links machinery (provisioning module, both token
+docs, the guided walkthrough and Atlassian flows out of the secrets command,
+now a one-item chooser for the Aura PAT only), the manifest and infra shape
+(digest settings comment, keyring secret-key union shrunk to aura/pat, root
+vitest and test tree gone, 13 devDependencies pruned to the one verified
+survivor, Taskfile comment), the dead refine-phase-transition effort archived,
+and the five root docs refreshed with the stale Atlassian bug report archived.
+108 files changed, +2,153/-43,644. A consolidated 40-test no-remnants guard
+pins the end state; the end-of-effort stage authored the repo's first gated
+test protocol into docs/testing.md. The stacked lineage forked once mid-effort
+and was repaired by a user-approved merge; all gates green (shared 169/169,
+all strip-types suites, typecheck, build, registration smoke). The 0.9.0
+release stays deferred to the audit effort's finalize per the map decision.
+
 ## 2026-10-01: Map complete: Unified in-chat resource references (unified-reference-mentions)
 
 All 6 tickets done: `reference-engine-core` (the registry-driven `aura-references` engine with the task kind end-to-end: `#task:` extraction with deferral, the cache interface, TTL-gated warmup, SWR refresh with server search merge, inline `<task-ref>` expansion, the per-turn instruction block, the dormant alias machinery), `reference-cache-sqlite` (the persistent `node:sqlite` WAL store at `~/.pi/agent/aura-reference-cache.db` behind the same interface, with the cross-session journal-mode race fix), `reference-task-alias` (`@AURA-` as the first engine alias with the once-per-session warning; `aura-tasks.ts` shrunk to the reachability probe), `reference-rule-kind` (the local-only rule kind with body injection matching both raw tokens and expanded elements; the `@rule:` alias; `engineering-rules.ts` slimmed), `reference-artifact-kind` (uuid-token UX with title-labeled rows, metadata-driven expansion attributes), and `reference-wiki-kind` (dual identity `#wiki:<space>/<path>` and `#wiki:<uuid>`, dual-endpoint resolution, the four-tag instruction block). Code: 10 files, +7,624/-950 (engine 2,102 lines, cache store + tests, two legacy extensions shrunk); whole tree +12,072/-1,701. All suites green; the one red (`atlassian-provision.test.ts`) is pre-existing on develop and filed as `docs/bugs/atlassian-provision-test-broken-import.md`. Per the branching mandate, all implementation landed on the integration branch `task/unified-reference-mentions` and reached `develop` in a single merge after the whole map was finalizable. Map archived.
@@ -118,3 +139,62 @@ A scoped Atlassian token covers one app, so pi-aura now stores **two** Atlassian
 
 ## 2026-09-01 — Generic OpenAPI → REST-CLI wrapper in the aura CLI (generic-openapi-cli-wrapper)
 Added a `rest` command group to the `aura` CLI that exposes every Aura REST operation by `operationId`: `rest list` (all 273 ops grouped by tag), `rest describe` (full path/params/body/responses), `rest call` (generic invoker with path-fill, query serialize, JSON body, reusing the existing `resolveAuraCredentials` PAT path), and `rest search` (hybrid retrieval by intent). An OpenAPI loader (`@pi-aura/shared/openapi`) is the single source of truth; a build-time `gen-rest-index` step inlines a compact operation-metadata + BM25 FTS index (with code-side tags) into the committed `aura.mjs` (no sidecar, under a 3 MB asserted budget), and `gen-rest-doc` regenerates `resources/rest-api.md`. The semantic search leg is **always on by default** via a local, CPU-only `Xenova/multilingual-e5-base` (768-dim, EN+DE) model that auto-fetches to `~/.pi/aura/huggingface`; op-vectors (i8, ~1 MB total) inline, model weights cache locally (never bundled); cloud (`aura.embed.*`) is an optional override. Semantic + FTS merge via reciprocal-rank fusion with a model-id guard. Five slices landed via TDD; the motivating case `rest search "commit allocation"` ranks `updateTaskMemberCapacity` #1. 149 shared (tsx) + 80 scripts (node --test) + 210 vitest tests, typecheck + build green. `@huggingface/transformers` + `onnxruntime-node` are new runtime deps (marked external in esbuild, like the keyring native binding).
+
+
+
+
+
+
+
+
+
+
+
+
+## 2026-11-12, Refresh the shipped contracts to the full live schemas and the new build identity (contract-refresh-d3886f06)
+
+The drift-detection loop is real: the live server was re-audited at build d3886f06 (the audited build 4aa37833 had moved; the surface diff is identity-only, 120 tools unchanged, only the build line moved), and the shipped contracts were re-transcribed at full schema scope so the contract self-check's warnings once again mean the server changed since the audit instead of firing against every server. The typed methods keep sending exactly what they sent; the provenance guard is now both-directional with default comparison against the fresh record (which lives in the ticket's gitignored evidence directory with its capture and diff scripts); the fake-caller tests pin the full-scope baseline and keep the drift gate's discriminating power; and the build identity anchor moved to d3886f06 with the old identity pinned absent from the shipped surfaces. The live self-check probe runs clean against the current server: zero warnings. The full gate (172 shared tests, ten extension suites, typecheck) is green on the landed state.
+
+## 2026-11-12, Finalize review cleanup sweep (finalize-cleanup)
+
+The finalize review's cleanup findings are fixed: the retired pre-AURA-2211 flat status series left the task-management usecase file (replaced with the resolution rule and a pointer to the process file) and the guard now bans it across both the usecase and process directories so this class of stale claim cannot survive the enforcement record again; the dead js-yaml dependency pair and the two ML dependencies that only served the embed fixtures are removed and pinned absent; the shared index placeholder names the shipped surface; 27 em-dash lines are reworded across the extension sources and tests and the Taskfile (the contract module's verbatim server strings keep theirs, pinned by the provenance guard with a documented carve-out); the testing doc's seam sentences name the right factories and hooks; the wiki tree-bounds word reads narrow; and the zero-consumer embed fixtures are gone with their guard pin flipped. The shared suite settles at 171 (the embed suites leaving), all ten extension suites pass, typecheck clean.
+
+## 2026-11-10, Root documents current (root-docs-current)
+
+The root documents describe the shipped package again: the README carries an extensions table matching the six-entry manifest, the optional-override MCP configuration note (the package registers the server itself from the keyring, no manual setup required), the released-version install pin, and the companion-plugin assumption for rule-mention body injection; the glossary describes the shipped surfaces with no deleted-module names; the project instructions file matches the settled layout; and the testing and dev-env docs describe the final tree (the 197-test shared suite, the per-file extension convention, the typecheck gate, the runtime-resolved module imports). Nineteen new guard tests pin the corrections so a retired claim reappearing fails the suite. The full gate (197 shared tests, ten extension suites, typecheck) is green on the landed state, and every file, target, and command the docs name exists on disk.
+
+## 2026-11-10, Process resources current (process-resources-current)
+
+The seven process resources teach the live canon again: every canonical reference repoints from the dead archived-article path to the way-of-working 1.x pages (verified live through the package's own typed-interface caller), workflow-phases.md teaches the split status series with the v18 quality gates and the v19 contributor rules plus the discard, reopen, and blocked contracts, review-modes.md teaches opinions as the review successor on the graded scale, and the capacity model is current (the placeholder epic, commitment steps, full landing, daily reset, no structural reserve; the leadership overview is readCapacity's company scope). Thirty-one new guard tests pin the rewrite per file, including an outright ban on the retired capacity vocabulary so even a negating sentence fails the suite. The full gate (178 shared tests, ten extension suites, typecheck) is green on the landed state.
+
+## 2026-11-10, Usecase resources current (usecase-resources-current)
+
+All twelve usecase resources teach the live server again: the capacity file is rewritten around readCapacity's four scopes and the two member-commitment tools with their consent rules (settings and the cross-member view stay UI pointers), the stale uuid parameter names are swept from five files, the wiki file covers the frontmatter and version contracts, task-management gains the ten placed family sections (owner and crew, blocked, story points, the priority queue, progress, activity, user groups, repository linking, the workflow variant, the neighborhood read), and the code-search, unified-search, artifact-management, memory-graph, and feedback files take their grounded corrections. The flagged planning-hub phrasing was verified against a live full-tier payload and kept, scoped to the full tier. Forty new guard tests pin the corrections per file (the parameter names, the em-dash ban, the taught facts), so a retired claim reappearing fails the suite. The full gate (147 shared tests, ten extension suites, typecheck) is green on the landed state.
+
+## 2026-11-10, Rewrite the aura skill file (aura-skill-rewrite)
+
+The aura skill file teaches the live server again: the 120-tool count with the build identity cited once as the drift anchor, the corrected tool list (the opinion artifact kind, the base64 upload with its size limit, the whole mode with its character limits and the expected-version and full-replace gates), the leave-and-return scorecard replacing the false "left MCP entirely" paragraph, the response-format contract with the permission exclusion, and the new tool families at bullet level, with the two expected-dead tools absent and the codemode-plus-write pattern as the taught file workflow. Eight content guards in the remnants suite pin the rewrite's load-bearing facts so the next drift fails the suite instead of teaching agents stale facts. The development-process paragraph now defers the split status series to the process resource that ticket rewrites next, and the codemode walkthrough pointer waits on the usecase resource. Full suite green on the landed state (107 shared tests, ten extension suites, typecheck).
+
+## 2026-11-10, Apply the consumer rule to the internal REST library (rest-library-consumer-rule)
+
+The internal REST library is retired whole, on counted evidence: the consumer enumeration found zero production consumers (the extensions migrated to the typed MCP interface, the CLI was already removed), so the generated client, its wrapper, the REST credential path, the spec source, the sync and codegen targets with their dev dependency, and the library's tests all left the tree, about 49,900 lines. The two type-only fixture imports in the feedback test were inlined as local fixture types rather than keeping the library alive; the guard flipped from keep-targets to removal pins, and the suite settled at 99 shared tests plus the ten extension suites, all green on the landed state. With this, the package's Aura access is the MCP interface alone: the registration, the mention machinery, and the feedback tool, with no REST code path left in production anywhere in the package.
+
+## 2026-11-10, Feedback submission on MCP (feedback-mcp-submission)
+
+The feedback tool submits through the MCP server: the confirmed sign-off flow now drives the typed interface's create-feedback method with the forced MCP source tag, the local JSONL audit record is byte-identical to the REST-era one, and the injected warning names the current tool spelling while still forbidding unsupervised model calls. No production extension file imports the shared REST client anymore, which completes the extension layer's migration onto the interface. The factory grew three injectable seams for tests (credential loading, interface construction, the audit file path), the interface is built per submission from freshly loaded credentials so the contract self-check runs on every send, and the suite verifies the whole path hermetically against a loopback fake instance (no live feedback rows are ever created by tests). The hermetic construction-path pattern landed with the mention machinery is reused here. The full gate (178 shared tests, ten extension suites, typecheck) is green on the landed state.
+
+## 2026-11-10, Mention machinery on MCP (mention-machinery-mcp)
+
+The mention machinery runs every Aura lookup over the MCP server through the typed interface: task search on the corrected live wire parameters (the stale search and status keys are gone), artifact search and resolution aligned, wiki search, resolution, and warmup rebuilt against the slim tree shape (candidates from title and slug, versions loaded lazily per resolution, one tree per listed space), and the stale-while-revalidate sqlite cache feeding all three kinds so the pane never waits on the network. A production blocker caught at verification is fixed in the same landing: the engine now loads real credentials at session start and passes them into the interface construction, so the session's refresh and warmup gates arm for real users instead of silently latching to cache-only; a construction-path regression test runs the entire path against a local fake aura-mcp-dev over loopback HTTP with no injected caller anywhere, and the verifier probed the production instance read-only through the shipped construction path. The reference engine's adapter seam is renamed to the interface constructor, two factory hooks (credential and cache seeding) exist for tests, and everything observable to the user (reference rendering, instant autocomplete, degrade behavior) is unchanged. The full gate (178 shared tests, ten extension suites, typecheck) is green on the landed state.
+
+## 2026-11-10, Move out the engineering surfaces (engineering-surfaces-move-out)
+
+The engineering surfaces left the package for their new home in the plugin repo: the engineering-foundation skill directory and the engineering-rules extension's dispatch half are removed, the manifest now lists exactly the six surviving extensions, and the README skill table and the project instructions file carry no trace of the moved-out surfaces, all pinned by the guard and probed by re-introduction in both directions. The removal was a split rather than a deletion: the rules loader survives as a plain non-manifest module because the mention machinery imports it for the local rule mention kind, with a module-surface pin preventing the prompt dispatch from regrowing here. The rules dispatch (always-on and on-demand prompt sections, mentioned-rule body injection) is now the plugin repo's job; until that side ships, rule mentions still autocomplete and expand but inject nothing. The gate (178 shared tests, ten extension suites, typecheck) is green on the landed state.
+
+## 2026-11-10, Remove the agent-facing CLI and REST surface (remove-cli-rest-surface)
+
+The agent-facing CLI and REST surface is retired as removal, not migration: the entire scripts workspace is deleted (the aura CLI with its dead review subcommands, the rest-* command modules, the REST reference generator, and their suites), the bundled aura.mjs and the rest-api.md reference resource are gone, the root workspaces list narrows to the shared package, and the Taskfile loses the build, watch, clean, and generation targets that served only the CLI. The remnants guards gained three sections pinning the removal, including a line-level scan that fails when any shipped file teaches CLI or REST access; the docs that taught that access now teach the MCP-first pattern (read through MCP, write with the file tool, UI pointers for REST-only capabilities). The always gate narrows accordingly: shared tests, the ten extension suites, and typecheck, all green on the landed state. Two support scripts stay (openapi-sync, release) because they serve the shared package, whose fate the consumer-rule ticket owns.
+
+## 2026-11-10, Aura MCP registration and typed interface (aura-mcp-interface)
+
+The package now registers the model-facing aura-mcp-dev server itself: an extension wires the registration at load from the settings endpoint plus the keyring PAT, stays silent when either is missing, and keeps the user's own mcp.json entry in precedence (pinned by a guard reading pi's installed source). A typed interface over pi's own MCP client library provides the ten strictly typed tool methods the mention machinery and the feedback tool will consume, with an injectable caller seam. The operator's contract self-check landed with it: on every initialization the live tool schemas are compared against the shipped definitions; cosmetic drift warns through a notify hook, core drift fails the path fast with a typed unavailable error that consumers map onto cache-only degradation. No protocol code is hand-rolled (a guard asserts the absence of JSON-RPC literals and static pi-mcp imports) and no runtime dependency is added. The full gate (169 shared tests, ten extension suites, ten script suites, typecheck, build) is green on the landed state.

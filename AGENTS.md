@@ -1,9 +1,8 @@
 # Agent conventions for pi-aura
 
 pi-aura is a Pi package: install with `pi install`, no Claude Code plugin
-manifest, no `skills.sh`. Skills are organized under `skills/core/`, agents
-under `agents/`, and pi extensions under `extensions/` plus
-`.pi/extensions/`. The task-workflow lives under `docs/tasks/`.
+manifest, no `skills.sh`. Skills are organized under `skills/core/` and pi
+extensions under `extensions/`. The task-workflow lives under `docs/tasks/`.
 
 ## Skill layout
 
@@ -11,9 +10,6 @@ Skills live under `skills/core/` (a single bucket, not the workflow
 package's engineering/productivity split):
 
 - `skills/core/aura/`: reference skill for working with Aura
-- `skills/core/aura-digest/`: the morning routine
-- `skills/core/engineering-foundation/`: router for the anwalt.de
-  engineering canon in the Aura wiki
 
 Every skill is listed in the top-level `README.md` skill table. When you
 add, rename, or change a skill's behaviour, re-sync its `README.md` entry
@@ -40,7 +36,7 @@ Work is planned and executed via a dependency-aware task graph under
 (setup-workflow, task-overview, wayfinder, implement-task, finalize-task,
 to-spec, to-tickets, tdd, code-review, etc.) come from the
 `task-workflow` package and operate on this tree. `docs/tasks/state.yaml`
-holds the current `task`/`slice` pointers and the `schema_version` stamp;
+holds the current `map`/`task` pointers and the `schema_version` stamp;
 it is tracked in git so the freshness stamp persists across clones.
 
 Bugs live under `docs/bugs/` (active reports) with an `archive/` subfolder;

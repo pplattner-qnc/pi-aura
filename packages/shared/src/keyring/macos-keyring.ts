@@ -16,9 +16,6 @@ const SECURITY_BINARY = "/usr/bin/security";
  *  members here as the enum grows. */
 const KNOWN_SECRET_KEYS: readonly SecretKey[] = [
   { service: "aura", name: "pat" },
-  { service: "atlassian", name: "email" },
-  { service: "atlassian", name: "api_token" },
-  { service: "atlassian", name: "bitbucket_token" },
 ];
 
 /** Per-impl packing (Q14): the namespace is stored as the `-s` (service)

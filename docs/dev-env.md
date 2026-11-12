@@ -3,38 +3,39 @@
 ## How to start
 
 ```bash
-# Clone + install build deps
+# Clone + install build deps (the root workspaces install populates packages/shared)
 git clone <repo>
-cd pi-aura/scripts
-npm install
-
-# Regenerate the Aura REST client from the spec (after touching openapi/openapi.yaml)
-npm run codegen
-
-# Build the skill bundles into skills/*/dist/
-task build
+cd pi-aura
+npm install        # or: task install
 ```
+
+There is no build step: the skill and the extensions ship and run as source.
 
 ## Aura instance + PAT
 
-The scripts talk to an Aura instance. For local development point the client
-at a local Aura server (`http://localhost:3000/api`, the spec's default server)
-or your hosted instance. The PAT/bearer token is currently read from
-`~/.config/mcp/mcp.json` (`mcpServers.aura-mcp-dev`); the in-flight
-`aura-access-rewrite` map is changing this.
+The package talks to an Aura instance over MCP. Point it at your instance by
+setting `aura.baseUrl` in `~/.pi/agent/settings.json` (for example your
+hosted Aura server's API base URL, `https://aura.example.com/api`); the
+package derives the MCP endpoint from it (`/mcp` on the same instance, a
+trailing `/api` stripped). Store the PAT in the OS keyring with
+`/aura secrets discover` (imports one from an existing
+`~/.config/mcp/mcp.json` entry) or `/aura secrets edit`. With no PAT
+stored, the package's server registration skips silently.
 
 ## Reproduction
 
 ```bash
-# Run the aura skill CLI against a workdir (artifact/wiki workflows):
-node skills/core/aura/dist/aura.mjs artifact get <uuid>
+# Run the shared package's suite (the main verification; guards included):
+cd packages/shared && npm test
 
-# The morning digest now runs via the in-process digest-fetch tool
-# (the aura-digest.mjs CLI bundle was deleted — no shell-out needed).
+# Run one extension suite:
+node --experimental-strip-types extensions/aura-references.test.ts
 ```
 
 ## Do-not-attempt-AI-reproduction
 
-- Don't attempt to spin up a real Aura instance or a real GNOME Keyring from
-  this environment. The keyring smoke test uses the live OS keyring on the
-  dev machine; for automated runs, inject a fake `KeyringBackend`.
+- Don't attempt to spin up a real Aura instance or a real OS keyring from
+  this environment. The keyring suites run `FileKeyring` against temp paths
+  (no platform dependency); for other automated runs, inject a fake
+  `Keyring` (`FakeKeyring`) or fakes at the extension factories' seams
+  (`loadCredentials`, `createInterface`, `createCache`).

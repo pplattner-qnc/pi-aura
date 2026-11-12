@@ -1,6 +1,6 @@
-# Integrations — Aura, JIRA, Asana
+# Integrations: Aura, JIRA, Asana
 
-> Canonical reference: `getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "prozesse/how-we-work-in-aura-a-practical-guide" })`
+> Canonical reference: `getKnowledgeNodeByPath({ slug: "knowledge-hub", path: "way-of-working-and-structures/1-5-tooling-aura-jira-asana" })`
 
 ## Hierarchy
 
@@ -13,39 +13,50 @@ Aura (source of truth)
 ## Rules
 
 1. **Aura first.** All tasks land in Aura for prioritisation, staffing, and
-   tracking — regardless of origin (customer feedback, IT support, company goals).
+   tracking, regardless of origin (customer feedback, IT support, company
+   goals).
 2. **Aura is the source of truth.** Full task hierarchy, workflow status,
    roles, plans, and decisions live in Aura.
 3. **JIRA mirrors engineering.** Aura has a converter to bring JIRA tasks in
    and push updates back. Development happens in JIRA; status syncs to Aura.
    **Aura wins on conflict.**
 4. **Asana mirrors portfolio** for Leadership and Stakeholders not yet fully
-   in Aura. Sync is in progress.
+   in Aura. Create the Asana task **from the Aura task**: one action, and it
+   is **linked automatically at creation**. The reverse direction needs the
+   link added manually into the description.
+5. **What belongs where.** Saga and Epic level plus milestones belong in
+   Asana; only selected Stories are mirrored there; Sub-Tasks generally not
+   at all.
+6. **Every task needs a parent.** Between the 5 operational Sagas and the
+   11 goal-oriented Sagas there is a home for every task. If you cannot tell
+   which one, ask your direct manager or MAK.
 
 ## Agent guidance
 
 - **Always work in Aura.** Use Aura MCP tools for task management, comments,
   and status updates.
-- **Reference JIRA issues** when they exist — use `getTaskByJiraKey` to look
+- **Reference JIRA issues** when they exist: use `getTaskByJiraKey` to look
   up an Aura task by its Jira key.
-- **Do not create tasks in JIRA or Asana directly** — create them in Aura
-  and let the sync handle propagation.
-- **When a task comes from JIRA**, bring it into Aura via the REST endpoint
-  `/tasks/{uuid}/jira-issues` (see `openapi-new.yaml`), then manage it in Aura
-  going forward.
+- **Jira creation is deliberate.** Create JIRA tasks when you need them;
+  Aura stays the source of truth regardless. Editing an Aura task no longer
+  silently creates a Jira ticket, and the target team is a deliberate
+  choice. Create in Aura first, then mirror.
+- **Asana tasks are created from the Aura task** (auto-linked at creation),
+  never standalone.
+- **When a task comes from JIRA**, it is brought into Aura by the Jira
+  integration; manage it in Aura going forward.
 
 ## Relevant MCP tools
 
-`getTaskByJiraKey` survives for Jira key lookup. Jira/Asana **linking** is
-not available via MCP after the overhaul — the linking tools
-(`getAsanaStatus`/`confirmAsanaLink`) are gone (REST-ONLY); use the REST
-endpoints in `openapi-new.yaml` (`/tasks/{uuid}/jira-issues*`, `/jira-issues`,
-`/integrations/asana/*`) or the Aura UI. Asana task **read**, however, is now
-exposed via two MCP tools that read the locally-mirrored Asana task rows (no
-Asana account required):
+`getTaskByJiraKey` resolves a task by its linked Jira issue key. Asana task
+**read** is exposed via two MCP tools over the locally-mirrored Asana task
+rows (no Asana account required):
 
 | Action | Tool | Notes |
 |---|---|---|
-| Get task by Jira key | `getTaskByJiraKey` | Surviving PRESENT tool |
-| List mirrored Asana tasks | `listAsanaTasks` | Paginated list of locally mirrored Asana task rows (resourceKind TASK; project/Saga rows excluded). Params: `page`, `limit`, `q` (contains search across name+gid), `sort_by` (`AsanaTaskSortField`), `sort_dir`, `project_gid` filter, `completed` (default false — pass true to include completed), `gid` (exact gid match for deep-link resolution), `level` (repeatable `AsanaTaskLevel`: EPIC/STORY/SUBTASK) |
+| Get task by Jira key | `getTaskByJiraKey` | Resolves a task via its linked Jira issue key (mirror match against the caller's connected Jira cloud site) |
+| List mirrored Asana tasks | `listAsanaTasks` | Paginated list of locally mirrored Asana task rows (resourceKind TASK; project/Saga rows excluded). Params: `page`, `limit`, `q` (contains search across name+gid), `sort_by` (`AsanaTaskSortField`), `sort_dir`, `project_gid` filter, `completed` (default false, pass true to include completed), `gid` (exact gid match for deep-link resolution), `level` (repeatable `AsanaTaskLevel`: EPIC/STORY/SUBTASK) |
 | Get a mirrored Asana task | `getAsanaTask` | Full detail of a single locally mirrored Asana task, addressed by `gid` (path param). Project rows (Sagas) are not exposed (404). No Asana account required |
+
+No MCP tool creates or updates a Jira or Asana link; manage links in the
+**Aura UI**.

@@ -1,16 +1,10 @@
-// settings.ts (shared) — minimal reader for the `aura` block from
-// ~/.pi/agent/settings.json.
+// settings.ts (shared): minimal reader for the `aura` block from
+// ~/.pi/agent/settings.json. Reads the `aura.baseUrl` field the REST client
+// needs.
 //
-// This is a deliberately minimal copy for the aura-client task: it reads only
-// the new `aura.baseUrl` field the REST client needs. scripts/src/settings.ts
-// keeps its own, richer copy (mcpServers + digest) until the call-site-
-// migration task reconciles the two.
-//
-// Shape (new `baseUrl` field added by Q4):
+// Shape:
 //   "aura": {
-//     "baseUrl": "https://aura.dev-anwalt.de/api",
-//     "mcpServers": { ... },
-//     "digest": { ... }
+//     "baseUrl": "https://aura.dev-anwalt.de/api"
 //   }
 
 import { readFileSync, existsSync } from "node:fs";

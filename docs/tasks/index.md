@@ -8,14 +8,15 @@ title: docs/tasks
 
 ## Live
 
-- add-capacity-subcommands
-- refine-phase-transition
+(none)
 
 ## Archived
 
 - adapt-blueprint-skills
+- add-capacity-subcommands
 - atlassian-bitbucket-token
 - atlassian-keyring-auth
+- audit-update-aura-instructions
 - aura-access-rewrite
 - aura-client
 - aura-digest-interactive
@@ -48,6 +49,8 @@ title: docs/tasks
 - reference-rule-kind
 - reference-task-alias
 - reference-wiki-kind
+- refine-phase-transition
+- remove-digest
 - skl-flow-rewrite
 - unified-reference-mentions
 - wire-bitbucket-guided-edit
