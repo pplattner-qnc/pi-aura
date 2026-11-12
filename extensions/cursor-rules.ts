@@ -100,8 +100,8 @@ interface Rule {
  * Parse the YAML frontmatter from a `.mdc` file. Returns `{ fm, body }` where
  * `fm` is a loose record of the parsed keys and `body` is the content after
  * the closing `---`. We only need `alwaysApply` (bool), `globs` (string or
- * list), and `name` (string), so a minimal parser suffices and avoids a
- * runtime dep on js-yaml for end users of the package.
+ * list), and `name` (string), so a minimal parser suffices; the frontmatter
+ * needs no YAML library.
  */
 export function parseFrontmatter(content: string): { fm: Record<string, unknown>; body: string } {
   const fm: Record<string, unknown> = {};

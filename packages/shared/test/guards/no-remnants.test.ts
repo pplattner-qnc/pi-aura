@@ -710,6 +710,57 @@ describe("no-remnants guard: REST library removal", () => {
       );
     }
   });
+
+  // finalize-cleanup: js-yaml's sole consumer was deleted with the REST
+  // library (the blueprint frontmatter loader), so the dependency, its
+  // @types devDependency, and every reference to it left with that removal.
+  // The guard file itself is the one file allowed to name js-yaml: it is
+  // the enforcement record pinning the absence.
+  it("carries no js-yaml dependency or reference anywhere", () => {
+    const offenders: string[] = [];
+    const sharedPkg = JSON.parse(
+      fs.readFileSync(path.join(sharedRoot, "package.json"), "utf-8"),
+    ) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    if ("js-yaml" in (sharedPkg.dependencies ?? {})) {
+      offenders.push("packages/shared/package.json: dependencies carries js-yaml");
+    }
+    if ("@types/js-yaml" in (sharedPkg.devDependencies ?? {})) {
+      offenders.push("packages/shared/package.json: devDependencies carries @types/js-yaml");
+    }
+    const scanned: Array<[string, string]> = [
+      ["package.json", path.join(repoRoot, "package.json")],
+      ["packages/shared/package.json", path.join(sharedRoot, "package.json")],
+      ["Taskfile.yml", path.join(repoRoot, "Taskfile.yml")],
+    ];
+    for (const file of fs
+      .readdirSync(path.join(repoRoot, "extensions"))
+      .filter((f) => f.endsWith(".ts"))) {
+      scanned.push([`extensions/${file}`, path.join(repoRoot, "extensions", file)]);
+    }
+    for (const sub of ["src", "test"]) {
+      for (const abs of walkFiles(path.join(sharedRoot, sub))) {
+        if (abs.endsWith(path.join("test", "guards", "no-remnants.test.ts"))) continue;
+        scanned.push([
+          `packages/shared/${sub}/${path.relative(path.join(sharedRoot, sub), abs)}`,
+          abs,
+        ]);
+      }
+    }
+    for (const [label, absPath] of scanned) {
+      const lines = fs.readFileSync(absPath, "utf-8").split("\n");
+      lines.forEach((line, index) => {
+        if (/js-yaml/i.test(line)) offenders.push(`${label}:${index + 1}`);
+      });
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      `no js-yaml dependency or reference should remain (its sole consumer was deleted with the REST library), found: ${offenders.join(", ") || "none"}`,
+    );
+  });
 });
 
 // no-remnants-guard-and-archive: the dead digest effort is archived and
