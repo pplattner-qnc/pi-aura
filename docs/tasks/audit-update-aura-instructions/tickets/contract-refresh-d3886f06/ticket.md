@@ -3,7 +3,7 @@ type: ticket
 subtype: feature
 title: Refresh the shipped contracts to the full live schemas and the new build identity
 status: stable
-workflow_state: ready
+workflow_state: done
 blocked_by: []
 size: m
 ---
