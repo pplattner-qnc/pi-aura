@@ -8,8 +8,8 @@ description: Work with Aura, the AI-native project management and knowledge plat
 Aura is an AI-native project management and knowledge platform. It combines task
 management, documentation (artifacts), a wiki/knowledge base, code search, and
 organizational memory into a single system. The `aura-mcp-dev` MCP server exposes
-120 tools for interacting with all of these capabilities (live build 2026-10-12,
-commit 4aa37833; every claim below is checked against that build).
+120 tools for interacting with all of these capabilities (live build 2026-11-09,
+commit d3886f06; every claim below is checked against that build).
 
 ## What Aura can do
 
