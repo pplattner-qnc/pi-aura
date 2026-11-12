@@ -2487,6 +2487,32 @@ describe("no-remnants guard: process resources current (prose)", () => {
   });
 });
 
+// finalize-cleanup: the retired pre-AURA-2211 flat status series (the two
+// waiting statuses chained before both gates) survived in a usecase file
+// because the ban below read only workflow-phases.md. The same ban now
+// scans every usecase and every process file, so this class of stale claim
+// cannot survive the enforcement record again.
+describe("no-remnants guard: retired flat status series ban (usecases and process)", () => {
+  it("teaches the retired flat status series in no usecase or process file", () => {
+    const flatSeries = /READY_FOR_ALIGNMENT\s*→\s*IN_ALIGNMENT[\s\S]{0,200}READY_FOR_REVIEW/;
+    const offenders: string[] = [];
+    for (const dir of [USECASES_DIR, PROCESS_DIR]) {
+      const absDir = path.join(repoRoot, dir);
+      for (const file of fs.readdirSync(absDir).filter((f) => f.endsWith(".md")).sort()) {
+        const match = fs.readFileSync(path.join(absDir, file), "utf-8").match(flatSeries);
+        if (match) {
+          offenders.push(`${dir}/${file}: ${match[0].replace(/\s+/g, " ").slice(0, 90)}`);
+        }
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "no shipped file may teach the retired pre-AURA-2211 flat status series (the split series is process/workflow-phases.md's to teach)",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
