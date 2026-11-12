@@ -1,6 +1,6 @@
 version: "3"
 
-# Taskfile — install and typecheck targets for the pi-aura repo.
+# Taskfile: install and typecheck targets for the pi-aura repo.
 #
 # The agent-facing CLI and REST reference build surface is removed (the
 # remove-cli-rest-surface retirement), and the internal REST library followed

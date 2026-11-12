@@ -193,7 +193,7 @@ console.log("loadRules + settings-driven ignore (recursive): ok");
       assert.equal(rules[0].name, "general-code-quality");
     });
 
-    // Now add a project-local ignore for general-code-quality — union skips it too.
+    // Now add a project-local ignore for general-code-quality; the union skips it too.
     mkdirSync(join(dir, ".pi"), { recursive: true });
     writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({
       aura: { cursorRules: { ignore: ["general-code-quality.mdc"] } },
@@ -222,7 +222,7 @@ console.log("loadRules project-local union: ok");
     mkdirSync(rulesDir, { recursive: true });
     writeFileSync(join(rulesDir, "tracker-aura.mdc"),
       "---\nalwaysApply: true\n---\nWould be loaded without an ignore glob.\n");
-    // No settings at all — nothing is skipped (no hardcoded rule-name skip).
+    // No settings at all: nothing is skipped (no hardcoded rule-name skip).
     mkdirSync(join(home, ".pi", "agent"), { recursive: true });
     withFakeHome(home, () => {
       const rules = loadRules(dir);

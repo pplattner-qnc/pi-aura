@@ -14,9 +14,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 const AURA_INSTRUCTION = `
 ## Aura
 
-When working with Aura — the AI-native project management and knowledge platform
+When working with Aura, the AI-native project management and knowledge platform
 (tasks, artifacts, wiki, knowledge base, project planning, or anything via the
-aura-mcp-dev MCP server) — you MUST use the \`aura\` skill. Load it with the \`read\`
+aura-mcp-dev MCP server), you MUST use the \`aura\` skill. Load it with the \`read\`
 tool from its SKILL.md before performing any Aura-related work, and prefer the
 aura-mcp-dev MCP tools for all Aura operations.
 `;

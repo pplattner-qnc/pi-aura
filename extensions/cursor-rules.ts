@@ -146,7 +146,7 @@ function parseYamlScalar(raw: string): unknown {
   if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
     return raw.slice(1, -1);
   }
-  // Numbers stay strings here — we don't need numeric parsing for rules.
+  // Numbers stay strings here; we don't need numeric parsing for rules.
   return raw;
 }
 
@@ -189,7 +189,7 @@ function parseYamlListBlock(yamlBlock: string, key: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Glob matching (minimal, dependency-free — supports *, **, ?)
+// Glob matching (minimal, dependency-free: supports *, **, ?)
 // ---------------------------------------------------------------------------
 
 /**
@@ -210,13 +210,13 @@ export function globToRegExp(pattern: string): RegExp {
     const ch = pattern[i];
     if (ch === "*") {
       if (pattern[i + 1] === "*") {
-        // `**` — any span including separators. Consume an optional following `/`
+        // `**`: any span including separators. Consume an optional following `/`
         // so `a/**/b` matches `a/b` (zero dirs) too.
         i += 2;
         if (pattern[i] === "/") i++;
         re += "(?:.*/)?";
       } else {
-        // `*` — non-separator span.
+        // `*`: non-separator span.
         re += "[^/]*";
         i++;
       }
@@ -255,7 +255,7 @@ export function matchesAnyGlob(relPath: string, patterns: string[]): boolean {
 
 /** Read the `aura.cursorRules.ignore` array from a single settings file.
  *  Returns [] when the file or the key is absent, or the value isn't a
- *  string array. Never throws — a malformed file just contributes no globs. */
+ *  string array. Never throws: a malformed file just contributes no globs. */
 function readIgnoreGlobs(settingsPath: string): string[] {
   if (!existsSync(settingsPath)) return [];
   let parsed: unknown;

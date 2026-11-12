@@ -3255,3 +3255,60 @@ describe("no-remnants guard: root docs current (prose)", () => {
     );
   });
 });
+
+// finalize-cleanup: the em-dash sweep over code comments and injected
+// strings per the repo rule. The named files carry no em-dash, with one
+// deliberate exception: aura-mcp-contract.ts's SHIPPED_AURA_MCP_TOOLS data
+// is the live server's own wording, transcribed verbatim, pinned by the
+// provenance guard, and compared verbatim against the live server at
+// every self-check, so rewording it would falsify the recorded evidence
+// and fire permanent cosmetic-drift warnings; it is also injected
+// nowhere (the registration sends only the name, url, headers, and its
+// own em-dash-free description). local-provider.ts was named by the same
+// sweep and deleted with the embed fixtures in this ticket.
+describe("no-remnants guard: em-dash sweep over comments and injected strings", () => {
+  it("carries no em-dash outside the verbatim contract data", () => {
+    const swept = [
+      "extensions/aura-mcp-client.ts",
+      "extensions/aura-mcp-server.ts",
+      "extensions/cursor-rules.ts",
+      "extensions/aura-mcp-client.test.ts",
+      "extensions/cursor-rules.test.ts",
+      "extensions/aura-skill-instruction.ts",
+      "extensions/aura-tasks.ts",
+      "Taskfile.yml",
+    ];
+    const offenders: string[] = [];
+    for (const rel of swept) {
+      const content = fs.readFileSync(path.join(repoRoot, rel), "utf-8");
+      content
+        .split("\n")
+        .forEach((line, index) => {
+          if (line.includes("\u2014")) {
+            offenders.push(`${rel}:${index + 1}: ${line.trim()}`);
+          }
+        });
+    }
+    // The contract module: only the verbatim server-text data block is
+    // exempt; its comments, its code, and every later edit are not.
+    const contractPath = path.join(repoRoot, "extensions", "aura-mcp-contract.ts");
+    const contract = fs.readFileSync(contractPath, "utf-8");
+    const dataStart = contract.indexOf("export const SHIPPED_AURA_MCP_TOOLS");
+    const dataEnd = contract.indexOf("\n];", dataStart);
+    assert.notEqual(dataStart, -1, "the shipped contracts should still exist");
+    assert.notEqual(dataEnd, -1, "the shipped contracts array should still close");
+    const outside = contract.slice(0, dataStart) + contract.slice(dataEnd);
+    outside
+      .split("\n")
+      .forEach((line, index) => {
+        if (line.includes("\u2014")) {
+          offenders.push(`extensions/aura-mcp-contract.ts:${index + 1}: ${line.trim()}`);
+        }
+      });
+    assert.deepEqual(
+      offenders,
+      [],
+      "the swept files' comments and injected strings should carry no em-dash (the repo's prose rule; the shipped contract data stays verbatim server text)",
+    );
+  });
+});
