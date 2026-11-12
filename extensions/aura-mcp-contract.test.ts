@@ -475,6 +475,7 @@ function fullListTasksLive(): ReturnType<typeof liveTool> {
     repoRoot,
     "docs",
     "tasks",
+    "archive",
     "audit-update-aura-instructions",
     "tickets",
     "contract-refresh-d3886f06",

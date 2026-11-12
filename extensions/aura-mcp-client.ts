@@ -330,7 +330,7 @@ export async function createDefaultAuraMcpCaller(credentials: {
       headers?: Record<string, string>;
     }) => unknown;
   };
-  const client = new piMcp.McpClient({ name: "pi-aura", version: "0.8.0" });
+  const client = new piMcp.McpClient({ name: "pi-aura", version: "0.9.0" });
   const transport = new piMcp.StreamableHttpTransport({
     url: resolved.url,
     headers: { Authorization: `Bearer ${resolved.pat}` },

@@ -35,7 +35,7 @@ You only need your own entry to override the registration (a different URL or cr
 ## Install
 
 ```bash
-pi install git:github.com/pplattner-qnc/pi-aura@v0.8.0
+pi install git:github.com/pplattner-qnc/pi-aura@v0.9.0
 ```
 
 ## Usage

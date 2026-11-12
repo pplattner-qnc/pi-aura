@@ -2998,7 +2998,7 @@ describe("no-remnants guard: root docs current (README)", () => {
     const readme = readRootDoc("README.md");
     assert.match(
       readme,
-      /pi install git:github\.com\/pplattner-qnc\/pi-aura@v0\.8\.0/,
+      /pi install git:github\.com\/pplattner-qnc\/pi-aura@v0\.9\.0/,
       "the install pin should name the current released version",
     );
     assert.doesNotMatch(readme, /@v0\.1\.0/, "the stale v0.1.0 pin should be gone");

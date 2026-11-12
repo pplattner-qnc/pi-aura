@@ -13,7 +13,7 @@
  * contract data grew to the full schema. Every entry is transcribed
  * verbatim from the effort's fresh introspection record (build d3886f06,
  * 2026-11-09 14:59:59, 120 tools) at
- * docs/tasks/audit-update-aura-instructions/tickets/contract-refresh-d3886f06/.work/introspection-dump-d3886f06.md
+ * docs/tasks/archive/audit-update-aura-instructions/tickets/contract-refresh-d3886f06/.work/introspection-dump-d3886f06.md
  * (the raw listTools payload and its round-trip verification sit beside it
  * in the same directory). The provenance guard in aura-mcp-contract.test.ts
  * cross-checks this data against that record in both directions, so a
