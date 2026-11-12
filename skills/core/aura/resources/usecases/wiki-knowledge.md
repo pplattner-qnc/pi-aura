@@ -36,7 +36,7 @@ For long documents, write the returned body to a local file with the
 |---|---|---|
 | List all spaces | `listKnowledgeSpaces` | Returns all knowledge spaces |
 | Get space by slug | `getKnowledgeSpace` | Space detail |
-| Full tree for a space | `getKnowledgeTree` | Folders + documents (no body); the answer is bounded, depth max 2 and 200 nodes by default, pass `depth`/`max_nodes` to widen (max 2/200) |
+| Full tree for a space | `getKnowledgeTree` | Folders + documents (no body); the answer is bounded, depth max 2 and 200 nodes by default, pass `depth`/`max_nodes` to narrow (max 2/200) |
 | Get node by UUID | `getKnowledgeNode` | Full document with body |
 | List files in a space | `listKnowledgeFiles` | FILE nodes only |
 | List file versions | `listKnowledgeFileVersions` | A FILE node's asset history, newest first; each entry carries its own checksum and provenance; download a specific version in the Aura UI |

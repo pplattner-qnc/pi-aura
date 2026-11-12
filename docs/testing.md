@@ -20,8 +20,8 @@ per-file strip-types suites beside their sources; there is no build step.
 # Root (workspaces root): one install populates packages/shared/
 npm install
 
-# packages/shared: the keyring, settings, and embed modules the extensions
-# resolve at runtime; the guards live in test/guards/
+# packages/shared: the keyring and settings modules the extensions resolve
+# at runtime; the guards live in test/guards/
 cd packages/shared
 npm run typecheck      # tsc --noEmit
 npm test               # tsx --test 'test/**/*.test.ts'
@@ -75,19 +75,15 @@ below list the exact commands.
   real Aura server for the typed MCP wrapper's tests: assert the envelopes
   it sends and the degraded-path errors it returns, never the network.
   The extension factories carry the seams one level up: `loadCredentials`
-  (both MCP consumers) and `createInterface` plus `createCache` (the
-  reference engine) take fakes; production wiring passes nothing.
-- **Mock-fidelity for external-library integration (the `_embedRaw`
-  lesson).** The local-embeddings provider mocks `@huggingface/transformers'`
-  `pipeline`. A mock whose output shape doesn't match the real library's
-  (a single `Tensor` with `dims=[N, hiddenDim]` and flat `data`, not an
-  array of per-text tensors) passes unit tests while crashing real
-  integration. Record the real output shape in the test (the
-  `local-provider.test.ts` asserts a single `{data, dims:[N,384]}` tensor
-  against a 2- and 3-text batch, with an off-by-one guard); the real-model
-  end-to-end gate that once embedded every REST operation retired with the
-  CLI, so the shape assertions in the embed suites are the remaining
-  guard.
+  and `createCache` (the reference engine), `loadCredentials`,
+  `createInterface`, and `logPath` (the feedback tool) take fakes;
+  production wiring passes nothing.
+- **Mock-fidelity for external-library integration.** A mock whose output
+  shape doesn't match the real library's (for example: a mocked model
+  loader returning an array of per-text tensors where the real call
+  returns a single batched tensor with flat `data`) passes unit tests
+  while crashing real integration. Record the real output shape in the
+  test whenever a suite mocks an external library's return value.
 
 ## Pi extension logic tests (`extensions/*.test.ts`)
 

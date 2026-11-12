@@ -609,8 +609,9 @@ describe("no-remnants guard: CLI and REST reference removal", () => {
 // (src/openapi/, src/rest/), the spec source (openapi/openapi.yaml), the
 // sync and codegen targets (the Taskfile targets, scripts/openapi-sync.sh,
 // openapi-ts.config.ts, tsconfig.codegen.json, the codegen devDependency),
-// and the library's tests. The embedding provider (src/embed/) is not the
-// REST library and survives the removal.
+// and the library's tests. (The embedding provider (src/embed/) survived
+// the REST-library removal with zero production consumers and was deleted
+// later by the finalize-cleanup ticket, its absence pinned below.)
 const REST_LIBRARY_FILES_GONE = [
   "packages/shared/src/aura-client.ts",
   "packages/shared/src/hey-api-aura-client.ts",
@@ -697,10 +698,8 @@ describe("no-remnants guard: REST library removal", () => {
 
   it("keeps the surviving shared package surface and the remaining seam suite", () => {
     for (const kept of [
-      "packages/shared/src/embed",
       "packages/shared/src/settings.ts",
       "packages/shared/src/keyring",
-      "packages/shared/test/embed/local-provider.test.ts",
       "extensions/aura-mcp-client.test.ts",
     ]) {
       assert.equal(
@@ -709,6 +708,102 @@ describe("no-remnants guard: REST library removal", () => {
         `${kept} should survive the REST library removal (guard against over-deletion)`,
       );
     }
+  });
+
+  // finalize-cleanup: the embed fixtures had zero production consumers
+  // (only this guard referenced them), so the operator approved their
+  // removal with the cleanup ticket. The fixtures, their suites, and the
+  // two ML dependencies that served only them are gone; the keep-survivors
+  // pin above no longer lists them.
+  it("has the zero-consumer embed fixtures removed with their suites and dependencies", () => {
+    const gone = [
+      "packages/shared/src/embed",
+      "packages/shared/test/embed",
+    ];
+    const offenders = gone.filter((dir) => fs.existsSync(path.join(repoRoot, dir)));
+    assert.deepEqual(
+      offenders,
+      [],
+      `the embed fixtures should be deleted (zero production consumers), still found: ${offenders.join(", ") || "none"}`,
+    );
+    const sharedPkg = JSON.parse(
+      fs.readFileSync(path.join(sharedRoot, "package.json"), "utf-8"),
+    ) as { dependencies?: Record<string, string> };
+    const deadDeps = ["@huggingface/transformers", "onnxruntime-node"].filter(
+      (dep) => dep in (sharedPkg.dependencies ?? {}),
+    );
+    assert.deepEqual(
+      deadDeps,
+      [],
+      `the shared package should carry no dependency whose only consumer was the embed provider, found: ${deadDeps.join(", ") || "none"}`,
+    );
+  });
+
+  // finalize-cleanup: js-yaml's sole consumer was deleted with the REST
+  // library (the blueprint frontmatter loader), so the dependency, its
+  // @types devDependency, and every reference to it left with that removal.
+  // The guard file itself is the one file allowed to name js-yaml: it is
+  // the enforcement record pinning the absence.
+  it("carries no js-yaml dependency or reference anywhere", () => {
+    const offenders: string[] = [];
+    const sharedPkg = JSON.parse(
+      fs.readFileSync(path.join(sharedRoot, "package.json"), "utf-8"),
+    ) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    if ("js-yaml" in (sharedPkg.dependencies ?? {})) {
+      offenders.push("packages/shared/package.json: dependencies carries js-yaml");
+    }
+    if ("@types/js-yaml" in (sharedPkg.devDependencies ?? {})) {
+      offenders.push("packages/shared/package.json: devDependencies carries @types/js-yaml");
+    }
+    const scanned: Array<[string, string]> = [
+      ["package.json", path.join(repoRoot, "package.json")],
+      ["packages/shared/package.json", path.join(sharedRoot, "package.json")],
+      ["Taskfile.yml", path.join(repoRoot, "Taskfile.yml")],
+    ];
+    for (const file of fs
+      .readdirSync(path.join(repoRoot, "extensions"))
+      .filter((f) => f.endsWith(".ts"))) {
+      scanned.push([`extensions/${file}`, path.join(repoRoot, "extensions", file)]);
+    }
+    for (const sub of ["src", "test"]) {
+      for (const abs of walkFiles(path.join(sharedRoot, sub))) {
+        if (abs.endsWith(path.join("test", "guards", "no-remnants.test.ts"))) continue;
+        scanned.push([
+          `packages/shared/${sub}/${path.relative(path.join(sharedRoot, sub), abs)}`,
+          abs,
+        ]);
+      }
+    }
+    for (const [label, absPath] of scanned) {
+      const lines = fs.readFileSync(absPath, "utf-8").split("\n");
+      lines.forEach((line, index) => {
+        if (/js-yaml/i.test(line)) offenders.push(`${label}:${index + 1}`);
+      });
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      `no js-yaml dependency or reference should remain (its sole consumer was deleted with the REST library), found: ${offenders.join(", ") || "none"}`,
+    );
+  });
+  // finalize-cleanup: the shared package's root module kept its original
+  // placeholder comment, which names the retired AuraClient as a future
+  // resident. The root module must describe the shipped surface instead of
+  // promising removed ones.
+  it("carries no removed-surface name in the shared package's root module", () => {
+    const indexLines = readSharedSourceLines(path.join("src", "index.ts"));
+    const offenders = indexLines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => /AuraClient|placeholder/i.test(line))
+      .map(({ index, line }) => `src/index.ts:${index + 1}: ${line.trim()}`);
+    assert.deepEqual(
+      offenders,
+      [],
+      "src/index.ts should describe the shipped surface, not name the removed REST client or stay a placeholder",
+    );
   });
 });
 
@@ -1266,6 +1361,22 @@ describe("no-remnants guard: usecase resources current (wiki)", () => {
       file,
       /checksum/,
       "the per-version checksum and provenance should be mentioned",
+    );
+  });
+
+  it("states the tree bounds as a narrowing, not a widening", () => {
+    const file = readUsecase("wiki-knowledge.md");
+    const row = file.split("| Full tree for a space |")[1]?.split("\n")[0] ?? "";
+    assert.notEqual(row, "", "the tree-bounds row should exist");
+    assert.match(
+      row,
+      /\bto narrow\b/,
+      "passing depth/max_nodes can only narrow the answer (the MCP defaults already equal the schema maxima)",
+    );
+    assert.doesNotMatch(
+      row,
+      /\bto widen\b/,
+      "the widen wording overstates the defaults (they already equal the schema maxima)",
     );
   });
 
@@ -2487,6 +2598,32 @@ describe("no-remnants guard: process resources current (prose)", () => {
   });
 });
 
+// finalize-cleanup: the retired pre-AURA-2211 flat status series (the two
+// waiting statuses chained before both gates) survived in a usecase file
+// because the ban below read only workflow-phases.md. The same ban now
+// scans every usecase and every process file, so this class of stale claim
+// cannot survive the enforcement record again.
+describe("no-remnants guard: retired flat status series ban (usecases and process)", () => {
+  it("teaches the retired flat status series in no usecase or process file", () => {
+    const flatSeries = /READY_FOR_ALIGNMENT\s*→\s*IN_ALIGNMENT[\s\S]{0,200}READY_FOR_REVIEW/;
+    const offenders: string[] = [];
+    for (const dir of [USECASES_DIR, PROCESS_DIR]) {
+      const absDir = path.join(repoRoot, dir);
+      for (const file of fs.readdirSync(absDir).filter((f) => f.endsWith(".md")).sort()) {
+        const match = fs.readFileSync(path.join(absDir, file), "utf-8").match(flatSeries);
+        if (match) {
+          offenders.push(`${dir}/${file}: ${match[0].replace(/\s+/g, " ").slice(0, 90)}`);
+        }
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      "no shipped file may teach the retired pre-AURA-2211 flat status series (the split series is process/workflow-phases.md's to teach)",
+    );
+  });
+});
+
 // root-docs-refresh: the README describes the package as it now is. The
 // skill table lists exactly the skills shipped under skills/core (the
 // manifest scans ./skills), and no agents table remains (the package
@@ -2985,6 +3122,62 @@ describe("no-remnants guard: root docs current (testing doc)", () => {
       "the codegen byte-stability check should be gone with the codegen target",
     );
   });
+
+  // finalize-cleanup: the mock-convention sentence attributed
+  // createInterface to the reference engine, where it is the feedback
+  // factory's injection hook (the engine's hooks are loadCredentials and
+  // createCache), and left logPath unmentioned; the runtime-resolution
+  // sentence overstated the embed half, with the same phrasing echoed in
+  // the Taskfile comment.
+  it("attributes the injection hooks to the right factories", () => {
+    const testing = readRootDoc("docs/testing.md");
+    assert.ok(
+      testing.includes("logPath"),
+      "the mock conventions should name logPath (the feedback factory's log-path hook)",
+    );
+    assert.doesNotMatch(
+      testing,
+      /createInterface[\s\S]{0,60}the\s+reference\s+engine/i,
+      "createInterface is the feedback factory's hook, not the reference engine's (its hooks are loadCredentials and createCache)",
+    );
+    assert.match(
+      testing,
+      /createInterface[\s\S]{0,40}the\s+feedback\s+tool/i,
+      "createInterface should be attributed to the feedback factory",
+    );
+  });
+
+  it("states the runtime-resolved modules as settings and keyring only", () => {
+    const testing = readRootDoc("docs/testing.md");
+    assert.doesNotMatch(
+      testing,
+      /embed modules the extensions resolve/i,
+      "the extensions resolve only settings and keyring at runtime (the embed fixtures have zero production consumers)",
+    );
+    const taskfile = fs.readFileSync(path.join(repoRoot, "Taskfile.yml"), "utf-8");
+    assert.doesNotMatch(
+      taskfile,
+      /embed modules the extensions resolve/i,
+      "the Taskfile comment must match reality: the extensions resolve only settings and keyring",
+    );
+  });
+
+  // finalize-cleanup: the mock-convention text presented the embed
+  // fixtures' shape assertions as a runtime seam; with the fixtures
+  // removed the doc must not name them at all.
+  it("presents no embed fixture as a runtime seam", () => {
+    const testing = readRootDoc("docs/testing.md");
+    const offenders = testing
+      .split("\n")
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => /embed/i.test(line))
+      .map(({ index, line }) => `docs/testing.md:${index + 1}: ${line.trim()}`);
+    assert.deepEqual(
+      offenders,
+      [],
+      "docs/testing.md should not name the removed embed fixtures or present them as a runtime seam",
+    );
+  });
 });
 
 describe("no-remnants guard: root docs current (dev-env doc)", () => {
@@ -3059,6 +3252,63 @@ describe("no-remnants guard: root docs current (prose)", () => {
       offenders,
       [],
       "the five root docs should carry no em-dash (the repo's prose rule; every doc is touched by this ticket)",
+    );
+  });
+});
+
+// finalize-cleanup: the em-dash sweep over code comments and injected
+// strings per the repo rule. The named files carry no em-dash, with one
+// deliberate exception: aura-mcp-contract.ts's SHIPPED_AURA_MCP_TOOLS data
+// is the live server's own wording, transcribed verbatim, pinned by the
+// provenance guard, and compared verbatim against the live server at
+// every self-check, so rewording it would falsify the recorded evidence
+// and fire permanent cosmetic-drift warnings; it is also injected
+// nowhere (the registration sends only the name, url, headers, and its
+// own em-dash-free description). local-provider.ts was named by the same
+// sweep and deleted with the embed fixtures in this ticket.
+describe("no-remnants guard: em-dash sweep over comments and injected strings", () => {
+  it("carries no em-dash outside the verbatim contract data", () => {
+    const swept = [
+      "extensions/aura-mcp-client.ts",
+      "extensions/aura-mcp-server.ts",
+      "extensions/cursor-rules.ts",
+      "extensions/aura-mcp-client.test.ts",
+      "extensions/cursor-rules.test.ts",
+      "extensions/aura-skill-instruction.ts",
+      "extensions/aura-tasks.ts",
+      "Taskfile.yml",
+    ];
+    const offenders: string[] = [];
+    for (const rel of swept) {
+      const content = fs.readFileSync(path.join(repoRoot, rel), "utf-8");
+      content
+        .split("\n")
+        .forEach((line, index) => {
+          if (line.includes("\u2014")) {
+            offenders.push(`${rel}:${index + 1}: ${line.trim()}`);
+          }
+        });
+    }
+    // The contract module: only the verbatim server-text data block is
+    // exempt; its comments, its code, and every later edit are not.
+    const contractPath = path.join(repoRoot, "extensions", "aura-mcp-contract.ts");
+    const contract = fs.readFileSync(contractPath, "utf-8");
+    const dataStart = contract.indexOf("export const SHIPPED_AURA_MCP_TOOLS");
+    const dataEnd = contract.indexOf("\n];", dataStart);
+    assert.notEqual(dataStart, -1, "the shipped contracts should still exist");
+    assert.notEqual(dataEnd, -1, "the shipped contracts array should still close");
+    const outside = contract.slice(0, dataStart) + contract.slice(dataEnd);
+    outside
+      .split("\n")
+      .forEach((line, index) => {
+        if (line.includes("\u2014")) {
+          offenders.push(`extensions/aura-mcp-contract.ts:${index + 1}: ${line.trim()}`);
+        }
+      });
+    assert.deepEqual(
+      offenders,
+      [],
+      "the swept files' comments and injected strings should carry no em-dash (the repo's prose rule; the shipped contract data stays verbatim server text)",
     );
   });
 });

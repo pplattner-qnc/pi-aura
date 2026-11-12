@@ -75,13 +75,13 @@ Use `createTask` (full param set available via MCP).
 
 Use `updateTask` for status changes, level changes, reparenting, and field updates.
 
-**Status flow:**
-```
-OPEN → READY_FOR_REFINEMENT → IN_REFINEMENT → READY_FOR_ALIGNMENT →
-IN_ALIGNMENT → READY_FOR_DEVELOPMENT → IN_DEVELOPMENT →
-READY_FOR_REVIEW → IN_REVIEW → READY_FOR_DEPLOYMENT →
-IN_DEPLOYMENT → DONE
-```
+**Status flow:** there is no single flat chain. A task's series is resolved
+from its hierarchy level and its workflow variant (`STANDARD` or
+`DISCOVERY`, set at creation and immutable); the standard series dropped
+the two waiting statuses before the gates, `READY_FOR_ALIGNMENT` and
+`READY_FOR_REVIEW` (AURA-2211). The full series tables per level and
+variant, the gates, and the status-change contract live in
+[workflow-phases.md](../process/workflow-phases.md).
 
 Tasks can also be `DISCARDED` (via `discardTask`, `reason` required) and
 reopened (via `reopenTask`, `to_status` + `reason` required).

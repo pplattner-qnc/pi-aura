@@ -5,7 +5,7 @@
  * The wrapper stands on `@earendil-works/pi-mcp` (the MCP client library pi
  * itself uses, present in the dependency tree and resolvable inside the pi
  * process where extensions run): its `McpClient` and `StreamableHttpTransport`
- * own every byte of protocol — JSON-RPC framing, the streamable HTTP
+ * own every byte of protocol: JSON-RPC framing, the streamable HTTP
  * transport, reconnection, timeouts. Nothing here hand-rolls any of it; the
  * only protocol-shaped code in the package is the *contract data* in
  * aura-mcp-contract.ts, which describes the server's tool schemas, not the
@@ -26,8 +26,8 @@
  * user, naming the tool and the difference, and the path stays callable.
  * Core drift (a tool gone; a parameter the wrapper sends or reads renamed,
  * retyped, or newly required) makes that tool's path unavailable: calls to
- * it fail fast with {@link AuraMcpToolUnavailableError} — the degraded-path
- * error consumers map onto their established cache-only behavior — and the
+ * it fail fast with {@link AuraMcpToolUnavailableError} (the degraded-path
+ * error consumers map onto their established cache-only behavior), and the
  * warning names what broke. A live fetch that itself fails skips the check
  * silently: no verdict, no warning, and natural call errors surface to the
  * consumer as always.
@@ -107,7 +107,7 @@ export class AuraMcpError extends Error {
 
 /** A call failed: either the server reported an application error inside an
  *  HTTP 200 result (`isError: true`), or the caller rejected (transport,
- *  protocol, timeout — the underlying error rides as `cause`). */
+ *  protocol, timeout; the underlying error rides as `cause`). */
 export class AuraMcpCallError extends AuraMcpError {
   declare readonly tool: string;
 
@@ -204,7 +204,7 @@ export interface SearchKnowledgeParams {
   space_slug?: string;
 }
 
-/** `createFeedback` parameters (the server's tool, not the sign-off flow —
+/** `createFeedback` parameters (the server's tool, not the sign-off flow:
  *  the aura_feedback extension owns that and calls this underneath). */
 export interface CreateFeedbackParams {
   /** Short title of the feedback, at most 120 characters. */
@@ -246,7 +246,7 @@ export interface LoadAuraMcpCredentialsOptions {
  * `aura.baseUrl` from `~/.pi/agent/settings.json` (via
  * `@pi-aura/shared/settings`) and the PAT from the OS keyring (via
  * `@pi-aura/shared/keyring`, service "aura", name "pat"). Both load through
- * dynamic imports — the package's standard seam, which keeps the unit-test
+ * dynamic imports, the package's standard seam, which keeps the unit-test
  * entry runnable with `node --experimental-strip-types`.
  *
  * Never throws: a missing settings file yields no `baseUrl`; a failing or
